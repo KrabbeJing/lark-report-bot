@@ -79,8 +79,7 @@ test('creates daily record when no technical message id field exists', async () 
 
   assert.equal(result.created, true);
   assert.equal(createCalled, true);
-  assert.match(createPayload.params.client_token, /^[a-f0-9]{32}$/);
-  assert.notEqual(createPayload.params.client_token, 'om_1');
+  assert.equal(createPayload.params.client_token, undefined);
 });
 
 test('does not create duplicate daily records when message id field is configured', async () => {

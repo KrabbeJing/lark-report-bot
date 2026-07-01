@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import { DAILY_FIELD_KEYS, WEEKLY_FIELD_KEYS, tableIsConfigured } from './config.js';
 import { formatDateTime } from './date-utils.js';
 
@@ -50,7 +49,6 @@ export class BitableService {
           table_id: group.dailyTable.tableId,
         },
         params: {
-          client_token: buildClientToken(context.messageId),
           user_id_type: 'open_id',
         },
         data: { fields },
@@ -194,11 +192,6 @@ function assertTable(table, name) {
   if (!tableIsConfigured(table)) {
     throw new Error(`${name} 未配置 appToken/tableId`);
   }
-}
-
-function buildClientToken(value) {
-  if (!value) return undefined;
-  return crypto.createHash('sha256').update(String(value)).digest('hex').slice(0, 32);
 }
 
 async function withBitableErrorContext(operation, table, fn) {
