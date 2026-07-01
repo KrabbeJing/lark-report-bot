@@ -67,7 +67,7 @@ export async function handleMessageEvent({
     await ensureDailyTable(group);
 
     const contact = typeof bitable.findTeamContact === 'function'
-      ? await bitable.findTeamContact(group, {
+      ? await findTeamContactSafely(bitable, group, {
         reporterName: parsed.reporterName,
         senderOpenId: getSenderOpenId(data),
       })
@@ -107,5 +107,19 @@ async function ensureGroupTables(group) {
 async function ensureDailyTable(group) {
   if (!tableIsConfigured(group.dailyTable)) {
     throw new Error(`群 ${group.chatId} 的 dailyTable 未配置 appToken/tableId`);
+  }
+}
+
+async function findTeamContactSafely(bitable, group, query) {
+  try {
+    return await bitable.findTeamContact(group, query);
+  } catch (err) {
+    console.warn('[daily-report] contact lookup failed; continue without supervisor mapping', {
+      chatId: group.chatId,
+      project: group.project,
+      code: err?.response?.data?.code || err?.code,
+      msg: err?.response?.data?.msg || err?.message,
+    });
+    return null;
   }
 }

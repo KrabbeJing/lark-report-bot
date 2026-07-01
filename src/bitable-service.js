@@ -42,17 +42,19 @@ export class BitableService {
     }
 
     const fields = this.buildDailyRecordFields(group, report, context);
-    const res = await this.client.bitable.appTableRecord.create({
-      path: {
-        app_token: group.dailyTable.appToken,
-        table_id: group.dailyTable.tableId,
-      },
-      params: {
-        client_token: context.messageId || undefined,
-        user_id_type: 'open_id',
-      },
-      data: { fields },
-    });
+    const res = await withBitableErrorContext('createDailyReportRecord', group.dailyTable, () => (
+      this.client.bitable.appTableRecord.create({
+        path: {
+          app_token: group.dailyTable.appToken,
+          table_id: group.dailyTable.tableId,
+        },
+        params: {
+          client_token: context.messageId || undefined,
+          user_id_type: 'open_id',
+        },
+        data: { fields },
+      })
+    ));
     return { created: true, record: res?.data?.record, fields };
   }
 
@@ -60,7 +62,7 @@ export class BitableService {
     if (!messageId || !tableIsConfigured(group.dailyTable)) return null;
     const fieldName = group.dailyTable.fields.messageId;
     if (!fieldName) return null;
-    const records = await this.listRecords(group.dailyTable);
+    const records = await this.listRecords(group.dailyTable, 'dailyTable.findByMessageId');
     return records.find(record => String(record.fields?.[fieldName] || '') === String(messageId)) || null;
   }
 
@@ -74,7 +76,7 @@ export class BitableService {
 
   async listAllDailyReportsForRange(group, startDate, endDate) {
     assertTable(group.dailyTable, 'dailyTable');
-    const records = await this.listRecords(group.dailyTable);
+    const records = await this.listRecords(group.dailyTable, 'dailyTable.listAll');
     const fields = group.dailyTable.fields;
     return records
       .filter(record => {
@@ -86,7 +88,7 @@ export class BitableService {
 
   async listDailyReportsForRange(group, startDate, endDate) {
     assertTable(group.dailyTable, 'dailyTable');
-    const records = await this.listRecords(group.dailyTable);
+    const records = await this.listRecords(group.dailyTable, 'dailyTable.listRange');
     const fields = group.dailyTable.fields;
     return records
       .filter(record => {
@@ -105,7 +107,7 @@ export class BitableService {
 
   async findTeamContact(group, { reporterName = '', senderOpenId = '' } = {}) {
     if (!tableIsConfigured(group.contactTable)) return null;
-    const records = await this.listRecords(group.contactTable);
+    const records = await this.listRecords(group.contactTable, 'contactTable.findTeamContact');
     const fields = group.contactTable.fields;
     const contacts = records.map(record => normalizeContactRecord(record, fields));
     return contacts.find(contact => {
@@ -125,30 +127,34 @@ export class BitableService {
     const existing = await this.findWeeklySummaryRecord(group, summary.weekStart);
     const fields = buildWeeklyFields(group, summary, context);
     if (existing) {
-      const res = await this.client.bitable.appTableRecord.update({
-        path: {
-          app_token: group.weeklyTable.appToken,
-          table_id: group.weeklyTable.tableId,
-          record_id: existing.record_id,
-        },
-        data: { fields },
-      });
+      const res = await withBitableErrorContext('upsertWeeklySummary.update', group.weeklyTable, () => (
+        this.client.bitable.appTableRecord.update({
+          path: {
+            app_token: group.weeklyTable.appToken,
+            table_id: group.weeklyTable.tableId,
+            record_id: existing.record_id,
+          },
+          data: { fields },
+        })
+      ));
       return { updated: true, record: res?.data?.record, fields };
     }
 
-    const res = await this.client.bitable.appTableRecord.create({
-      path: {
-        app_token: group.weeklyTable.appToken,
-        table_id: group.weeklyTable.tableId,
-      },
-      data: { fields },
-    });
+    const res = await withBitableErrorContext('upsertWeeklySummary.create', group.weeklyTable, () => (
+      this.client.bitable.appTableRecord.create({
+        path: {
+          app_token: group.weeklyTable.appToken,
+          table_id: group.weeklyTable.tableId,
+        },
+        data: { fields },
+      })
+    ));
     return { created: true, record: res?.data?.record, fields };
   }
 
   async findWeeklySummaryRecord(group, weekStart) {
     if (!tableIsConfigured(group.weeklyTable)) return null;
-    const records = await this.listRecords(group.weeklyTable);
+    const records = await this.listRecords(group.weeklyTable, 'weeklyTable.findSummary');
     const fields = group.weeklyTable.fields;
     return records.find(record => {
       const recordChatId = String(record.fields?.[fields.chatId] || '');
@@ -157,23 +163,25 @@ export class BitableService {
     }) || null;
   }
 
-  async listRecords(table) {
+  async listRecords(table, label = 'table.listRecords') {
     assertTable(table, 'table');
     const items = [];
     let pageToken;
     do {
-      const res = await this.client.bitable.appTableRecord.list({
-        path: {
-          app_token: table.appToken,
-          table_id: table.tableId,
-        },
-        params: {
-          view_id: table.viewId || undefined,
-          page_size: 500,
-          page_token: pageToken,
-          user_id_type: 'open_id',
-        },
-      });
+      const res = await withBitableErrorContext(label, table, () => (
+        this.client.bitable.appTableRecord.list({
+          path: {
+            app_token: table.appToken,
+            table_id: table.tableId,
+          },
+          params: {
+            view_id: table.viewId || undefined,
+            page_size: 500,
+            page_token: pageToken,
+            user_id_type: 'open_id',
+          },
+        })
+      ));
       items.push(...(res?.data?.items || []));
       pageToken = res?.data?.has_more ? res.data.page_token : undefined;
     } while (pageToken);
@@ -185,6 +193,32 @@ function assertTable(table, name) {
   if (!tableIsConfigured(table)) {
     throw new Error(`${name} 未配置 appToken/tableId`);
   }
+}
+
+async function withBitableErrorContext(operation, table, fn) {
+  try {
+    return await fn();
+  } catch (err) {
+    const data = err?.response?.data;
+    const context = {
+      operation,
+      appToken: maskToken(table?.appToken),
+      tableId: maskToken(table?.tableId),
+      viewId: maskToken(table?.viewId),
+      code: data?.code,
+      msg: data?.msg,
+    };
+    console.error('[bitable] request failed', context);
+    err.message = `${err.message || 'Bitable request failed'} [${operation} appToken=${context.appToken} tableId=${context.tableId} viewId=${context.viewId} code=${context.code || ''} msg=${context.msg || ''}]`;
+    throw err;
+  }
+}
+
+function maskToken(value) {
+  const text = String(value || '');
+  if (!text) return '';
+  if (text.length <= 8) return `${text.slice(0, 2)}***${text.slice(-2)}`;
+  return `${text.slice(0, 4)}***${text.slice(-4)}`;
 }
 
 function normalizeDailyRecord(record, fields, group) {
