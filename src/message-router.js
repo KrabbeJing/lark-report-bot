@@ -58,7 +58,24 @@ export async function handleMessageEvent({
   });
 
   if (parsed?.highConfidence) {
+    console.log('[daily-report] parsed', {
+      messageId: message.message_id,
+      chatId: message.chat_id,
+      reporterName: parsed.reporterName,
+      reportDate: parsed.reportDate,
+      confidence: parsed.confidence,
+      workItemCount: parsed.workItems.length,
+      planItemCount: parsed.tomorrowPlanItems.length,
+      riskItemCount: parsed.riskItems.length,
+    });
+
     if (!group) {
+      console.warn('[daily-report] parsed but group not configured', {
+        messageId: message.message_id,
+        chatId: message.chat_id,
+        reporterName: parsed.reporterName,
+        reportDate: parsed.reportDate,
+      });
       if (mentioned) {
         await messenger.replyText(message.message_id, '我识别到了日报，但当前群还没有配置日报收集表。请先在 config/groups.json 里配置这个群。');
       }
@@ -82,11 +99,38 @@ export async function handleMessageEvent({
       contact,
     });
 
+    console.log('[daily-report] record write result', {
+      messageId: message.message_id,
+      chatId: message.chat_id,
+      reporterName: parsed.reporterName,
+      reportDate: parsed.reportDate,
+      created: result.created,
+      recordId: result.record?.record_id || result.record?.recordId || '',
+      workItemCount: parsed.workItems.length,
+    });
+
     if (mentioned) {
       const verb = result.created ? '已收集' : '这条日报已收集过';
       await messenger.replyText(message.message_id, `${verb}：${parsed.reporterName} ${parsed.reportDate}，共 ${parsed.workItems.length} 项事项。`);
     }
     return;
+  }
+
+  if (parsed && !parsed.highConfidence) {
+    console.warn('[daily-report] low confidence; ignored', {
+      messageId: message.message_id,
+      chatId: message.chat_id,
+      confidence: parsed.confidence,
+      reason: parsed.reason,
+      firstLine: getFirstLine(reportText),
+    });
+  } else if ((mentioned || process.env.DAILY_PARSE_DEBUG === 'true') && group) {
+    console.log('[daily-report] not matched; ignored', {
+      messageId: message.message_id,
+      chatId: message.chat_id,
+      mentioned,
+      firstLine: getFirstLine(reportText),
+    });
   }
 
   if (mentioned) {
@@ -122,4 +166,12 @@ async function findTeamContactSafely(bitable, group, query) {
     });
     return null;
   }
+}
+
+function getFirstLine(text) {
+  return String(text || '')
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .find(Boolean)
+    ?.slice(0, 60) || '';
 }
