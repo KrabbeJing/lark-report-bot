@@ -1,0 +1,20 @@
+{
+  "name": "lark-report-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.40.0",
+    "dotenv": "^16.4.5",
+    "echarts": "^6.1.0",
+    "puppeteer": "^25.1.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

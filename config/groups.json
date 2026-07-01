@@ -1,0 +1,68 @@
+{
+  "timezone": "Asia/Shanghai",
+  "botNames": ["数金小助手"],
+  "weeklyPush": {
+    "enabled": false,
+    "dayOfWeek": 6,
+    "time": "10:00",
+    "timezone": "Asia/Shanghai"
+  },
+  "dailySupervisorPush": {
+    "enabled": false,
+    "time": "17:00",
+    "timezone": "Asia/Shanghai"
+  },
+  "groups": [
+    {
+      "enabled": true,
+      "chatId": "oc_127d0a4ec12a42a31de3110fdf9b51f3",
+      "name": "示例项目组日报群",
+      "project": "示例项目组",
+      "agileGroup": "示例敏捷小组",
+      "pushChatId": "oc_127d0a4ec12a42a31de3110fdf9b51f3",
+      "dailyTable": {
+        "appToken": "Ic8FbuOr2aYeBasWrelcFw6enxe",
+        "tableId": "tblHjXGd1QpSXFQX",
+        "viewId": "vewXSKRchw",
+        "fields": {
+          "reportDate": "日报日期",
+          "project": "所属板块",
+          "reporterName": "日报提交人",
+          "workItems": "今日工作总结",
+          "tomorrowPlanItems": "明日工作计划",
+          "riskItems": "遇到的问题",
+          "aiSummary": "AI汇总",
+          "supervisor": "直属上级"
+        },
+        "fieldTypes": {
+          "reporterName": "text",
+          "supervisor": "user"
+        }
+      },
+      "contactTable": {
+        "appToken": "Ic8FbuOr2aYeBasWrelcFw6enxe",
+        "tableId": "tblz5tlDWsLyFzv7",
+        "viewId": "vewVnQxucW",
+        "fields": {
+          "teamName": "团队名称",
+          "teamMember": "团队成员",
+          "teamRole": "团队身份",
+          "supervisor": "直属上级"
+        }
+      },
+      "weeklyTable": null,
+      "weeklySheet": {
+        "enabled": false,
+        "spreadsheetToken": "",
+        "wikiNodeToken": "BaTOwZsM6ikYjJkhSqOc8e0Ynrh",
+        "spreadsheetUrl": "https://acncyn3n5k6i.feishu.cn/wiki/BaTOwZsM6ikYjJkhSqOc8e0Ynrh?sheet=4dcda2",
+        "templateSheetId": "z51e64",
+        "titlePattern": "数字金融部周报 {{weekStart}}-{{weekEnd}}",
+        "copyTemplate": true,
+        "reportScope": "allDailyTable",
+        "reuseExisting": true,
+        "skipPushIfExisting": true
+      }
+    }
+  ]
+}
