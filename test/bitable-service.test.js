@@ -82,6 +82,115 @@ test('creates daily record when no technical message id field exists', async () 
   assert.equal(createPayload.params.client_token, undefined);
 });
 
+test('extracts created record from axios-wrapped bitable response', async () => {
+  const group = createGroup();
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async () => ({
+          status: 200,
+          data: {
+            code: 0,
+            msg: 'success',
+            data: { items: [] },
+          },
+        }),
+        create: async () => ({
+          status: 200,
+          data: {
+            code: 0,
+            msg: 'success',
+            data: {
+              record: {
+                record_id: 'rec_new',
+                fields: { 日报提交人: '王治坤' },
+              },
+            },
+          },
+        }),
+      },
+    },
+  });
+
+  const result = await service.createDailyReportRecord(group, {
+    highConfidence: true,
+    reportDate: '2026-06-26',
+    reporterName: '王治坤',
+    rawText: '原文',
+    workItems: ['事项1'],
+    riskItems: [],
+  });
+
+  assert.equal(result.created, true);
+  assert.equal(result.record.record_id, 'rec_new');
+  assert.equal(result.responseSummary.code, 0);
+  assert.equal(result.responseSummary.recordId, 'rec_new');
+});
+
+test('formats configured date fields as millisecond timestamps', () => {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      project: '支付平台',
+      dailyTable: {
+        appToken: 'bas_test',
+        tableId: 'tbl_daily',
+        fieldTypes: {
+          reportDate: 'date',
+        },
+      },
+    }],
+  }).groups[0];
+  const service = new BitableService({});
+  const fields = service.buildDailyRecordFields(group, {
+    highConfidence: true,
+    reportDate: '2026-06-26',
+    reporterName: '王治坤',
+    rawText: '原文',
+    workItems: ['事项1'],
+    riskItems: [],
+  });
+
+  assert.equal(fields['日报日期'], Date.UTC(2026, 5, 26));
+});
+
+test('throws when bitable returns a non-zero business code', async () => {
+  const group = createGroup();
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async () => ({
+          status: 200,
+          data: {
+            code: 0,
+            data: { items: [] },
+          },
+        }),
+        create: async () => ({
+          status: 200,
+          data: {
+            code: 1254037,
+            msg: 'Invalid client token',
+            data: {},
+          },
+        }),
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => service.createDailyReportRecord(group, {
+      highConfidence: true,
+      reportDate: '2026-06-26',
+      reporterName: '王治坤',
+      rawText: '原文',
+      workItems: ['事项1'],
+      riskItems: [],
+    }),
+    /code=1254037/,
+  );
+});
+
 test('does not create duplicate daily records when message id field is configured', async () => {
   const group = normalizeConfig({
     groups: [{

@@ -35,6 +35,7 @@
           "supervisor": "直属上级"
         },
         "fieldTypes": {
+          "reportDate": "date",
           "reporterName": "text",
           "supervisor": "user"
         }

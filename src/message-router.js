@@ -106,6 +106,8 @@ export async function handleMessageEvent({
       reportDate: parsed.reportDate,
       created: result.created,
       recordId: result.record?.record_id || result.record?.recordId || '',
+      verifiedOutsideView: result.verifiedOutsideView || false,
+      responseSummary: result.responseSummary,
       workItemCount: parsed.workItems.length,
     });
 
