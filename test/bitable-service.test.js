@@ -49,6 +49,7 @@ test('builds daily record fields using configured field names', () => {
 test('creates daily record when no technical message id field exists', async () => {
   const group = createGroup();
   let createCalled = false;
+  let createPayload = null;
   const service = new BitableService({
     bitable: {
       appTableRecord: {
@@ -57,8 +58,9 @@ test('creates daily record when no technical message id field exists', async () 
             items: [],
           },
         }),
-        create: async () => {
+        create: async (payload) => {
           createCalled = true;
+          createPayload = payload;
         },
       },
     },
@@ -77,6 +79,8 @@ test('creates daily record when no technical message id field exists', async () 
 
   assert.equal(result.created, true);
   assert.equal(createCalled, true);
+  assert.match(createPayload.params.client_token, /^[a-f0-9]{32}$/);
+  assert.notEqual(createPayload.params.client_token, 'om_1');
 });
 
 test('does not create duplicate daily records when message id field is configured', async () => {
