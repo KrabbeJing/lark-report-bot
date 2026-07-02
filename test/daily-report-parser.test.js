@@ -132,3 +132,22 @@ test('parses dot date title with trailing colon', () => {
     '对接市北第二支行沟通医码当先营销活动策略。',
   ]);
 });
+
+test('keeps original numbered body text after removing report title', () => {
+  const parsed = parseDailyReportText(`刘喜双7.1工作日报
+1、与技术沟通开发区一中云充值取数逻辑问题，完成数据提取
+2、整理千分卡考核指标，完成填报`, {
+    messageTime: new Date('2026-07-01T09:00:00+08:00'),
+    timezone: 'Asia/Shanghai',
+  });
+
+  assert.equal(parsed.highConfidence, true);
+  assert.equal(parsed.reporterName, '刘喜双');
+  assert.equal(parsed.reportDate, '2026-07-01');
+  assert.equal(parsed.workSummaryText, `1、与技术沟通开发区一中云充值取数逻辑问题，完成数据提取
+2、整理千分卡考核指标，完成填报`);
+  assert.deepEqual(parsed.workItems, [
+    '与技术沟通开发区一中云充值取数逻辑问题，完成数据提取',
+    '整理千分卡考核指标，完成填报',
+  ]);
+});

@@ -154,6 +154,61 @@ test('formats configured date fields as millisecond timestamps', () => {
   assert.equal(fields['日报日期'], Date.UTC(2026, 5, 26));
 });
 
+test('writes only configured daily fields and preserves numbered summary text', () => {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      project: '支付平台',
+      dailyTable: {
+        appToken: 'bas_test',
+        tableId: 'tbl_daily',
+        fields: {
+          reportDate: '日报日期',
+          reporterName: '日报提交人',
+          workItems: '今日工作总结',
+          riskItems: '遇到的问题',
+          aiSummary: 'AI汇总',
+          supervisor: '直属上级',
+        },
+        fieldTypes: {
+          reportDate: 'date',
+          reporterName: 'user',
+          supervisor: 'user',
+        },
+        writeFields: ['reportDate', 'reporterName', 'workItems', 'supervisor'],
+      },
+    }],
+  }).groups[0];
+  const service = new BitableService({});
+  const fields = service.buildDailyRecordFields(group, {
+    highConfidence: true,
+    reportDate: '2026-07-01',
+    reporterName: '刘喜双',
+    rawText: '原文',
+    workSummaryText: `1、与技术沟通开发区一中云充值取数逻辑问题，完成数据提取
+2、整理千分卡考核指标，完成填报`,
+    workItems: [
+      '与技术沟通开发区一中云充值取数逻辑问题，完成数据提取',
+      '整理千分卡考核指标，完成填报',
+    ],
+    riskItems: ['问题不应写入'],
+  }, {
+    senderOpenId: 'ou_liu',
+    contact: {
+      supervisor: '王经理',
+      supervisorOpenId: 'ou_mgr',
+    },
+  });
+
+  assert.equal(fields['日报日期'], Date.UTC(2026, 6, 1));
+  assert.deepEqual(fields['日报提交人'], [{ id: 'ou_liu', name: '刘喜双' }]);
+  assert.equal(fields['今日工作总结'], `1、与技术沟通开发区一中云充值取数逻辑问题，完成数据提取
+2、整理千分卡考核指标，完成填报`);
+  assert.deepEqual(fields['直属上级'], [{ id: 'ou_mgr', name: '王经理' }]);
+  assert.equal(fields['遇到的问题'], undefined);
+  assert.equal(fields['AI汇总'], undefined);
+});
+
 test('throws when bitable returns a non-zero business code', async () => {
   const group = createGroup();
   const service = new BitableService({

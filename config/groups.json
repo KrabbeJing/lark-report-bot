@@ -36,9 +36,10 @@
         },
         "fieldTypes": {
           "reportDate": "date",
-          "reporterName": "text",
+          "reporterName": "user",
           "supervisor": "user"
-        }
+        },
+        "writeFields": ["reportDate", "reporterName", "workItems", "supervisor"]
       },
       "contactTable": {
         "appToken": "Ic8FbuOr2aYeBasWrelcFw6enxe",

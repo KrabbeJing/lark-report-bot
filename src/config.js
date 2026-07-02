@@ -166,6 +166,7 @@ function normalizeTableConfig(table, defaults) {
     viewId: table.viewId || table.view_id || '',
     fields: configuredFields,
     fieldTypes: table.fieldTypes || table.field_types || {},
+    writeFields: table.writeFields || table.write_fields || null,
   };
 }
 

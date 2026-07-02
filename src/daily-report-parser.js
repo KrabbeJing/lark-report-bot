@@ -28,6 +28,7 @@ export function parseDailyReportText(text, options = {}) {
   const workItems = sections.hasSections
     ? extractWorkItems(sections.work.length ? sections.work : sections.unsectioned)
     : extractWorkItems(lines.slice(1));
+  const workSummaryText = buildWorkSummaryText(lines.slice(1), sections);
   const tomorrowPlanItems = extractWorkItems(sections.plan);
   const explicitRiskItems = extractWorkItems(sections.risk);
   const riskItems = [
@@ -58,6 +59,7 @@ export function parseDailyReportText(text, options = {}) {
     reporterName,
     reportDate: dateInfo.ymd,
     rawText: normalized,
+    workSummaryText,
     workItems,
     tomorrowPlanItems,
     riskItems,
@@ -141,6 +143,16 @@ function extractWorkItems(bodyLines) {
 
   if (current) items.push(current.trim());
   return items.filter(Boolean);
+}
+
+function buildWorkSummaryText(bodyLines, sections) {
+  const sourceLines = sections.hasSections
+    ? (sections.work.length ? sections.work : sections.unsectioned)
+    : bodyLines;
+  return sourceLines
+    .map(line => String(line || '').trim())
+    .filter(Boolean)
+    .join('\n');
 }
 
 function splitSections(bodyLines) {

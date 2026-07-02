@@ -1,4 +1,4 @@
-import { DAILY_FIELD_KEYS, WEEKLY_FIELD_KEYS, tableIsConfigured } from './config.js';
+import { WEEKLY_FIELD_KEYS, tableIsConfigured } from './config.js';
 import { DEFAULT_TIMEZONE, formatDateTime, formatYmd, parseYmd } from './date-utils.js';
 
 export class BitableService {
@@ -7,29 +7,32 @@ export class BitableService {
   }
 
   buildDailyRecordFields(group, report, context = {}) {
-    const fields = group.dailyTable?.fields || DAILY_FIELD_KEYS;
     const contact = context.contact || {};
     const recordFields = {};
+    const setDailyField = (key, value, fieldContext = context) => {
+      if (!shouldWriteDailyField(group.dailyTable, key)) return;
+      setMappedField(recordFields, group.dailyTable, key, value, fieldContext);
+    };
 
-    setMappedField(recordFields, group.dailyTable, 'messageId', context.messageId || '', context);
-    setMappedField(recordFields, group.dailyTable, 'chatId', context.chatId || group.chatId || '', context);
-    setMappedField(recordFields, group.dailyTable, 'project', contact.teamName || group.project || '', context);
-    setMappedField(recordFields, group.dailyTable, 'agileGroup', group.agileGroup || '', context);
-    setMappedField(recordFields, group.dailyTable, 'reportDate', report.reportDate || '', context);
-    setMappedField(recordFields, group.dailyTable, 'reporterName', report.reporterName || '', context);
-    setMappedField(recordFields, group.dailyTable, 'senderOpenId', context.senderOpenId || '', context);
-    setMappedField(recordFields, group.dailyTable, 'rawText', report.rawText || '', context);
-    setMappedField(recordFields, group.dailyTable, 'workItems', report.workItems || [], context);
-    setMappedField(recordFields, group.dailyTable, 'tomorrowPlanItems', report.tomorrowPlanItems || [], context);
-    setMappedField(recordFields, group.dailyTable, 'riskItems', report.riskItems || [], context);
-    setMappedField(recordFields, group.dailyTable, 'aiSummary', buildDailyAiSummary(report), context);
-    setMappedField(recordFields, group.dailyTable, 'supervisor', contact.supervisor || '', {
+    setDailyField('messageId', context.messageId || '');
+    setDailyField('chatId', context.chatId || group.chatId || '');
+    setDailyField('project', contact.teamName || group.project || '');
+    setDailyField('agileGroup', group.agileGroup || '');
+    setDailyField('reportDate', report.reportDate || '');
+    setDailyField('reporterName', report.reporterName || '');
+    setDailyField('senderOpenId', context.senderOpenId || '');
+    setDailyField('rawText', report.rawText || '');
+    setDailyField('workItems', report.workSummaryText || report.workItems || []);
+    setDailyField('tomorrowPlanItems', report.tomorrowPlanItems || []);
+    setDailyField('riskItems', report.riskItems || []);
+    setDailyField('aiSummary', buildDailyAiSummary(report));
+    setDailyField('supervisor', contact.supervisor || '', {
       ...context,
       supervisorOpenId: contact.supervisorOpenId || '',
     });
-    setMappedField(recordFields, group.dailyTable, 'source', context.source || 'chat', context);
-    setMappedField(recordFields, group.dailyTable, 'parseStatus', report.highConfidence ? 'parsed' : 'low_confidence', context);
-    setMappedField(recordFields, group.dailyTable, 'messageTime', context.messageTimeText || '', context);
+    setDailyField('source', context.source || 'chat');
+    setDailyField('parseStatus', report.highConfidence ? 'parsed' : 'low_confidence');
+    setDailyField('messageTime', context.messageTimeText || '');
 
     return recordFields;
   }
@@ -367,6 +370,12 @@ function setMappedField(recordFields, table, key, value, context = {}) {
   const formatted = formatFieldValue(table, key, value, context);
   if (formatted === undefined) return;
   recordFields[fieldName] = formatted;
+}
+
+function shouldWriteDailyField(table, key) {
+  const allowed = table?.writeFields;
+  if (!Array.isArray(allowed) || allowed.length === 0) return true;
+  return allowed.includes(key);
 }
 
 function formatFieldValue(table, key, value, context = {}) {
