@@ -1,8 +1,10 @@
 import { addDaysToYmd, coerceLarkTimestamp, formatYmd } from './date-utils.js';
 
 const DATE_RANGE_PATTERNS = [
-  /(?<startYear>20\d{2})?\s*(?<startMonth>\d{1,2})\s*[-/.月]\s*(?<startDay>\d{1,2})\s*(?:日)?\s*[-~至到]\s*(?:(?<endYear>20\d{2})\s*[-/.年]\s*)?(?:(?<endMonth>\d{1,2})\s*[-/.月]\s*)?(?<endDay>\d{1,2})\s*日?/,
+  /(?:(?<startYear>20\d{2})\s*[-/.年]\s*)?(?<startMonth>\d{1,2})\s*[-/.月]\s*(?<startDay>\d{1,2})\s*(?:日)?\s*[-~至到]\s*(?:(?<endYear>20\d{2})\s*[-/.年]\s*)?(?:(?<endMonth>\d{1,2})\s*[-/.月]\s*)?(?<endDay>\d{1,2})\s*日?/,
 ];
+
+const DATE_RANGE_LIKE_RE = /(?:^|[^\d])(?:20\d{2}\s*[-/.年]\s*)?(?:0?[1-9]|1[0-2])\s*[-/.月]\s*(?:0?[1-9]|[12]\d|3[01])\s*(?:日)?\s*[-~至到]\s*(?:(?:20\d{2})\s*[-/.年]\s*)?(?:(?:0?[1-9]|1[0-2])\s*[-/.月]\s*)?(?:0?[1-9]|[12]\d|3[01])\s*日?/;
 
 const DATE_PATTERNS = [
   /(?<year>20\d{2})\s*[-/.年]\s*(?<month>\d{1,2})\s*[-/.月]\s*(?<day>\d{1,2})\s*日?/,
@@ -47,7 +49,7 @@ export function parseDailyReportText(text, options = {}) {
   if (dateInfo?.raw) confidence += 0.15;
   if (workItems.length > 0) confidence += 0.25;
 
-  const highConfidence = confidence >= 0.75;
+  const highConfidence = !dateInfo.invalidRange && confidence >= 0.75;
   if (!highConfidence) {
     return {
       highConfidence,
@@ -85,6 +87,17 @@ function normalizeText(text) {
 function extractDateInfo(title, fallbackDate, timezone) {
   const range = extractDateRange(title, fallbackDate, timezone);
   if (range) return range;
+
+  if (looksLikeDateRange(title)) {
+    return {
+      raw: '',
+      ymd: formatYmd(fallbackDate, timezone),
+      dates: [],
+      rangeText: '',
+      reportType: '日期范围无效',
+      invalidRange: true,
+    };
+  }
 
   const single = extractDate(title, fallbackDate, timezone);
   return {
@@ -124,6 +137,10 @@ function extractDateRange(title, fallbackDate, timezone) {
     };
   }
   return null;
+}
+
+function looksLikeDateRange(title) {
+  return DATE_RANGE_LIKE_RE.test(String(title || ''));
 }
 
 function expandDateRange(start, end) {

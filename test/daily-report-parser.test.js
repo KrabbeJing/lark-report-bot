@@ -181,3 +181,50 @@ test('uses title date instead of next-day message time', () => {
   assert.deepEqual(parsed.reportDates, ['2026-06-30']);
   assert.equal(parsed.reportType, '单日');
 });
+
+test('does not reinterpret backward date range as single-day report', () => {
+  const parsed = parseDailyReportText(`刘喜双 6.30-6.29 工作日报
+1、内容`, {
+    messageTime: new Date('2026-07-01T09:00:00+08:00'),
+    timezone: 'Asia/Shanghai',
+  });
+
+  assert.equal(parsed.highConfidence, false);
+});
+
+test('parses full-year date range with omitted end year', () => {
+  const parsed = parseDailyReportText(`刘喜双 2026-06-29-06-30 工作日报
+1、内容`, {
+    messageTime: new Date('2026-07-01T09:00:00+08:00'),
+    timezone: 'Asia/Shanghai',
+  });
+
+  assert.equal(parsed.highConfidence, true);
+  assert.equal(parsed.reportDate, '2026-06-29');
+  assert.deepEqual(parsed.reportDates, ['2026-06-29', '2026-06-30']);
+  assert.equal(parsed.dateRange, '2026-06-29~2026-06-30');
+  assert.equal(parsed.reportType, '多日合并');
+});
+
+test('parses dotted full-year date range', () => {
+  const parsed = parseDailyReportText(`刘喜双 2026.6.29-6.30 工作日报
+1、内容`, {
+    messageTime: new Date('2026-07-01T09:00:00+08:00'),
+    timezone: 'Asia/Shanghai',
+  });
+
+  assert.equal(parsed.highConfidence, true);
+  assert.equal(parsed.reportDate, '2026-06-29');
+  assert.deepEqual(parsed.reportDates, ['2026-06-29', '2026-06-30']);
+  assert.equal(parsed.reportType, '多日合并');
+});
+
+test('does not reinterpret too-long date range as single-day report', () => {
+  const parsed = parseDailyReportText(`刘喜双 6.1-7.15 工作日报
+1、内容`, {
+    messageTime: new Date('2026-07-01T09:00:00+08:00'),
+    timezone: 'Asia/Shanghai',
+  });
+
+  assert.equal(parsed.highConfidence, false);
+});
