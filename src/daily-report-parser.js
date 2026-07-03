@@ -1,4 +1,8 @@
-import { coerceLarkTimestamp, formatYmd } from './date-utils.js';
+import { addDaysToYmd, coerceLarkTimestamp, formatYmd } from './date-utils.js';
+
+const DATE_RANGE_PATTERNS = [
+  /(?<startYear>20\d{2})?\s*(?<startMonth>\d{1,2})\s*[-/.月]\s*(?<startDay>\d{1,2})\s*(?:日)?\s*[-~至到]\s*(?:(?<endYear>20\d{2})\s*[-/.年]\s*)?(?:(?<endMonth>\d{1,2})\s*[-/.月]\s*)?(?<endDay>\d{1,2})\s*日?/,
+];
 
 const DATE_PATTERNS = [
   /(?<year>20\d{2})\s*[-/.年]\s*(?<month>\d{1,2})\s*[-/.月]\s*(?<day>\d{1,2})\s*日?/,
@@ -22,7 +26,7 @@ export function parseDailyReportText(text, options = {}) {
   const hasReportKeyword = /(?:工作)?日报/.test(title) || /(?:工作)?日报/.test(normalized.slice(0, 80));
   if (!hasReportKeyword) return null;
 
-  const dateInfo = extractDate(title, fallbackDate, timezone);
+  const dateInfo = extractDateInfo(title, fallbackDate, timezone);
   const reporterName = extractReporterName(title, dateInfo?.raw);
   const sections = splitSections(lines.slice(1));
   const workItems = sections.hasSections
@@ -58,6 +62,9 @@ export function parseDailyReportText(text, options = {}) {
     confidence,
     reporterName,
     reportDate: dateInfo.ymd,
+    reportDates: dateInfo.dates,
+    dateRange: dateInfo.rangeText,
+    reportType: dateInfo.reportType,
     rawText: normalized,
     workSummaryText,
     workItems,
@@ -73,6 +80,61 @@ function normalizeText(text) {
     .replace(/\u00a0/g, ' ')
     .replace(/[ \t]+$/gm, '')
     .trim();
+}
+
+function extractDateInfo(title, fallbackDate, timezone) {
+  const range = extractDateRange(title, fallbackDate, timezone);
+  if (range) return range;
+
+  const single = extractDate(title, fallbackDate, timezone);
+  return {
+    ...single,
+    dates: [single.ymd],
+    rangeText: single.ymd,
+    reportType: '单日',
+  };
+}
+
+function extractDateRange(title, fallbackDate, timezone) {
+  for (const pattern of DATE_RANGE_PATTERNS) {
+    const match = String(title || '').match(pattern);
+    if (!match?.groups) continue;
+
+    const fallbackYear = Number(formatYmd(fallbackDate, timezone).slice(0, 4));
+    const startYear = match.groups.startYear ? Number(match.groups.startYear) : fallbackYear;
+    const endYear = match.groups.endYear ? Number(match.groups.endYear) : startYear;
+    const startMonth = Number(match.groups.startMonth);
+    const startDay = Number(match.groups.startDay);
+    const endMonth = Number(match.groups.endMonth || match.groups.startMonth);
+    const endDay = Number(match.groups.endDay);
+
+    if (!isValidMonthDay(startMonth, startDay) || !isValidMonthDay(endMonth, endDay)) continue;
+
+    const start = `${startYear}-${String(startMonth).padStart(2, '0')}-${String(startDay).padStart(2, '0')}`;
+    const end = `${endYear}-${String(endMonth).padStart(2, '0')}-${String(endDay).padStart(2, '0')}`;
+    const dates = expandDateRange(start, end);
+    if (dates.length < 2) continue;
+
+    return {
+      raw: match[0],
+      ymd: dates[0],
+      dates,
+      rangeText: `${dates[0]}~${dates[dates.length - 1]}`,
+      reportType: '多日合并',
+    };
+  }
+  return null;
+}
+
+function expandDateRange(start, end) {
+  const dates = [];
+  let current = start;
+  for (let i = 0; i < 31; i += 1) {
+    dates.push(current);
+    if (current === end) return dates;
+    current = addDaysToYmd(current, 1);
+  }
+  return [];
 }
 
 function extractDate(title, fallbackDate, timezone) {

@@ -151,3 +151,33 @@ test('keeps original numbered body text after removing report title', () => {
     '整理千分卡考核指标，完成填报',
   ]);
 });
+
+test('parses date range daily report into multiple report dates', () => {
+  const parsed = parseDailyReportText(`刘喜双 6.29-6.30 工作日报
+1、完成开发区一中云充值取数逻辑梳理
+2、整理千分卡考核指标`, {
+    messageTime: new Date('2026-07-01T01:30:00+08:00'),
+    timezone: 'Asia/Shanghai',
+  });
+
+  assert.equal(parsed.highConfidence, true);
+  assert.equal(parsed.reporterName, '刘喜双');
+  assert.equal(parsed.reportDate, '2026-06-29');
+  assert.deepEqual(parsed.reportDates, ['2026-06-29', '2026-06-30']);
+  assert.equal(parsed.dateRange, '2026-06-29~2026-06-30');
+  assert.equal(parsed.reportType, '多日合并');
+  assert.equal(parsed.workSummaryText, `1、完成开发区一中云充值取数逻辑梳理
+2、整理千分卡考核指标`);
+});
+
+test('uses title date instead of next-day message time', () => {
+  const parsed = parseDailyReportText(`刘喜双6.30工作日报
+1、补发昨日数据提取进展`, {
+    messageTime: new Date('2026-07-01T00:30:00+08:00'),
+    timezone: 'Asia/Shanghai',
+  });
+
+  assert.equal(parsed.reportDate, '2026-06-30');
+  assert.deepEqual(parsed.reportDates, ['2026-06-30']);
+  assert.equal(parsed.reportType, '单日');
+});
