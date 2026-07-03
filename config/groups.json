@@ -12,6 +12,12 @@
     "time": "17:00",
     "timezone": "Asia/Shanghai"
   },
+  "dailyFactSync": {
+    "enabled": false,
+    "time": "18:10",
+    "timezone": "Asia/Shanghai",
+    "lookbackDays": 7
+  },
   "groups": [
     {
       "enabled": true,
@@ -41,6 +47,7 @@
         },
         "writeFields": ["reportDate", "reporterName", "workItems", "supervisor"]
       },
+      "dailyFactTable": null,
       "contactTable": {
         "appToken": "Ic8FbuOr2aYeBasWrelcFw6enxe",
         "tableId": "tblz5tlDWsLyFzv7",

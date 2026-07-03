@@ -4,11 +4,12 @@ import { fileURLToPath } from 'node:url';
 import * as lark from '@larksuiteoapi/node-sdk';
 import { createAiProvider } from './ai-providers.js';
 import { BitableService } from './bitable-service.js';
+import { syncDailyFactsForAllGroups } from './daily-fact-sync.js';
 import { pushDailyReportsToSupervisors } from './daily-supervisor-push.js';
 import { loadGroupConfig } from './config.js';
 import { LarkMessenger } from './lark-messenger.js';
 import { handleMessageEvent } from './message-router.js';
-import { startDailySupervisorScheduler, startWeeklyScheduler } from './scheduler.js';
+import { startDailyFactSyncScheduler, startDailySupervisorScheduler, startWeeklyScheduler } from './scheduler.js';
 import { generateWeeklyReportForGroup } from './weekly-reporter.js';
 import { WeeklySheetWriter } from './weekly-sheet-writer.js';
 
@@ -116,6 +117,17 @@ startDailySupervisorScheduler({
         console.error(`[daily-supervisor] failed for ${group.project || group.chatId}`, err?.response?.data || err);
       }
     }
+  },
+});
+
+startDailyFactSyncScheduler({
+  config,
+  onRun: async (now) => {
+    await syncDailyFactsForAllGroups({
+      config,
+      bitable,
+      now,
+    });
   },
 });
 

@@ -82,6 +82,69 @@ test('creates daily record when no technical message id field exists', async () 
   assert.equal(createPayload.params.client_token, undefined);
 });
 
+test('creates chat daily records in fact table when configured', async () => {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      project: '支付平台',
+      dailyTable: {
+        appToken: 'bas_test',
+        tableId: 'tbl_source',
+      },
+      dailyFactTable: {
+        appToken: 'bas_test',
+        tableId: 'tbl_fact',
+        fields: {
+          messageId: '来源消息ID',
+          reportDate: '日报日期',
+          reporterName: '实际日报提交人',
+          workItems: '今日工作总结',
+        },
+        fieldTypes: {
+          reportDate: 'date',
+          reporterName: 'user',
+        },
+      },
+    }],
+  }).groups[0];
+  let createPayload = null;
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async () => ({ data: { items: [] } }),
+        create: async (payload) => {
+          createPayload = payload;
+          return {
+            data: {
+              data: {
+                record: { record_id: 'rec_chat_fact', fields: payload.data.fields },
+              },
+            },
+          };
+        },
+      },
+    },
+  });
+
+  const result = await service.createDailyReportRecord(group, {
+    highConfidence: true,
+    reportDate: '2026-07-01',
+    reporterName: '刘喜双',
+    workSummaryText: '1、完成数据提取',
+    workItems: ['完成数据提取'],
+    riskItems: [],
+  }, {
+    messageId: 'om_1',
+    senderOpenId: 'ou_liu',
+  });
+
+  assert.equal(result.created, true);
+  assert.equal(createPayload.path.table_id, 'tbl_fact');
+  assert.equal(createPayload.data.fields['来源消息ID'], 'om_1');
+  assert.deepEqual(createPayload.data.fields['实际日报提交人'], [{ id: 'ou_liu', name: '刘喜双' }]);
+  assert.equal(createPayload.data.fields['今日工作总结'], '1、完成数据提取');
+});
+
 test('extracts created record from axios-wrapped bitable response', async () => {
   const group = createGroup();
   const service = new BitableService({
@@ -207,6 +270,136 @@ test('writes only configured daily fields and preserves numbered summary text', 
   assert.deepEqual(fields['直属上级'], [{ id: 'ou_mgr', name: '王经理' }]);
   assert.equal(fields['遇到的问题'], undefined);
   assert.equal(fields['AI汇总'], undefined);
+});
+
+test('syncs source form daily records into fact table with contact enrichment', async () => {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      project: '默认板块',
+      dailyTable: {
+        appToken: 'bas_test',
+        tableId: 'tbl_source',
+        fields: {
+          reportDate: '日报日期',
+          reporterName: '日报提交人',
+          workItems: '今日工作总结',
+          tomorrowPlanItems: '明日工作计划',
+          riskItems: '遇到的问题',
+          supervisor: '直属上级',
+        },
+      },
+      dailyFactTable: {
+        appToken: 'bas_test',
+        tableId: 'tbl_fact',
+        fields: {
+          sourceRecordId: '来源记录ID',
+          source: '日报来源',
+          reportDate: '日报日期',
+          project: '所属板块',
+          reporterName: '实际日报提交人',
+          reporterNameText: '日报提交人姓名',
+          workItems: '今日工作总结',
+          supervisor: '直属上级',
+          matchingStatus: '匹配状态',
+          syncedAt: '同步时间',
+        },
+        fieldTypes: {
+          reportDate: 'date',
+          reporterName: 'user',
+          supervisor: 'user',
+        },
+        writeFields: [
+          'sourceRecordId',
+          'source',
+          'reportDate',
+          'project',
+          'reporterName',
+          'reporterNameText',
+          'workItems',
+          'supervisor',
+          'matchingStatus',
+          'syncedAt',
+        ],
+      },
+      contactTable: {
+        appToken: 'bas_test',
+        tableId: 'tbl_contacts',
+      },
+    }],
+  }).groups[0];
+  let createPayload = null;
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async ({ path }) => {
+          if (path.table_id === 'tbl_source') {
+            return {
+              data: {
+                items: [{
+                  record_id: 'rec_source_1',
+                  fields: {
+                    日报日期: Date.UTC(2026, 6, 1),
+                    日报提交人: [{ id: 'ou_liu', name: '刘喜双' }],
+                    今日工作总结: `1、与技术沟通开发区一中云充值取数逻辑问题，完成数据提取
+2、整理千分卡考核指标，完成填报`,
+                  },
+                }],
+              },
+            };
+          }
+          if (path.table_id === 'tbl_fact') {
+            return { data: { items: [] } };
+          }
+          if (path.table_id === 'tbl_contacts') {
+            return {
+              data: {
+                items: [{
+                  record_id: 'rec_contact',
+                  fields: {
+                    团队名称: '渠道创新建设',
+                    团队成员: [{ id: 'ou_liu', name: '刘喜双' }],
+                    直属上级: [{ id: 'ou_mgr', name: '王经理' }],
+                  },
+                }],
+              },
+            };
+          }
+          return { data: { items: [] } };
+        },
+        create: async (payload) => {
+          createPayload = payload;
+          return {
+            data: {
+              data: {
+                record: { record_id: 'rec_fact_1', fields: payload.data.fields },
+              },
+            },
+          };
+        },
+      },
+    },
+  });
+
+  const result = await service.syncDailyFactRecordsForGroup(group, {
+    now: new Date('2026-07-03T10:10:00.000Z'),
+    timezone: 'Asia/Shanghai',
+    lookbackDays: 7,
+  });
+
+  assert.equal(result.created, 1);
+  assert.equal(result.updated, 0);
+  assert.equal(createPayload.path.table_id, 'tbl_fact');
+  assert.equal(createPayload.data.fields['来源记录ID'], 'rec_source_1');
+  assert.equal(createPayload.data.fields['日报来源'], 'form');
+  assert.equal(createPayload.data.fields['日报日期'], Date.UTC(2026, 6, 1));
+  assert.equal(createPayload.data.fields['所属板块'], '渠道创新建设');
+  assert.deepEqual(createPayload.data.fields['实际日报提交人'], [{ id: 'ou_liu', name: '刘喜双' }]);
+  assert.equal(createPayload.data.fields['日报提交人姓名'], '刘喜双');
+  assert.equal(createPayload.data.fields['今日工作总结'], `1、与技术沟通开发区一中云充值取数逻辑问题，完成数据提取
+2、整理千分卡考核指标，完成填报`);
+  assert.deepEqual(createPayload.data.fields['直属上级'], [{ id: 'ou_mgr', name: '王经理' }]);
+  assert.equal(createPayload.data.fields['匹配状态'], '已匹配');
 });
 
 test('throws when bitable returns a non-zero business code', async () => {

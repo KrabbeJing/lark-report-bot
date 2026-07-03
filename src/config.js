@@ -9,6 +9,7 @@ const DEFAULT_CONFIG_PATH = path.resolve(__dirname, '..', 'config', 'groups.json
 export const DAILY_FIELD_KEYS = {
   reportDate: '日报日期',
   project: '所属板块',
+  agileGroup: '敏捷小组',
   reporterName: '日报提交人',
   workItems: '今日工作总结',
   tomorrowPlanItems: '明日工作计划',
@@ -26,6 +27,28 @@ export const DAILY_TECHNICAL_FIELD_KEYS = {
   source: '来源',
   parseStatus: '解析状态',
   messageTime: '消息时间',
+};
+
+export const DAILY_FACT_FIELD_KEYS = {
+  sourceRecordId: '来源记录ID',
+  messageId: '来源消息ID',
+  chatId: '来源群ID',
+  source: '日报来源',
+  reportDate: '日报日期',
+  project: '所属板块',
+  agileGroup: '敏捷小组',
+  reporterName: '实际日报提交人',
+  reporterNameText: '日报提交人姓名',
+  senderOpenId: '发送人OpenID',
+  workItems: '今日工作总结',
+  tomorrowPlanItems: '明日工作计划',
+  riskItems: '遇到的问题',
+  supervisor: '直属上级',
+  matchingStatus: '匹配状态',
+  parseStatus: '解析状态',
+  rawText: '原始日报文本',
+  messageTime: '消息时间',
+  syncedAt: '同步时间',
 };
 
 export const CONTACT_FIELD_KEYS = {
@@ -129,6 +152,12 @@ export function normalizeConfig(raw) {
     time: raw.dailySupervisorPush?.time || '17:00',
     timezone: raw.dailySupervisorPush?.timezone || timezone,
   };
+  const dailyFactSync = {
+    enabled: raw.dailyFactSync?.enabled === true,
+    time: raw.dailyFactSync?.time || '18:10',
+    timezone: raw.dailyFactSync?.timezone || timezone,
+    lookbackDays: Number(raw.dailyFactSync?.lookbackDays ?? raw.dailyFactSync?.lookback_days ?? 7),
+  };
 
   const groups = (raw.groups || [])
     .filter(group => group.enabled !== false)
@@ -138,6 +167,7 @@ export function normalizeConfig(raw) {
       project: group.project || group.name || group.chatId,
       agileGroup: group.agileGroup || '',
       dailyTable: normalizeTableConfig(group.dailyTable, DAILY_FIELD_KEYS),
+      dailyFactTable: normalizeTableConfig(group.dailyFactTable || group.daily_fact_table, DAILY_FACT_FIELD_KEYS),
       contactTable: normalizeTableConfig(group.contactTable || raw.contactTable, CONTACT_FIELD_KEYS),
       weeklyTable: normalizeTableConfig(group.weeklyTable, WEEKLY_FIELD_KEYS),
       weeklySheet: normalizeWeeklySheetConfig(group.weeklySheet || raw.weeklySheet),
@@ -148,6 +178,7 @@ export function normalizeConfig(raw) {
     botNames,
     weeklyPush,
     dailySupervisorPush,
+    dailyFactSync,
     groups,
   };
 }

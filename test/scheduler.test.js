@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { shouldRunDailySupervisorPush, shouldRunWeeklyPush } from '../src/scheduler.js';
+import { shouldRunDailyFactSync, shouldRunDailySupervisorPush, shouldRunWeeklyPush } from '../src/scheduler.js';
 import { normalizeConfig } from '../src/config.js';
 
 test('runs weekly push at configured Saturday time in Asia Shanghai', () => {
@@ -40,4 +40,19 @@ test('does not run daily supervisor push at wrong time', () => {
 test('daily supervisor push is disabled unless explicitly enabled', () => {
   assert.equal(normalizeConfig({}).dailySupervisorPush.enabled, false);
   assert.equal(normalizeConfig({ dailySupervisorPush: { enabled: true } }).dailySupervisorPush.enabled, true);
+});
+
+test('runs daily fact sync at configured time in Asia Shanghai', () => {
+  const now = new Date('2026-06-29T10:10:00.000Z');
+  assert.equal(shouldRunDailyFactSync(now, {
+    time: '18:10',
+    timezone: 'Asia/Shanghai',
+  }), true);
+});
+
+test('daily fact sync is disabled unless explicitly enabled', () => {
+  assert.equal(normalizeConfig({}).dailyFactSync.enabled, false);
+  const config = normalizeConfig({ dailyFactSync: { enabled: true, lookbackDays: 3 } });
+  assert.equal(config.dailyFactSync.enabled, true);
+  assert.equal(config.dailyFactSync.lookbackDays, 3);
 });

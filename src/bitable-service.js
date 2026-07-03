@@ -1,5 +1,5 @@
 import { WEEKLY_FIELD_KEYS, tableIsConfigured } from './config.js';
-import { DEFAULT_TIMEZONE, formatDateTime, formatYmd, parseYmd } from './date-utils.js';
+import { DEFAULT_TIMEZONE, addDaysToYmd, formatDateTime, formatYmd, parseYmd } from './date-utils.js';
 
 export class BitableService {
   constructor(client) {
@@ -7,19 +7,22 @@ export class BitableService {
   }
 
   buildDailyRecordFields(group, report, context = {}) {
+    const table = context.table || getDailyWriteTable(group);
     const contact = context.contact || {};
     const recordFields = {};
     const setDailyField = (key, value, fieldContext = context) => {
-      if (!shouldWriteDailyField(group.dailyTable, key)) return;
-      setMappedField(recordFields, group.dailyTable, key, value, fieldContext);
+      if (!shouldWriteDailyField(table, key)) return;
+      setMappedField(recordFields, table, key, value, fieldContext);
     };
 
+    setDailyField('sourceRecordId', context.sourceRecordId || '');
     setDailyField('messageId', context.messageId || '');
     setDailyField('chatId', context.chatId || group.chatId || '');
     setDailyField('project', contact.teamName || group.project || '');
     setDailyField('agileGroup', group.agileGroup || '');
     setDailyField('reportDate', report.reportDate || '');
     setDailyField('reporterName', report.reporterName || '');
+    setDailyField('reporterNameText', report.reporterName || '');
     setDailyField('senderOpenId', context.senderOpenId || '');
     setDailyField('rawText', report.rawText || '');
     setDailyField('workItems', report.workSummaryText || report.workItems || []);
@@ -32,24 +35,27 @@ export class BitableService {
     });
     setDailyField('source', context.source || 'chat');
     setDailyField('parseStatus', report.highConfidence ? 'parsed' : 'low_confidence');
+    setDailyField('matchingStatus', context.matchingStatus || contact.matchingStatus || '');
     setDailyField('messageTime', context.messageTimeText || '');
+    setDailyField('syncedAt', context.syncedAtText || '');
 
     return recordFields;
   }
 
   async createDailyReportRecord(group, report, context = {}) {
-    assertTable(group.dailyTable, 'dailyTable');
+    const table = getDailyWriteTable(group);
+    assertTable(table, table === group.dailyFactTable ? 'dailyFactTable' : 'dailyTable');
     const existing = await this.findDailyRecordByMessageId(group, context.messageId);
     if (existing) {
       return { created: false, record: existing };
     }
 
-    const fields = this.buildDailyRecordFields(group, report, context);
-    const res = await withBitableErrorContext('createDailyReportRecord', group.dailyTable, () => (
+    const fields = this.buildDailyRecordFields(group, report, { ...context, table });
+    const res = await withBitableErrorContext('createDailyReportRecord', table, () => (
       this.client.bitable.appTableRecord.create({
         path: {
-          app_token: group.dailyTable.appToken,
-          table_id: group.dailyTable.tableId,
+          app_token: table.appToken,
+          table_id: table.tableId,
         },
         params: {
           user_id_type: 'open_id',
@@ -85,16 +91,18 @@ export class BitableService {
   }
 
   async findDailyRecordByMessageId(group, messageId) {
-    if (!messageId || !tableIsConfigured(group.dailyTable)) return null;
-    const fieldName = group.dailyTable.fields.messageId;
+    const table = getDailyWriteTable(group);
+    if (!messageId || !tableIsConfigured(table)) return null;
+    const fieldName = table.fields.messageId;
     if (!fieldName) return null;
-    const records = await this.listRecords(group.dailyTable, 'dailyTable.findByMessageId', { includeView: false });
+    const records = await this.listRecords(table, 'dailyWriteTable.findByMessageId', { includeView: false });
     return records.find(record => String(record.fields?.[fieldName] || '') === String(messageId)) || null;
   }
 
   async findRecentlyCreatedDailyRecord(group, report) {
-    const records = await this.listRecords(group.dailyTable, 'dailyTable.verifyCreate', { includeView: false });
-    const fields = group.dailyTable.fields;
+    const table = getDailyWriteTable(group);
+    const records = await this.listRecords(table, 'dailyWriteTable.verifyCreate', { includeView: false });
+    const fields = table.fields;
     const expectedDate = String(report.reportDate || '');
     const expectedReporter = String(report.reporterName || '');
     const expectedWorkItems = (report.workItems || []).join('\n');
@@ -110,6 +118,129 @@ export class BitableService {
     }) || null;
   }
 
+  async syncDailyFactRecordsForGroup(group, options = {}) {
+    if (!tableIsConfigured(group.dailyTable) || !tableIsConfigured(group.dailyFactTable)) {
+      return { skipped: true, reason: 'dailyTable or dailyFactTable not configured' };
+    }
+
+    const timezone = options.timezone || DEFAULT_TIMEZONE;
+    const now = options.now || new Date();
+    const endDate = options.endDate || formatYmd(now, timezone);
+    const lookbackDays = Number(options.lookbackDays ?? 7);
+    const startDate = options.startDate || addDaysToYmd(endDate, -Math.max(lookbackDays - 1, 0));
+    const sourceRecords = await this.listRecords(group.dailyTable, 'dailyFactSync.source.list');
+    const targetRecords = await this.listRecords(group.dailyFactTable, 'dailyFactSync.target.list', { includeView: false });
+    const targetBySourceRecordId = indexRecordsByField(targetRecords, group.dailyFactTable.fields.sourceRecordId);
+
+    let created = 0;
+    let updated = 0;
+    let skipped = 0;
+    const errors = [];
+
+    for (const sourceRecord of sourceRecords) {
+      const report = normalizeDailyRecord(sourceRecord, group.dailyTable.fields, group);
+      if (!report.reportDate || report.reportDate < startDate || report.reportDate > endDate) {
+        skipped += 1;
+        continue;
+      }
+
+      try {
+        const result = await this.upsertDailyFactRecordFromSource(group, sourceRecord, report, {
+          now,
+          timezone,
+          existingRecord: targetBySourceRecordId.get(String(sourceRecord.record_id || '')),
+        });
+        if (result.created) created += 1;
+        else if (result.updated) updated += 1;
+      } catch (err) {
+        errors.push({
+          sourceRecordId: sourceRecord.record_id,
+          message: err?.message || String(err),
+        });
+      }
+    }
+
+    return {
+      skipped: false,
+      sourceCount: sourceRecords.length,
+      rangeStart: startDate,
+      rangeEnd: endDate,
+      created,
+      updated,
+      filtered: skipped,
+      errors,
+      existingTargetCount: targetBySourceRecordId.size,
+    };
+  }
+
+  async upsertDailyFactRecordFromSource(group, sourceRecord, report, options = {}) {
+    assertTable(group.dailyFactTable, 'dailyFactTable');
+    const sourceRecordId = sourceRecord.record_id || '';
+    const existing = options.existingRecord || await this.findDailyFactRecordBySourceRecordId(group, sourceRecordId);
+    let contact = null;
+    try {
+      contact = await this.findTeamContact(group, {
+        reporterName: report.reporterName,
+        senderOpenId: report.senderOpenId,
+      });
+    } catch (err) {
+      console.warn('[daily-fact-sync] contact lookup failed; continue unmatched', {
+        sourceRecordId,
+        reporterName: report.reporterName,
+        code: err?.response?.data?.code || err?.code,
+        msg: err?.response?.data?.msg || err?.message,
+      });
+    }
+    const fields = this.buildDailyRecordFields(group, report, {
+      table: group.dailyFactTable,
+      sourceRecordId,
+      source: 'form',
+      senderOpenId: report.senderOpenId,
+      contact,
+      matchingStatus: contact?.matchingStatus || '未匹配',
+      syncedAtText: formatDateTime(options.now || new Date(), options.timezone || DEFAULT_TIMEZONE),
+    });
+
+    if (existing) {
+      const res = await withBitableErrorContext('dailyFactSync.target.update', group.dailyFactTable, () => (
+        this.client.bitable.appTableRecord.update({
+          path: {
+            app_token: group.dailyFactTable.appToken,
+            table_id: group.dailyFactTable.tableId,
+            record_id: existing.record_id,
+          },
+          params: {
+            user_id_type: 'open_id',
+          },
+          data: { fields },
+        })
+      ));
+      return { updated: true, record: extractRecordFromResponse(res), fields };
+    }
+
+    const res = await withBitableErrorContext('dailyFactSync.target.create', group.dailyFactTable, () => (
+      this.client.bitable.appTableRecord.create({
+        path: {
+          app_token: group.dailyFactTable.appToken,
+          table_id: group.dailyFactTable.tableId,
+        },
+        params: {
+          user_id_type: 'open_id',
+        },
+        data: { fields },
+      })
+    ));
+    return { created: true, record: extractRecordFromResponse(res), fields };
+  }
+
+  async findDailyFactRecordBySourceRecordId(group, sourceRecordId) {
+    if (!sourceRecordId || !tableIsConfigured(group.dailyFactTable)) return null;
+    const fieldName = group.dailyFactTable.fields.sourceRecordId;
+    if (!fieldName) return null;
+    const records = await this.listRecords(group.dailyFactTable, 'dailyFactSync.target.findBySourceRecordId', { includeView: false });
+    return records.find(record => String(record.fields?.[fieldName] || '') === String(sourceRecordId)) || null;
+  }
+
   async listDailyReportsForWeek(group, weekStart, weekEnd) {
     return this.listDailyReportsForRange(group, weekStart, weekEnd);
   }
@@ -119,9 +250,10 @@ export class BitableService {
   }
 
   async listAllDailyReportsForRange(group, startDate, endDate) {
-    assertTable(group.dailyTable, 'dailyTable');
-    const records = await this.listRecords(group.dailyTable, 'dailyTable.listAll');
-    const fields = group.dailyTable.fields;
+    const table = getDailyReadTable(group);
+    assertTable(table, table === group.dailyFactTable ? 'dailyFactTable' : 'dailyTable');
+    const records = await this.listRecords(table, 'dailyTable.listAll');
+    const fields = table.fields;
     return records
       .filter(record => {
         const reportDate = normalizeDateFieldValue(record.fields?.[fields.reportDate]);
@@ -131,9 +263,10 @@ export class BitableService {
   }
 
   async listDailyReportsForRange(group, startDate, endDate) {
-    assertTable(group.dailyTable, 'dailyTable');
-    const records = await this.listRecords(group.dailyTable, 'dailyTable.listRange');
-    const fields = group.dailyTable.fields;
+    const table = getDailyReadTable(group);
+    assertTable(table, table === group.dailyFactTable ? 'dailyFactTable' : 'dailyTable');
+    const records = await this.listRecords(table, 'dailyTable.listRange');
+    const fields = table.fields;
     return records
       .filter(record => {
         const recordChatId = normalizeFieldValue(fields.chatId ? record.fields?.[fields.chatId] : '');
@@ -154,12 +287,7 @@ export class BitableService {
     const records = await this.listRecords(group.contactTable, 'contactTable.findTeamContact');
     const fields = group.contactTable.fields;
     const contacts = records.map(record => normalizeContactRecord(record, fields));
-    return contacts.find(contact => {
-      const haystack = [contact.teamMember, contact.teamMemberId, contact.supervisor, contact.supervisorOpenId]
-        .filter(Boolean)
-        .join('\n');
-      return (reporterName && haystack.includes(reporterName)) || (senderOpenId && haystack.includes(senderOpenId));
-    }) || null;
+    return findBestContact(contacts, { reporterName, senderOpenId });
   }
 
   async upsertWeeklySummary(group, summary, context = {}) {
@@ -241,6 +369,14 @@ function assertTable(table, name) {
   }
 }
 
+function getDailyWriteTable(group) {
+  return tableIsConfigured(group.dailyFactTable) ? group.dailyFactTable : group.dailyTable;
+}
+
+function getDailyReadTable(group) {
+  return tableIsConfigured(group.dailyFactTable) ? group.dailyFactTable : group.dailyTable;
+}
+
 async function withBitableErrorContext(operation, table, fn) {
   try {
     const res = await fn();
@@ -296,7 +432,7 @@ function normalizeDailyRecord(record, fields, group) {
     chatId: normalizeFieldValue(fields.chatId ? f[fields.chatId] : ''),
     project: normalizeFieldValue(fields.project ? f[fields.project] : '') || group.project,
     agileGroup: normalizeFieldValue(fields.agileGroup ? f[fields.agileGroup] : '') || group.agileGroup,
-    reportDate: normalizeFieldValue(f[fields.reportDate]),
+    reportDate: normalizeDateFieldValue(f[fields.reportDate]),
     reporterName: reporter.name || normalizeFieldValue(f[fields.reporterName]),
     senderOpenId: normalizeFieldValue(fields.senderOpenId ? f[fields.senderOpenId] : '') || reporter.id,
     supervisor: supervisor.name,
@@ -418,6 +554,46 @@ function normalizeContactRecord(record, fields) {
   };
 }
 
+function findBestContact(contacts, { reporterName = '', senderOpenId = '' } = {}) {
+  const exactOpenId = senderOpenId
+    ? contacts.find(contact => contact.teamMemberId === senderOpenId)
+    : null;
+  if (exactOpenId) {
+    return {
+      ...exactOpenId,
+      matchMethod: 'open_id',
+      matchingStatus: '已匹配',
+    };
+  }
+
+  const exactName = reporterName
+    ? contacts.find(contact => contact.teamMember === reporterName)
+    : null;
+  if (exactName) {
+    return {
+      ...exactName,
+      matchMethod: 'name',
+      matchingStatus: '姓名匹配',
+    };
+  }
+
+  const loose = contacts.find(contact => {
+    const haystack = [contact.teamMember, contact.teamMemberId, contact.supervisor, contact.supervisorOpenId]
+      .filter(Boolean)
+      .join('\n');
+    return (reporterName && haystack.includes(reporterName)) || (senderOpenId && haystack.includes(senderOpenId));
+  });
+  if (loose) {
+    return {
+      ...loose,
+      matchMethod: 'loose',
+      matchingStatus: '姓名匹配',
+    };
+  }
+
+  return null;
+}
+
 function normalizePersonValue(value) {
   if (Array.isArray(value)) {
     const first = value[0] || {};
@@ -499,4 +675,14 @@ function summarizeBitableResponse(res) {
 
 function objectKeys(value) {
   return value && typeof value === 'object' ? Object.keys(value).slice(0, 12) : [];
+}
+
+function indexRecordsByField(records, fieldName) {
+  const index = new Map();
+  if (!fieldName) return index;
+  for (const record of records || []) {
+    const value = normalizeFieldValue(record.fields?.[fieldName]);
+    if (value) index.set(String(value), record);
+  }
+  return index;
 }

@@ -66,6 +66,39 @@ export function startDailySupervisorScheduler({ config, onRun, logger = console,
   };
 }
 
+export function startDailyFactSyncScheduler({ config, onRun, logger = console, intervalMs = 60_000 }) {
+  const schedule = config.dailyFactSync;
+  if (!schedule?.enabled) {
+    logger.log('[scheduler] daily fact sync disabled');
+    return { stop() {} };
+  }
+
+  const runKeys = new Set();
+  const tick = async () => {
+    const now = new Date();
+    if (!shouldRunDailyFactSync(now, schedule)) return;
+
+    const runKey = `${formatYmd(now, schedule.timezone)}-${schedule.time}`;
+    if (runKeys.has(runKey)) return;
+    runKeys.add(runKey);
+
+    logger.log(`[scheduler] daily fact sync triggered: ${runKey}`);
+    try {
+      await onRun(now);
+    } catch (err) {
+      logger.error('[scheduler] daily fact sync failed', err);
+    }
+  };
+
+  const timer = setInterval(tick, intervalMs);
+  tick();
+  return {
+    stop() {
+      clearInterval(timer);
+    },
+  };
+}
+
 export function shouldRunWeeklyPush(now, schedule) {
   const parts = getLocalParts(now, schedule.timezone || 'Asia/Shanghai');
   const [hour, minute] = String(schedule.time || '10:00').split(':').map(Number);
@@ -75,8 +108,16 @@ export function shouldRunWeeklyPush(now, schedule) {
 }
 
 export function shouldRunDailySupervisorPush(now, schedule) {
+  return shouldRunDailySchedule(now, schedule, '17:00');
+}
+
+export function shouldRunDailyFactSync(now, schedule) {
+  return shouldRunDailySchedule(now, schedule, '18:10');
+}
+
+function shouldRunDailySchedule(now, schedule, defaultTime) {
   const parts = getLocalParts(now, schedule.timezone || 'Asia/Shanghai');
-  const [hour, minute] = String(schedule.time || '17:00').split(':').map(Number);
+  const [hour, minute] = String(schedule.time || defaultTime).split(':').map(Number);
   return parts.hour === hour && parts.minute === minute;
 }
 
