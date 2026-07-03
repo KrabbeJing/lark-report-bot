@@ -47,6 +47,7 @@
         },
         "writeFields": ["reportDate", "reporterName", "workItems", "supervisor"]
       },
+      "chatDailyRawTable": null,
       "dailyFactTable": null,
       "contactTable": {
         "appToken": "Ic8FbuOr2aYeBasWrelcFw6enxe",

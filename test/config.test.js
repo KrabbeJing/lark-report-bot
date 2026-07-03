@@ -24,3 +24,45 @@ test('normalizes weeklySheet from wiki url', () => {
   assert.equal(group.weeklySheet.wikiNodeToken, 'BaTOwZsM6ikYjJkhSqOc8e0Ynrh');
   assert.equal(group.weeklySheet.templateSheetId, '4dcda2');
 });
+
+test('normalizes chat raw and daily fact table configs', () => {
+  const config = normalizeConfig({
+    dailyFactSync: {
+      enabled: true,
+      time: '18:10',
+      lookbackDays: 5,
+    },
+    groups: [{
+      chatId: 'oc_test',
+      dailyTable: {
+        appToken: 'bas_test',
+        tableId: 'tbl_daily',
+      },
+      chatDailyRawTable: {
+        appToken: 'bas_test',
+        tableId: 'tbl_chat_raw',
+        fields: {
+          messageId: '消息ID',
+          rawText: '原始消息文本',
+        },
+      },
+      dailyFactTable: {
+        appToken: 'bas_test',
+        tableId: 'tbl_fact',
+        fields: {
+          factKey: '事实唯一键',
+          reporterNameText: '日报提交人姓名',
+        },
+      },
+    }],
+  });
+
+  const group = config.groups[0];
+  assert.equal(config.dailyFactSync.enabled, true);
+  assert.equal(config.dailyFactSync.lookbackDays, 5);
+  assert.equal(group.chatDailyRawTable.tableId, 'tbl_chat_raw');
+  assert.equal(group.chatDailyRawTable.fields.messageId, '消息ID');
+  assert.equal(group.chatDailyRawTable.fields.reportDateRange, '日报日期范围');
+  assert.equal(group.dailyFactTable.fields.factKey, '事实唯一键');
+  assert.equal(group.dailyFactTable.fields.contentFingerprint, '内容指纹');
+});
