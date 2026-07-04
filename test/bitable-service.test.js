@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { BitableService } from '../src/bitable-service.js';
 import { normalizeConfig } from '../src/config.js';
+import { buildContentFingerprint } from '../src/daily-record-utils.js';
 
 function createGroup() {
   return normalizeConfig({
@@ -143,6 +144,293 @@ test('creates chat daily records in fact table when configured', async () => {
   assert.equal(createPayload.data.fields['来源消息ID'], 'om_1');
   assert.deepEqual(createPayload.data.fields['实际日报提交人'], [{ id: 'ou_liu', name: '刘喜双' }]);
   assert.equal(createPayload.data.fields['今日工作总结'], '1、完成数据提取');
+});
+
+test('creates chat raw daily record and marks previous version historical', async () => {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      dailyTable: { appToken: 'bas', tableId: 'tbl_daily' },
+      chatDailyRawTable: {
+        appToken: 'bas',
+        tableId: 'tbl_chat_raw',
+        fields: {
+          messageId: '消息ID',
+          chatId: '群ID',
+          senderOpenId: '发送人OpenID',
+          reporterName: '标题姓名',
+          reportDateRange: '日报日期范围',
+          reportDates: '拆分日期列表',
+          rawText: '原始消息文本',
+          workSummaryText: '解析后工作总结',
+          contentFingerprint: '内容指纹',
+          rawRecordStatus: '原始记录状态',
+        },
+      },
+    }],
+  }).groups[0];
+
+  const updates = [];
+  let createPayload = null;
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async () => ({
+          data: {
+            items: [{
+              record_id: 'rec_old',
+              fields: {
+                发送人OpenID: 'ou_liu',
+                拆分日期列表: '2026-07-01',
+                原始记录状态: '主版本',
+              },
+            }],
+          },
+        }),
+        update: async (payload) => {
+          updates.push(payload);
+          return { data: { data: { record: { record_id: payload.path.record_id } } } };
+        },
+        create: async (payload) => {
+          createPayload = payload;
+          return { data: { data: { record: { record_id: 'rec_new', fields: payload.data.fields } } } };
+        },
+      },
+    },
+  });
+
+  const result = await service.createChatDailyRawRecord(group, {
+    reporterName: '刘喜双',
+    reportDate: '2026-07-01',
+    reportDates: ['2026-07-01'],
+    dateRange: '2026-07-01',
+    reportType: '单日',
+    rawText: '刘喜双7.1工作日报\n1、完成数据提取',
+    workSummaryText: '1、完成数据提取',
+    workItems: ['完成数据提取'],
+  }, {
+    messageId: 'om_new',
+    chatId: 'oc_test',
+    senderOpenId: 'ou_liu',
+  });
+
+  assert.equal(result.created, true);
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].path.record_id, 'rec_old');
+  assert.equal(updates[0].data.fields['原始记录状态'], '历史版本');
+  assert.equal(createPayload.data.fields['消息ID'], 'om_new');
+  assert.equal(createPayload.data.fields['原始记录状态'], '主版本');
+  assert.equal(createPayload.data.fields['拆分日期列表'], '2026-07-01');
+  assert.equal(createPayload.data.fields['内容指纹'], buildContentFingerprint({
+    workItems: '1、完成数据提取',
+  }));
+  assert.equal(result.historicalUpdated, 1);
+});
+
+test('does not mark blank-identity chat raw rows historical', async () => {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      dailyTable: { appToken: 'bas', tableId: 'tbl_daily' },
+      chatDailyRawTable: {
+        appToken: 'bas',
+        tableId: 'tbl_chat_raw',
+        fields: {
+          messageId: '消息ID',
+          senderOpenId: '发送人OpenID',
+          reporterName: '标题姓名',
+          reportDates: '拆分日期列表',
+          rawRecordStatus: '原始记录状态',
+        },
+      },
+    }],
+  }).groups[0];
+
+  const updates = [];
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async () => ({
+          data: {
+            items: [{
+              record_id: 'rec_blank',
+              fields: {
+                发送人OpenID: '',
+                标题姓名: '',
+                拆分日期列表: '2026-07-01',
+                原始记录状态: '主版本',
+              },
+            }],
+          },
+        }),
+        create: async (payload) => (
+          { data: { data: { record: { record_id: 'rec_new', fields: payload.data.fields } } } }
+        ),
+        update: async (payload) => {
+          updates.push(payload);
+          return { data: { data: { record: { record_id: payload.path.record_id } } } };
+        },
+      },
+    },
+  });
+
+  const result = await service.createChatDailyRawRecord(group, {
+    reportDate: '2026-07-01',
+    reportDates: ['2026-07-01'],
+    workSummaryText: '1、完成数据提取',
+  }, {
+    messageId: 'om_new',
+  });
+
+  assert.equal(result.created, true);
+  assert.equal(result.historicalUpdated, 0);
+  assert.equal(updates.length, 0);
+});
+
+test('does not update chat raw history when create fails', async () => {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      dailyTable: { appToken: 'bas', tableId: 'tbl_daily' },
+      chatDailyRawTable: {
+        appToken: 'bas',
+        tableId: 'tbl_chat_raw',
+        fields: {
+          messageId: '消息ID',
+          senderOpenId: '发送人OpenID',
+          reporterName: '标题姓名',
+          reportDates: '拆分日期列表',
+          rawRecordStatus: '原始记录状态',
+        },
+      },
+    }],
+  }).groups[0];
+
+  let listCalled = false;
+  let updateCalled = false;
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async () => {
+          listCalled = true;
+          return { data: { items: [] } };
+        },
+        create: async () => {
+          throw new Error('create failed');
+        },
+        update: async () => {
+          updateCalled = true;
+        },
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => service.createChatDailyRawRecord(group, {
+      reporterName: '刘喜双',
+      reportDate: '2026-07-01',
+      reportDates: ['2026-07-01'],
+      workSummaryText: '1、完成数据提取',
+    }, {
+      messageId: 'om_new',
+      senderOpenId: 'ou_liu',
+    }),
+    /create failed/,
+  );
+
+  assert.equal(listCalled, false);
+  assert.equal(updateCalled, false);
+});
+
+test('marks only overlapping main chat raw records historical for multi-day report', async () => {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      dailyTable: { appToken: 'bas', tableId: 'tbl_daily' },
+      chatDailyRawTable: {
+        appToken: 'bas',
+        tableId: 'tbl_chat_raw',
+        fields: {
+          messageId: '消息ID',
+          senderOpenId: '发送人OpenID',
+          reporterName: '标题姓名',
+          reportDates: '拆分日期列表',
+          rawRecordStatus: '原始记录状态',
+        },
+      },
+    }],
+  }).groups[0];
+
+  const updates = [];
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async () => ({
+          data: {
+            items: [
+              {
+                record_id: 'rec_new',
+                fields: {
+                  消息ID: 'om_new',
+                  发送人OpenID: 'ou_liu',
+                  标题姓名: '刘喜双',
+                  拆分日期列表: '2026-07-01\n2026-07-02',
+                  原始记录状态: '主版本',
+                },
+              },
+              {
+                record_id: 'rec_overlap',
+                fields: {
+                  消息ID: 'om_old_1',
+                  发送人OpenID: 'ou_liu',
+                  拆分日期列表: '2026-07-02',
+                  原始记录状态: '主版本',
+                },
+              },
+              {
+                record_id: 'rec_non_overlap',
+                fields: {
+                  消息ID: 'om_old_2',
+                  发送人OpenID: 'ou_liu',
+                  拆分日期列表: '2026-07-03',
+                  原始记录状态: '主版本',
+                },
+              },
+              {
+                record_id: 'rec_history',
+                fields: {
+                  消息ID: 'om_old_3',
+                  发送人OpenID: 'ou_liu',
+                  拆分日期列表: '2026-07-01',
+                  原始记录状态: '历史版本',
+                },
+              },
+            ],
+          },
+        }),
+        create: async (payload) => (
+          { data: { data: { record: { record_id: 'rec_new', fields: payload.data.fields } } } }
+        ),
+        update: async (payload) => {
+          updates.push(payload);
+          return { data: { data: { record: { record_id: payload.path.record_id } } } };
+        },
+      },
+    },
+  });
+
+  const result = await service.createChatDailyRawRecord(group, {
+    reporterName: '刘喜双',
+    reportDate: '2026-07-01',
+    reportDates: ['2026-07-01', '2026-07-02'],
+    workSummaryText: '1、完成数据提取',
+  }, {
+    messageId: 'om_new',
+    senderOpenId: 'ou_liu',
+  });
+
+  assert.equal(result.historicalUpdated, 1);
+  assert.deepEqual(updates.map(update => update.path.record_id), ['rec_overlap']);
 });
 
 test('extracts created record from axios-wrapped bitable response', async () => {

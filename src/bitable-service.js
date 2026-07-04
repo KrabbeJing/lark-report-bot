@@ -1,5 +1,6 @@
 import { WEEKLY_FIELD_KEYS, tableIsConfigured } from './config.js';
 import { DEFAULT_TIMEZONE, addDaysToYmd, formatDateTime, formatYmd, parseYmd } from './date-utils.js';
+import { buildContentFingerprint } from './daily-record-utils.js';
 
 export class BitableService {
   constructor(client) {
@@ -97,6 +98,67 @@ export class BitableService {
       responseSummary,
       verifiedOutsideView,
     };
+  }
+
+  async createChatDailyRawRecord(group, report, context = {}) {
+    assertTable(group.chatDailyRawTable, 'chatDailyRawTable');
+    const fields = buildChatRawFields(group.chatDailyRawTable, report, context);
+    const res = await withBitableErrorContext('chatDailyRaw.create', group.chatDailyRawTable, () => (
+      this.client.bitable.appTableRecord.create({
+        path: {
+          app_token: group.chatDailyRawTable.appToken,
+          table_id: group.chatDailyRawTable.tableId,
+        },
+        params: { user_id_type: 'open_id' },
+        data: { fields },
+      })
+    ));
+    const record = extractRecordFromResponse(res);
+    const historical = await this.markPreviousChatRawRecordsHistorical(group, report, {
+      ...context,
+      excludeRecordId: getRecordId(record),
+      excludeMessageId: context.messageId,
+    });
+    return { created: true, record, fields, historicalUpdated: historical.updated };
+  }
+
+  async markPreviousChatRawRecordsHistorical(group, report, context = {}) {
+    if (!tableIsConfigured(group.chatDailyRawTable)) return { updated: 0 };
+    const records = await this.listRecords(group.chatDailyRawTable, 'chatDailyRaw.findPrevious', { includeView: false });
+    const fields = group.chatDailyRawTable.fields;
+    const dates = new Set((report.reportDates || [report.reportDate]).map(date => String(date || '').trim()).filter(Boolean));
+    const incomingSender = String(context.senderOpenId || '').trim();
+    const incomingName = String(report.reporterName || '').trim();
+    const excludeRecordId = String(context.excludeRecordId || '').trim();
+    const excludeMessageId = String(context.excludeMessageId || '').trim();
+    const candidates = records.filter(record => {
+      if (excludeRecordId && String(record.record_id || '') === excludeRecordId) return false;
+      const f = record.fields || {};
+      const recordMessageId = normalizeFieldValue(fields.messageId ? f[fields.messageId] : '');
+      if (excludeMessageId && recordMessageId === excludeMessageId) return false;
+      const recordSender = normalizeFieldValue(f[fields.senderOpenId]);
+      const recordName = normalizeFieldValue(f[fields.reporterName]);
+      const sameSender = Boolean(incomingSender && recordSender && recordSender === incomingSender);
+      const sameName = Boolean(incomingName && recordName && recordName === incomingName);
+      const recordDates = splitMultiline(f[fields.reportDates]);
+      const overlaps = recordDates.some(date => dates.has(date));
+      const isMain = normalizeFieldValue(f[fields.rawRecordStatus]) === '主版本';
+      return overlaps && isMain && (sameSender || sameName);
+    });
+
+    for (const record of candidates) {
+      await withBitableErrorContext('chatDailyRaw.markHistorical', group.chatDailyRawTable, () => (
+        this.client.bitable.appTableRecord.update({
+          path: {
+            app_token: group.chatDailyRawTable.appToken,
+            table_id: group.chatDailyRawTable.tableId,
+            record_id: record.record_id,
+          },
+          data: { fields: { [fields.rawRecordStatus]: '历史版本' } },
+        })
+      ));
+    }
+    return { updated: candidates.length };
   }
 
   async findDailyRecordByMessageId(group, messageId) {
@@ -454,6 +516,29 @@ function normalizeDailyRecord(record, fields, group) {
     parseStatus: normalizeFieldValue(fields.parseStatus ? f[fields.parseStatus] : ''),
     messageTime: normalizeFieldValue(fields.messageTime ? f[fields.messageTime] : ''),
   };
+}
+
+function buildChatRawFields(table, report, context = {}) {
+  const recordFields = {};
+  setMappedField(recordFields, table, 'messageId', context.messageId || '', context);
+  setMappedField(recordFields, table, 'chatId', context.chatId || '', context);
+  setMappedField(recordFields, table, 'chatName', context.chatName || '', context);
+  setMappedField(recordFields, table, 'senderOpenId', context.senderOpenId || '', context);
+  setMappedField(recordFields, table, 'reporterName', report.reporterName || '', context);
+  setMappedField(recordFields, table, 'reportDateRange', report.dateRange || report.reportDate || '', context);
+  setMappedField(recordFields, table, 'reportDates', report.reportDates || [report.reportDate], context);
+  setMappedField(recordFields, table, 'rawText', report.rawText || '', context);
+  setMappedField(recordFields, table, 'workSummaryText', report.workSummaryText || report.workItems || [], context);
+  setMappedField(recordFields, table, 'contentFingerprint', buildContentFingerprint({
+    workItems: report.workSummaryText || report.workItems || '',
+    tomorrowPlanItems: report.tomorrowPlanItems || '',
+    riskItems: report.riskItems || '',
+  }), context);
+  setMappedField(recordFields, table, 'messageTime', context.messageTimeText || '', context);
+  setMappedField(recordFields, table, 'receivedAt', context.receivedAtText || formatDateTime(new Date(), DEFAULT_TIMEZONE), context);
+  setMappedField(recordFields, table, 'parseStatus', report.highConfidence ? '已解析' : '低置信度', context);
+  setMappedField(recordFields, table, 'rawRecordStatus', '主版本', context);
+  return recordFields;
 }
 
 function buildWeeklyFields(group, summary, context = {}) {
