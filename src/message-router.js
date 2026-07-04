@@ -1,6 +1,7 @@
 import { tableIsConfigured, findGroupByChatId } from './config.js';
 import { formatDateTime, coerceLarkTimestamp } from './date-utils.js';
 import { parseDailyReportText } from './daily-report-parser.js';
+import { buildFactKey } from './daily-record-utils.js';
 import { generateWeeklyReportForGroup } from './weekly-reporter.js';
 import { getMessageText, getSenderOpenId, isMentionedBot, isWeeklyCommand, stripBotMentions } from './message-utils.js';
 import { extractSheetRef, handleSheetPosterRequest } from './sheet-poster.js';
@@ -81,35 +82,97 @@ export async function handleMessageEvent({
       }
       return;
     }
-    await ensureDailyTable(group);
 
+    const senderOpenId = getSenderOpenId(data);
     const contact = typeof bitable.findTeamContact === 'function'
       ? await findTeamContactSafely(bitable, group, {
         reporterName: parsed.reporterName,
-        senderOpenId: getSenderOpenId(data),
+        senderOpenId,
       })
       : null;
 
-    const result = await bitable.createDailyReportRecord(group, parsed, {
+    const context = {
       messageId: message.message_id,
       chatId: message.chat_id,
-      senderOpenId: getSenderOpenId(data),
+      senderOpenId,
       source: mentioned ? 'mention_chat' : 'chat',
       messageTimeText: formatDateTime(messageTime, config.timezone),
       contact,
-    });
+    };
 
-    console.log('[daily-report] record write result', {
-      messageId: message.message_id,
-      chatId: message.chat_id,
-      reporterName: parsed.reporterName,
-      reportDate: parsed.reportDate,
-      created: result.created,
-      recordId: result.record?.record_id || result.record?.recordId || '',
-      verifiedOutsideView: result.verifiedOutsideView || false,
-      responseSummary: result.responseSummary,
-      workItemCount: parsed.workItems.length,
-    });
+    const useRawFactTables = tableIsConfigured(group.chatDailyRawTable)
+      && tableIsConfigured(group.dailyFactTable)
+      && typeof bitable.createChatDailyRawRecord === 'function'
+      && typeof bitable.upsertDailyFactRecord === 'function';
+
+    let result;
+    if (useRawFactTables) {
+      const rawResult = await bitable.createChatDailyRawRecord(group, parsed, context);
+      const rawRecordId = rawResult.record?.record_id || rawResult.record?.recordId || '';
+      const reportDates = (parsed.reportDates?.length ? parsed.reportDates : [parsed.reportDate])
+        .map(date => String(date || '').trim())
+        .filter(Boolean);
+      const factResults = [];
+
+      for (const reportDate of reportDates) {
+        const reporterName = contact?.teamMember || parsed.reporterName;
+        const memberOpenId = contact?.teamMemberId || senderOpenId;
+        const factInput = {
+          factKey: buildFactKey({
+            openId: memberOpenId,
+            name: reporterName,
+            reportDate,
+          }),
+          reportDate,
+          reporterName,
+          memberOpenId,
+          workSummaryText: parsed.workSummaryText,
+          tomorrowPlanItems: parsed.tomorrowPlanItems,
+          riskItems: parsed.riskItems,
+          source: 'chat',
+          messageId: message.message_id,
+          sourceRecordId: rawRecordId,
+          rawRecordId,
+          reportType: parsed.reportType,
+          dateRange: parsed.dateRange,
+          contact,
+        };
+        factResults.push(await bitable.upsertDailyFactRecord(group, factInput));
+      }
+
+      result = {
+        created: rawResult.created || factResults.some(factResult => factResult.created),
+        record: rawResult.record || factResults[0]?.record,
+      };
+
+      console.log('[daily-report] chat raw/fact write result', {
+        messageId: message.message_id,
+        chatId: message.chat_id,
+        reporterName: parsed.reporterName,
+        reportDate: parsed.reportDate,
+        reportDates,
+        rawCreated: rawResult.created,
+        rawRecordId,
+        factResultCount: factResults.length,
+        factRecordIds: factResults.map(factResult => factResult.record?.record_id || factResult.record?.recordId || ''),
+        workItemCount: parsed.workItems.length,
+      });
+    } else {
+      await ensureDailyTable(group);
+      result = await bitable.createDailyReportRecord(group, parsed, context);
+
+      console.log('[daily-report] record write result', {
+        messageId: message.message_id,
+        chatId: message.chat_id,
+        reporterName: parsed.reporterName,
+        reportDate: parsed.reportDate,
+        created: result.created,
+        recordId: result.record?.record_id || result.record?.recordId || '',
+        verifiedOutsideView: result.verifiedOutsideView || false,
+        responseSummary: result.responseSummary,
+        workItemCount: parsed.workItems.length,
+      });
+    }
 
     if (mentioned) {
       const verb = result.created ? '已收集' : '这条日报已收集过';

@@ -145,3 +145,151 @@ test('continues daily report collection when contact lookup is forbidden', async
   assert.equal(calls[0].context.contact, null);
   assert.equal(calls[0].parsed.reporterName, '王治坤');
 });
+
+test('writes configured chat reports to raw table and fact table', async () => {
+  const config = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      project: '支付平台',
+      dailyTable: { appToken: 'bas', tableId: 'tbl_daily' },
+      chatDailyRawTable: { appToken: 'bas', tableId: 'tbl_chat_raw' },
+      dailyFactTable: { appToken: 'bas', tableId: 'tbl_fact' },
+    }],
+  });
+  const calls = [];
+
+  await handleMessageEvent({
+    data: {
+      sender: { sender_id: { open_id: 'ou_liu' } },
+      message: {
+        message_id: 'om_1',
+        chat_id: 'oc_test',
+        chat_type: 'group',
+        message_type: 'text',
+        create_time: String(new Date('2026-07-01T00:30:00+08:00').getTime()),
+        content: JSON.stringify({
+          text: `刘喜双6.30工作日报
+1、补发昨日数据提取进展`,
+        }),
+      },
+    },
+    client: {},
+    messenger: { replyText: async () => {} },
+    bitable: {
+      findTeamContact: async () => ({ teamMember: '刘喜双', teamMemberId: 'ou_liu', matchingStatus: '已匹配' }),
+      createChatDailyRawRecord: async (group, parsed, context) => {
+        calls.push({ type: 'raw', group, parsed, context });
+        return { created: true, record: { record_id: 'rec_raw' } };
+      },
+      upsertDailyFactRecord: async (group, input) => {
+        calls.push({ type: 'fact', group, input });
+        return { created: true, record: { record_id: 'rec_fact' } };
+      },
+    },
+    config,
+    aiProvider: {},
+    outDir: '/tmp',
+  });
+
+  assert.equal(calls[0].type, 'raw');
+  assert.equal(calls[0].parsed.reportDate, '2026-06-30');
+  assert.equal(calls[1].type, 'fact');
+  assert.equal(calls[1].input.factKey, 'open_id:ou_liu:2026-06-30');
+  assert.equal(calls[1].input.source, 'chat');
+});
+
+test('writes raw and fact records without legacy daily table configured', async () => {
+  const config = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      project: '支付平台',
+      dailyTable: null,
+      chatDailyRawTable: { appToken: 'bas', tableId: 'tbl_chat_raw' },
+      dailyFactTable: { appToken: 'bas', tableId: 'tbl_fact' },
+    }],
+  });
+  const calls = [];
+
+  await handleMessageEvent({
+    data: {
+      sender: { sender_id: { open_id: 'ou_liu' } },
+      message: {
+        message_id: 'om_4',
+        chat_id: 'oc_test',
+        chat_type: 'group',
+        message_type: 'text',
+        create_time: String(new Date('2026-07-01T00:30:00+08:00').getTime()),
+        content: JSON.stringify({
+          text: `刘喜双6.30工作日报
+1、补发昨日数据提取进展`,
+        }),
+      },
+    },
+    client: {},
+    messenger: { replyText: async () => {} },
+    bitable: {
+      createChatDailyRawRecord: async (group, parsed, context) => {
+        calls.push({ type: 'raw', group, parsed, context });
+        return { created: true, record: { record_id: 'rec_raw' } };
+      },
+      upsertDailyFactRecord: async (group, input) => {
+        calls.push({ type: 'fact', group, input });
+        return { created: true, record: { record_id: 'rec_fact' } };
+      },
+    },
+    config,
+    aiProvider: {},
+    outDir: '/tmp',
+  });
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].type, 'raw');
+  assert.equal(calls[1].type, 'fact');
+  assert.equal(calls[1].input.factKey, 'open_id:ou_liu:2026-06-30');
+});
+
+test('writes one fact record per report date with raw source record id', async () => {
+  const config = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      project: '支付平台',
+      chatDailyRawTable: { appToken: 'bas', tableId: 'tbl_chat_raw' },
+      dailyFactTable: { appToken: 'bas', tableId: 'tbl_fact' },
+    }],
+  });
+  const factInputs = [];
+
+  await handleMessageEvent({
+    data: {
+      sender: { sender_id: { open_id: 'ou_liu' } },
+      message: {
+        message_id: 'om_5',
+        chat_id: 'oc_test',
+        chat_type: 'group',
+        message_type: 'text',
+        create_time: String(new Date('2026-07-01T00:30:00+08:00').getTime()),
+        content: JSON.stringify({
+          text: `刘喜双 6.29-6.30 工作日报
+1、补发两日数据提取进展`,
+        }),
+      },
+    },
+    client: {},
+    messenger: { replyText: async () => {} },
+    bitable: {
+      createChatDailyRawRecord: async () => ({ created: true, record: { record_id: 'rec_raw' } }),
+      upsertDailyFactRecord: async (_group, input) => {
+        factInputs.push(input);
+        return { created: true, record: { record_id: `rec_fact_${factInputs.length}` } };
+      },
+    },
+    config,
+    aiProvider: {},
+    outDir: '/tmp',
+  });
+
+  assert.equal(factInputs.length, 2);
+  assert.deepEqual(factInputs.map(input => input.reportDate), ['2026-06-29', '2026-06-30']);
+  assert.deepEqual(factInputs.map(input => input.sourceRecordId), ['rec_raw', 'rec_raw']);
+  assert.deepEqual(factInputs.map(input => input.source), ['chat', 'chat']);
+});
