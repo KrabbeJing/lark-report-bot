@@ -9,6 +9,8 @@ export class BitableService {
   buildDailyRecordFields(group, report, context = {}) {
     const table = context.table || getDailyWriteTable(group);
     const contact = context.contact || {};
+    const reporterDisplayName = contact.teamMember || report.reporterName || '';
+    const reporterOpenId = contact.teamMemberId || context.senderOpenId || '';
     const recordFields = {};
     const setDailyField = (key, value, fieldContext = context) => {
       if (!shouldWriteDailyField(table, key)) return;
@@ -19,11 +21,14 @@ export class BitableService {
     setDailyField('messageId', context.messageId || '');
     setDailyField('chatId', context.chatId || group.chatId || '');
     setDailyField('project', contact.teamName || group.project || '');
-    setDailyField('agileGroup', group.agileGroup || '');
+    setDailyField('agileGroup', contact.agileGroup || group.agileGroup || '');
     setDailyField('reportDate', report.reportDate || '');
-    setDailyField('reporterName', report.reporterName || '');
-    setDailyField('reporterNameText', report.reporterName || '');
-    setDailyField('senderOpenId', context.senderOpenId || '');
+    setDailyField('reporterName', reporterDisplayName, {
+      ...context,
+      senderOpenId: reporterOpenId,
+    });
+    setDailyField('reporterNameText', reporterDisplayName);
+    setDailyField('senderOpenId', reporterOpenId);
     setDailyField('rawText', report.rawText || '');
     setDailyField('workItems', report.workSummaryText || report.workItems || []);
     setDailyField('tomorrowPlanItems', report.tomorrowPlanItems || []);
@@ -32,6 +37,10 @@ export class BitableService {
     setDailyField('supervisor', contact.supervisor || '', {
       ...context,
       supervisorOpenId: contact.supervisorOpenId || '',
+    });
+    setDailyField('divisionalLeader', contact.divisionalLeader || '', {
+      ...context,
+      divisionalLeaderOpenId: contact.divisionalLeaderOpenId || '',
     });
     setDailyField('source', context.source || 'chat');
     setDailyField('parseStatus', report.highConfidence ? 'parsed' : 'low_confidence');
@@ -521,7 +530,7 @@ function formatFieldValue(table, key, value, context = {}) {
   }
 
   if (fieldType === 'user') {
-    const id = key === 'reporterName' ? context.senderOpenId : context.supervisorOpenId;
+    const id = getUserFieldOpenId(key, context);
     const name = Array.isArray(value) ? value.join('\n') : String(value || '');
     if (id) return [{ id, name }];
     if (!name) return undefined;
@@ -529,6 +538,13 @@ function formatFieldValue(table, key, value, context = {}) {
 
   if (Array.isArray(value)) return value.join('\n');
   return value == null ? '' : value;
+}
+
+function getUserFieldOpenId(key, context = {}) {
+  if (key === 'reporterName') return context.senderOpenId;
+  if (key === 'supervisor') return context.supervisorOpenId;
+  if (key === 'divisionalLeader') return context.divisionalLeaderOpenId;
+  return '';
 }
 
 function toBitableDateTimestamp(value) {

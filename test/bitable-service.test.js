@@ -664,6 +664,54 @@ test('matches contact by alias when open id is unavailable', async () => {
   assert.equal(contact.matchingStatus, '姓名匹配');
 });
 
+test('builds contact-enriched daily fields from real directory identity', () => {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      project: '默认板块',
+      agileGroup: '默认敏捷组',
+      dailyFactTable: {
+        appToken: 'bas',
+        tableId: 'tbl_fact',
+        fields: {
+          reporterName: '实际日报提交人',
+          reporterNameText: '日报提交人姓名',
+          agileGroup: '敏捷小组',
+          divisionalLeader: '分管领导',
+        },
+        fieldTypes: {
+          reporterName: 'user',
+          divisionalLeader: 'user',
+        },
+      },
+    }],
+  }).groups[0];
+
+  const service = new BitableService({});
+  const fields = service.buildDailyRecordFields(group, {
+    highConfidence: true,
+    reportDate: '2026-07-03',
+    reporterName: '用户400276',
+    workItems: [],
+    riskItems: [],
+  }, {
+    senderOpenId: 'ou_old',
+    contact: {
+      teamMember: '刘喜双',
+      teamMemberId: 'ou_external',
+      accountDisplayName: '用户400276',
+      agileGroup: '敏捷一组',
+      divisionalLeader: '李总',
+      divisionalLeaderOpenId: 'ou_leader',
+    },
+  });
+
+  assert.equal(fields['日报提交人姓名'], '刘喜双');
+  assert.deepEqual(fields['实际日报提交人'], [{ id: 'ou_external', name: '刘喜双' }]);
+  assert.equal(fields['敏捷小组'], '敏捷一组');
+  assert.deepEqual(fields['分管领导'], [{ id: 'ou_leader', name: '李总' }]);
+});
+
 test('normalizes supervisor user field from daily report records', async () => {
   const group = createGroup();
   const service = new BitableService({
