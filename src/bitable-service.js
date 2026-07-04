@@ -543,14 +543,23 @@ function normalizeContactRecord(record, fields) {
   const f = record.fields || {};
   const member = normalizePersonValue(fields.teamMember ? f[fields.teamMember] : '');
   const supervisor = normalizePersonValue(fields.supervisor ? f[fields.supervisor] : '');
+  const divisionalLeader = normalizePersonValue(fields.divisionalLeader ? f[fields.divisionalLeader] : '');
+  const realName = normalizeFieldValue(fields.memberRealName ? f[fields.memberRealName] : '');
+  const aliases = splitMultiline(fields.memberAliases ? f[fields.memberAliases] : '');
+  const currentOpenId = normalizeFieldValue(fields.currentOpenId ? f[fields.currentOpenId] : '') || member.id;
   return {
     recordId: record.record_id,
     teamName: normalizeFieldValue(fields.teamName ? f[fields.teamName] : ''),
-    teamMember: member.name,
-    teamMemberId: member.id,
+    teamMember: realName || member.name,
+    accountDisplayName: member.name,
+    teamMemberId: currentOpenId,
+    memberAliases: aliases,
     teamRole: normalizeFieldValue(fields.teamRole ? f[fields.teamRole] : ''),
+    agileGroup: normalizeFieldValue(fields.agileGroup ? f[fields.agileGroup] : ''),
     supervisor: supervisor.name,
     supervisorOpenId: supervisor.id,
+    divisionalLeader: divisionalLeader.name,
+    divisionalLeaderOpenId: divisionalLeader.id,
   };
 }
 
@@ -566,27 +575,14 @@ function findBestContact(contacts, { reporterName = '', senderOpenId = '' } = {}
     };
   }
 
-  const exactName = reporterName
-    ? contacts.find(contact => contact.teamMember === reporterName)
+  const name = String(reporterName || '').trim();
+  const exactName = name
+    ? contacts.find(contact => contact.teamMember === name || contact.memberAliases?.includes(name))
     : null;
   if (exactName) {
     return {
       ...exactName,
-      matchMethod: 'name',
-      matchingStatus: '姓名匹配',
-    };
-  }
-
-  const loose = contacts.find(contact => {
-    const haystack = [contact.teamMember, contact.teamMemberId, contact.supervisor, contact.supervisorOpenId]
-      .filter(Boolean)
-      .join('\n');
-    return (reporterName && haystack.includes(reporterName)) || (senderOpenId && haystack.includes(senderOpenId));
-  });
-  if (loose) {
-    return {
-      ...loose,
-      matchMethod: 'loose',
+      matchMethod: 'name_fallback',
       matchingStatus: '姓名匹配',
     };
   }

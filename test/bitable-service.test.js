@@ -568,6 +568,102 @@ test('uses contact table to enrich team name and supervisor', async () => {
   assert.equal(fields['明日工作计划'], '计划1');
 });
 
+test('matches contact by open id and uses real name for display', async () => {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      dailyTable: { appToken: 'bas', tableId: 'tbl_daily' },
+      contactTable: {
+        appToken: 'bas',
+        tableId: 'tbl_contacts',
+        fields: {
+          teamName: '团队名称',
+          teamMember: '团队成员',
+          memberRealName: '成员真实姓名',
+          memberAliases: '成员别名',
+          currentOpenId: '当前OpenID',
+          supervisor: '直属上级',
+          divisionalLeader: '分管领导',
+        },
+      },
+    }],
+  }).groups[0];
+
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async () => ({
+          data: {
+            items: [{
+              record_id: 'rec_contact',
+              fields: {
+                团队名称: '零售大众客群经营',
+                团队成员: [{ id: 'ou_external', name: '用户400276' }],
+                成员真实姓名: '刘喜双',
+                成员别名: '喜双\n小刘',
+                当前OpenID: 'ou_external',
+                直属上级: [{ id: 'ou_mgr', name: '王经理' }],
+                分管领导: [{ id: 'ou_leader', name: '李总' }],
+              },
+            }],
+          },
+        }),
+      },
+    },
+  });
+
+  const contact = await service.findTeamContact(group, { reporterName: '刘喜双', senderOpenId: 'ou_external' });
+  assert.equal(contact.teamMember, '刘喜双');
+  assert.equal(contact.accountDisplayName, '用户400276');
+  assert.equal(contact.teamMemberId, 'ou_external');
+  assert.equal(contact.matchMethod, 'open_id');
+  assert.equal(contact.matchingStatus, '已匹配');
+  assert.equal(contact.divisionalLeader, '李总');
+  assert.equal(contact.divisionalLeaderOpenId, 'ou_leader');
+});
+
+test('matches contact by alias when open id is unavailable', async () => {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      dailyTable: { appToken: 'bas', tableId: 'tbl_daily' },
+      contactTable: {
+        appToken: 'bas',
+        tableId: 'tbl_contacts',
+        fields: {
+          teamMember: '团队成员',
+          memberRealName: '成员真实姓名',
+          memberAliases: '成员别名',
+        },
+      },
+    }],
+  }).groups[0];
+
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async () => ({
+          data: {
+            items: [{
+              record_id: 'rec_contact',
+              fields: {
+                团队成员: [{ id: 'ou_1', name: '用户400276' }],
+                成员真实姓名: '刘喜双',
+                成员别名: '喜双\n小刘',
+              },
+            }],
+          },
+        }),
+      },
+    },
+  });
+
+  const contact = await service.findTeamContact(group, { reporterName: '小刘' });
+  assert.equal(contact.teamMember, '刘喜双');
+  assert.equal(contact.matchMethod, 'name_fallback');
+  assert.equal(contact.matchingStatus, '姓名匹配');
+});
+
 test('normalizes supervisor user field from daily report records', async () => {
   const group = createGroup();
   const service = new BitableService({

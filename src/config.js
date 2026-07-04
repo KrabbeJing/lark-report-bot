@@ -77,8 +77,16 @@ export const DAILY_FACT_FIELD_KEYS = {
 export const CONTACT_FIELD_KEYS = {
   teamName: '团队名称',
   teamMember: '团队成员',
+  memberRealName: '成员真实姓名',
+  memberAliases: '成员别名',
+  currentOpenId: '当前OpenID',
+  historicalOpenIds: '历史OpenID/历史账号说明',
+  accountType: '账号类型',
+  memberStatus: '成员状态',
   teamRole: '团队身份',
+  agileGroup: '敏捷小组',
   supervisor: '直属上级',
+  divisionalLeader: '分管领导',
 };
 
 export const WEEKLY_FIELD_KEYS = {
