@@ -1,6 +1,6 @@
 import { WEEKLY_FIELD_KEYS, tableIsConfigured } from './config.js';
 import { DEFAULT_TIMEZONE, addDaysToYmd, formatDateTime, formatYmd, parseYmd } from './date-utils.js';
-import { buildContentFingerprint } from './daily-record-utils.js';
+import { buildContentFingerprint, buildSourceRefs, hasSameContentFingerprint } from './daily-record-utils.js';
 
 export class BitableService {
   constructor(client) {
@@ -304,6 +304,46 @@ export class BitableService {
     return { created: true, record: extractRecordFromResponse(res), fields };
   }
 
+  async upsertDailyFactRecord(group, input) {
+    assertTable(group.dailyFactTable, 'dailyFactTable');
+    const existing = await this.findDailyFactRecordByFactKey(group, input.factKey);
+    const fields = buildDailyFactFields(group.dailyFactTable, input, existing);
+    if (existing) {
+      const res = await withBitableErrorContext('dailyFact.update', group.dailyFactTable, () => (
+        this.client.bitable.appTableRecord.update({
+          path: {
+            app_token: group.dailyFactTable.appToken,
+            table_id: group.dailyFactTable.tableId,
+            record_id: existing.record_id,
+          },
+          params: { user_id_type: 'open_id' },
+          data: { fields },
+        })
+      ));
+      return { updated: true, record: extractRecordFromResponse(res), fields };
+    }
+
+    const res = await withBitableErrorContext('dailyFact.create', group.dailyFactTable, () => (
+      this.client.bitable.appTableRecord.create({
+        path: {
+          app_token: group.dailyFactTable.appToken,
+          table_id: group.dailyFactTable.tableId,
+        },
+        params: { user_id_type: 'open_id' },
+        data: { fields },
+      })
+    ));
+    return { created: true, record: extractRecordFromResponse(res), fields };
+  }
+
+  async findDailyFactRecordByFactKey(group, factKey) {
+    if (!factKey || !tableIsConfigured(group.dailyFactTable)) return null;
+    const fieldName = group.dailyFactTable.fields.factKey;
+    if (!fieldName) return null;
+    const records = await this.listRecords(group.dailyFactTable, 'dailyFact.findByFactKey', { includeView: false });
+    return records.find(record => String(record.fields?.[fieldName] || '') === String(factKey)) || null;
+  }
+
   async findDailyFactRecordBySourceRecordId(group, sourceRecordId) {
     if (!sourceRecordId || !tableIsConfigured(group.dailyFactTable)) return null;
     const fieldName = group.dailyFactTable.fields.sourceRecordId;
@@ -539,6 +579,75 @@ function buildChatRawFields(table, report, context = {}) {
   setMappedField(recordFields, table, 'parseStatus', report.highConfidence ? '已解析' : '低置信度', context);
   setMappedField(recordFields, table, 'rawRecordStatus', '主版本', context);
   return recordFields;
+}
+
+function buildDailyFactFields(table, input, existing) {
+  const existingFields = existing?.fields || {};
+  const fields = table.fields;
+  const incomingWorkItems = input.workSummaryText || input.workItems || '';
+  const incomingTomorrowPlanItems = input.tomorrowPlanItems || '';
+  const incomingRiskItems = input.riskItems || '';
+  const existingWorkItems = normalizeFieldValue(fields.workItems ? existingFields[fields.workItems] : '');
+  const existingTomorrowPlanItems = normalizeFieldValue(fields.tomorrowPlanItems ? existingFields[fields.tomorrowPlanItems] : '');
+  const existingRiskItems = normalizeFieldValue(fields.riskItems ? existingFields[fields.riskItems] : '');
+  const incomingFingerprint = buildContentFingerprint({
+    workItems: incomingWorkItems,
+    tomorrowPlanItems: incomingTomorrowPlanItems,
+    riskItems: incomingRiskItems,
+  });
+  const existingFingerprint = normalizeFieldValue(fields.contentFingerprint ? existingFields[fields.contentFingerprint] : '');
+  const existingSource = normalizeFieldValue(fields.source ? existingFields[fields.source] : '');
+  const existingHasForm = sourceHas(existingSource, 'form');
+  const existingHasChat = sourceHas(existingSource, 'chat');
+  const hasChatAndForm = (existingHasChat && input.source === 'form')
+    || (existingHasForm && input.source === 'chat')
+    || (existingHasForm && existingHasChat);
+  const sameContent = hasSameContentFingerprint(existingFingerprint, incomingFingerprint);
+  const mergedSource = hasChatAndForm ? 'form+chat' : input.source;
+  const mergeStatus = hasChatAndForm ? (sameContent ? '重复已合并' : '内容冲突') : '单来源';
+  const conflictStatus = mergeStatus === '内容冲突' ? '内容冲突' : '无冲突';
+  const factStatus = mergeStatus === '内容冲突' ? '待人工确认' : '有效';
+  const useIncomingContent = input.source === 'form' || (input.source === 'chat' && !existingHasForm);
+  const existingRefs = normalizeFieldValue(fields.sourceRefs ? existingFields[fields.sourceRefs] : '');
+  const incomingRefs = buildSourceRefs({ sourceRecordId: input.sourceRecordId, messageId: input.messageId });
+
+  const recordFields = {};
+  setMappedField(recordFields, table, 'factKey', input.factKey);
+  setMappedField(recordFields, table, 'reportDate', input.reportDate);
+  setMappedField(recordFields, table, 'reporterName', input.reporterName || '', {
+    senderOpenId: input.memberOpenId || '',
+  });
+  setMappedField(recordFields, table, 'reporterNameText', input.reporterName || '');
+  setMappedField(recordFields, table, 'memberOpenId', input.memberOpenId || '');
+  setMappedField(recordFields, table, 'workItems', useIncomingContent ? incomingWorkItems : existingWorkItems);
+  setMappedField(recordFields, table, 'tomorrowPlanItems', useIncomingContent ? incomingTomorrowPlanItems : existingTomorrowPlanItems);
+  setMappedField(recordFields, table, 'riskItems', useIncomingContent ? incomingRiskItems : existingRiskItems);
+  setMappedField(recordFields, table, 'contentFingerprint', useIncomingContent ? incomingFingerprint : existingFingerprint);
+  setMappedField(recordFields, table, 'source', mergedSource);
+  setMappedField(recordFields, table, 'sourceRecordId', input.sourceRecordId || normalizeFieldValue(fields.sourceRecordId ? existingFields[fields.sourceRecordId] : ''));
+  setMappedField(recordFields, table, 'messageId', input.messageId || normalizeFieldValue(fields.messageId ? existingFields[fields.messageId] : ''));
+  setMappedField(recordFields, table, 'sourceRefs', mergeSourceRefs(existingRefs, incomingRefs));
+  setMappedField(recordFields, table, 'mergeStatus', mergeStatus);
+  setMappedField(recordFields, table, 'conflictStatus', conflictStatus);
+  setMappedField(recordFields, table, 'factStatus', factStatus);
+  setMappedField(recordFields, table, 'syncedAt', formatDateTime(new Date(), DEFAULT_TIMEZONE));
+  return recordFields;
+}
+
+function sourceHas(source, part) {
+  return String(source || '')
+    .split('+')
+    .map(item => item.trim())
+    .includes(part);
+}
+
+function mergeSourceRefs(existingRefs, incomingRefs) {
+  const refs = [];
+  for (const ref of `${existingRefs || ''}\n${incomingRefs || ''}`.split('\n')) {
+    const value = ref.trim();
+    if (value && !refs.includes(value)) refs.push(value);
+  }
+  return refs.join('\n');
 }
 
 function buildWeeklyFields(group, summary, context = {}) {

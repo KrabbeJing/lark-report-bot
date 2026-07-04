@@ -146,6 +146,387 @@ test('creates chat daily records in fact table when configured', async () => {
   assert.equal(createPayload.data.fields['今日工作总结'], '1、完成数据提取');
 });
 
+test('reconciles form and chat sources with form priority and conflict status', async () => {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      dailyTable: { appToken: 'bas', tableId: 'tbl_daily' },
+      dailyFactTable: {
+        appToken: 'bas',
+        tableId: 'tbl_fact',
+        fields: {
+          factKey: '事实唯一键',
+          reportDate: '日报日期',
+          reporterNameText: '日报提交人姓名',
+          memberOpenId: '成员OpenID',
+          workItems: '今日工作总结',
+          tomorrowPlanItems: '明日工作计划',
+          riskItems: '遇到的问题',
+          contentFingerprint: '内容指纹',
+          source: '日报来源',
+          sourceRecordId: '来源记录ID',
+          messageId: '来源消息ID',
+          sourceRefs: '来源组合',
+          mergeStatus: '合并状态',
+          conflictStatus: '冲突状态',
+          factStatus: '事实记录状态',
+        },
+        fieldTypes: { reportDate: 'date' },
+      },
+    }],
+  }).groups[0];
+
+  let updatePayload = null;
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async () => ({
+          data: {
+            items: [{
+              record_id: 'rec_fact',
+              fields: {
+                事实唯一键: 'open_id:ou_liu:2026-07-01',
+                今日工作总结: '1、群聊内容',
+                内容指纹: 'chat-fingerprint',
+                日报来源: 'chat',
+              },
+            }],
+          },
+        }),
+        update: async (payload) => {
+          updatePayload = payload;
+          return { data: { data: { record: { record_id: 'rec_fact', fields: payload.data.fields } } } };
+        },
+      },
+    },
+  });
+
+  const result = await service.upsertDailyFactRecord(group, {
+    factKey: 'open_id:ou_liu:2026-07-01',
+    reportDate: '2026-07-01',
+    reporterName: '刘喜双',
+    memberOpenId: 'ou_liu',
+    workSummaryText: '1、表单内容',
+    tomorrowPlanItems: '2、表单明日计划',
+    riskItems: '3、表单风险',
+    source: 'form',
+    sourceRecordId: 'rec_form',
+    messageId: 'om_chat',
+    existingChatFingerprint: 'chat-fingerprint',
+  });
+
+  assert.equal(result.updated, true);
+  assert.equal(updatePayload.path.record_id, 'rec_fact');
+  assert.equal(updatePayload.data.fields['日报来源'], 'form+chat');
+  assert.equal(updatePayload.data.fields['今日工作总结'], '1、表单内容');
+  assert.equal(updatePayload.data.fields['明日工作计划'], '2、表单明日计划');
+  assert.equal(updatePayload.data.fields['遇到的问题'], '3、表单风险');
+  assert.equal(updatePayload.data.fields['合并状态'], '内容冲突');
+  assert.equal(updatePayload.data.fields['冲突状态'], '内容冲突');
+  assert.equal(updatePayload.data.fields['事实记录状态'], '待人工确认');
+});
+
+test('marks same-content form and chat facts as duplicate merged without conflict', async () => {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      dailyTable: { appToken: 'bas', tableId: 'tbl_daily' },
+      dailyFactTable: {
+        appToken: 'bas',
+        tableId: 'tbl_fact',
+        fields: {
+          factKey: '事实唯一键',
+          reportDate: '日报日期',
+          reporterNameText: '日报提交人姓名',
+          memberOpenId: '成员OpenID',
+          workItems: '今日工作总结',
+          tomorrowPlanItems: '明日工作计划',
+          riskItems: '遇到的问题',
+          contentFingerprint: '内容指纹',
+          source: '日报来源',
+          sourceRecordId: '来源记录ID',
+          messageId: '来源消息ID',
+          sourceRefs: '来源组合',
+          mergeStatus: '合并状态',
+          conflictStatus: '冲突状态',
+          factStatus: '事实记录状态',
+        },
+        fieldTypes: { reportDate: 'date' },
+      },
+    }],
+  }).groups[0];
+  const sameFingerprint = buildContentFingerprint({
+    workItems: '1、相同内容',
+    tomorrowPlanItems: '2、相同计划',
+    riskItems: '3、相同风险',
+  });
+
+  let updatePayload = null;
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async () => ({
+          data: {
+            items: [{
+              record_id: 'rec_fact',
+              fields: {
+                事实唯一键: 'open_id:ou_liu:2026-07-01',
+                今日工作总结: '1、相同内容',
+                明日工作计划: '2、相同计划',
+                遇到的问题: '3、相同风险',
+                内容指纹: sameFingerprint,
+                日报来源: 'chat',
+                来源消息ID: 'om_chat',
+              },
+            }],
+          },
+        }),
+        update: async (payload) => {
+          updatePayload = payload;
+          return { data: { data: { record: { record_id: 'rec_fact', fields: payload.data.fields } } } };
+        },
+      },
+    },
+  });
+
+  const result = await service.upsertDailyFactRecord(group, {
+    factKey: 'open_id:ou_liu:2026-07-01',
+    reportDate: '2026-07-01',
+    reporterName: '刘喜双',
+    memberOpenId: 'ou_liu',
+    workSummaryText: '1、相同内容',
+    tomorrowPlanItems: '2、相同计划',
+    riskItems: '3、相同风险',
+    source: 'form',
+    sourceRecordId: 'rec_form',
+  });
+
+  assert.equal(result.updated, true);
+  assert.equal(updatePayload.data.fields['日报来源'], 'form+chat');
+  assert.equal(updatePayload.data.fields['合并状态'], '重复已合并');
+  assert.equal(updatePayload.data.fields['冲突状态'], '无冲突');
+  assert.equal(updatePayload.data.fields['事实记录状态'], '有效');
+});
+
+test('preserves existing form content when later chat source conflicts', async () => {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      dailyTable: { appToken: 'bas', tableId: 'tbl_daily' },
+      dailyFactTable: {
+        appToken: 'bas',
+        tableId: 'tbl_fact',
+        fields: {
+          factKey: '事实唯一键',
+          reportDate: '日报日期',
+          reporterNameText: '日报提交人姓名',
+          memberOpenId: '成员OpenID',
+          workItems: '今日工作总结',
+          tomorrowPlanItems: '明日工作计划',
+          riskItems: '遇到的问题',
+          contentFingerprint: '内容指纹',
+          source: '日报来源',
+          sourceRecordId: '来源记录ID',
+          messageId: '来源消息ID',
+          sourceRefs: '来源组合',
+          mergeStatus: '合并状态',
+          conflictStatus: '冲突状态',
+          factStatus: '事实记录状态',
+        },
+        fieldTypes: { reportDate: 'date' },
+      },
+    }],
+  }).groups[0];
+
+  const existingFingerprint = buildContentFingerprint({
+    workItems: '1、表单内容',
+    tomorrowPlanItems: '2、表单明日计划',
+    riskItems: '3、表单风险',
+  });
+  let updatePayload = null;
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async () => ({
+          data: {
+            items: [{
+              record_id: 'rec_fact',
+              fields: {
+                事实唯一键: 'open_id:ou_liu:2026-07-01',
+                今日工作总结: { text: '1、表单内容' },
+                明日工作计划: ['2、表单明日计划'],
+                遇到的问题: { text: '3、表单风险' },
+                内容指纹: existingFingerprint,
+                日报来源: 'form+chat',
+                来源组合: 'form:rec_form',
+              },
+            }],
+          },
+        }),
+        update: async (payload) => {
+          updatePayload = payload;
+          return { data: { data: { record: { record_id: 'rec_fact', fields: payload.data.fields } } } };
+        },
+      },
+    },
+  });
+
+  const result = await service.upsertDailyFactRecord(group, {
+    factKey: 'open_id:ou_liu:2026-07-01',
+    reportDate: '2026-07-01',
+    reporterName: '刘喜双',
+    memberOpenId: 'ou_liu',
+    workSummaryText: '1、群聊不同内容',
+    tomorrowPlanItems: '2、群聊不同计划',
+    riskItems: '3、群聊不同风险',
+    source: 'chat',
+    messageId: 'om_chat',
+  });
+
+  assert.equal(result.updated, true);
+  assert.equal(updatePayload.data.fields['日报来源'], 'form+chat');
+  assert.equal(updatePayload.data.fields['今日工作总结'], '1、表单内容');
+  assert.equal(updatePayload.data.fields['明日工作计划'], '2、表单明日计划');
+  assert.equal(updatePayload.data.fields['遇到的问题'], '3、表单风险');
+  assert.equal(updatePayload.data.fields['内容指纹'], existingFingerprint);
+  assert.equal(updatePayload.data.fields['合并状态'], '内容冲突');
+  assert.equal(updatePayload.data.fields['冲突状态'], '内容冲突');
+  assert.equal(updatePayload.data.fields['事实记录状态'], '待人工确认');
+  assert.equal(updatePayload.data.fields['来源组合'], 'form:rec_form\nchat:om_chat');
+});
+
+test('merges existing chat source refs when incoming form source wins', async () => {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      dailyTable: { appToken: 'bas', tableId: 'tbl_daily' },
+      dailyFactTable: {
+        appToken: 'bas',
+        tableId: 'tbl_fact',
+        fields: {
+          factKey: '事实唯一键',
+          reportDate: '日报日期',
+          reporterNameText: '日报提交人姓名',
+          memberOpenId: '成员OpenID',
+          workItems: '今日工作总结',
+          contentFingerprint: '内容指纹',
+          source: '日报来源',
+          sourceRecordId: '来源记录ID',
+          messageId: '来源消息ID',
+          sourceRefs: '来源组合',
+          mergeStatus: '合并状态',
+          conflictStatus: '冲突状态',
+          factStatus: '事实记录状态',
+        },
+        fieldTypes: { reportDate: 'date' },
+      },
+    }],
+  }).groups[0];
+
+  let updatePayload = null;
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async () => ({
+          data: {
+            items: [{
+              record_id: 'rec_fact',
+              fields: {
+                事实唯一键: 'open_id:ou_liu:2026-07-01',
+                今日工作总结: '1、群聊内容',
+                内容指纹: buildContentFingerprint({ workItems: '1、群聊内容' }),
+                日报来源: 'chat',
+                来源消息ID: 'om_old',
+                来源组合: 'chat:om_old',
+              },
+            }],
+          },
+        }),
+        update: async (payload) => {
+          updatePayload = payload;
+          return { data: { data: { record: { record_id: 'rec_fact', fields: payload.data.fields } } } };
+        },
+      },
+    },
+  });
+
+  const result = await service.upsertDailyFactRecord(group, {
+    factKey: 'open_id:ou_liu:2026-07-01',
+    reportDate: '2026-07-01',
+    reporterName: '刘喜双',
+    memberOpenId: 'ou_liu',
+    workSummaryText: '1、表单内容',
+    source: 'form',
+    sourceRecordId: 'rec_form',
+  });
+
+  assert.equal(result.updated, true);
+  assert.equal(updatePayload.data.fields['日报来源'], 'form+chat');
+  assert.equal(updatePayload.data.fields['今日工作总结'], '1、表单内容');
+  assert.equal(updatePayload.data.fields['来源记录ID'], 'rec_form');
+  assert.equal(updatePayload.data.fields['来源消息ID'], 'om_old');
+  assert.equal(updatePayload.data.fields['来源组合'], 'chat:om_old\nform:rec_form');
+});
+
+test('writes reporter user field from member open id for daily fact upsert', async () => {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      dailyTable: { appToken: 'bas', tableId: 'tbl_daily' },
+      dailyFactTable: {
+        appToken: 'bas',
+        tableId: 'tbl_fact',
+        fields: {
+          factKey: '事实唯一键',
+          reportDate: '日报日期',
+          reporterName: '实际日报提交人',
+          reporterNameText: '日报提交人姓名',
+          memberOpenId: '成员OpenID',
+          workItems: '今日工作总结',
+          contentFingerprint: '内容指纹',
+          source: '日报来源',
+          sourceRecordId: '来源记录ID',
+          messageId: '来源消息ID',
+          sourceRefs: '来源组合',
+          mergeStatus: '合并状态',
+          conflictStatus: '冲突状态',
+          factStatus: '事实记录状态',
+        },
+        fieldTypes: {
+          reportDate: 'date',
+          reporterName: 'user',
+        },
+      },
+    }],
+  }).groups[0];
+
+  let createPayload = null;
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async () => ({ data: { items: [] } }),
+        create: async (payload) => {
+          createPayload = payload;
+          return { data: { data: { record: { record_id: 'rec_fact', fields: payload.data.fields } } } };
+        },
+      },
+    },
+  });
+
+  const result = await service.upsertDailyFactRecord(group, {
+    factKey: 'open_id:ou_liu:2026-07-01',
+    reportDate: '2026-07-01',
+    reporterName: '刘喜双',
+    memberOpenId: 'ou_liu',
+    workSummaryText: '1、群聊内容',
+    source: 'chat',
+    messageId: 'om_chat',
+  });
+
+  assert.equal(result.created, true);
+  assert.deepEqual(createPayload.data.fields['实际日报提交人'], [{ id: 'ou_liu', name: '刘喜双' }]);
+});
+
 test('creates chat raw daily record and marks previous version historical', async () => {
   const group = normalizeConfig({
     groups: [{
