@@ -146,6 +146,49 @@ test('continues daily report collection when contact lookup is forbidden', async
   assert.equal(calls[0].parsed.reporterName, '王治坤');
 });
 
+test('falls back to legacy daily table write when raw and fact tables are absent', async () => {
+  const config = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      project: '支付平台',
+      dailyTable: { appToken: 'bas_test', tableId: 'tbl_daily' },
+    }],
+  });
+  const calls = [];
+
+  await handleMessageEvent({
+    data: {
+      sender: { sender_id: { open_id: 'ou_1' } },
+      message: {
+        message_id: 'om_fallback',
+        chat_id: 'oc_test',
+        chat_type: 'group',
+        message_type: 'text',
+        create_time: String(new Date('2026-06-26T09:00:00+08:00').getTime()),
+        content: JSON.stringify({
+          text: `王治坤6.26日工作日报
+1、参加案例评审`,
+        }),
+      },
+    },
+    client: {},
+    messenger: { replyText: async () => {} },
+    bitable: {
+      createDailyReportRecord: async (group, parsed, context) => {
+        calls.push({ group, parsed, context });
+        return { created: true };
+      },
+    },
+    config,
+    aiProvider: {},
+    outDir: '/tmp',
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].parsed.reporterName, '王治坤');
+  assert.equal(calls[0].context.senderOpenId, 'ou_1');
+});
+
 test('writes configured chat reports to raw table and fact table', async () => {
   const config = normalizeConfig({
     groups: [{
