@@ -1,6 +1,6 @@
 import { WEEKLY_FIELD_KEYS, tableIsConfigured } from './config.js';
 import { DEFAULT_TIMEZONE, addDaysToYmd, formatDateTime, formatYmd, parseYmd } from './date-utils.js';
-import { buildContentFingerprint, buildSourceRefs, hasSameContentFingerprint } from './daily-record-utils.js';
+import { buildContentFingerprint, buildFactKey, buildSourceRefs, hasSameContentFingerprint } from './daily-record-utils.js';
 
 export class BitableService {
   constructor(client) {
@@ -190,8 +190,10 @@ export class BitableService {
   }
 
   async syncDailyFactRecordsForGroup(group, options = {}) {
-    if (!tableIsConfigured(group.dailyTable) || !tableIsConfigured(group.dailyFactTable)) {
-      return { skipped: true, reason: 'dailyTable or dailyFactTable not configured' };
+    if (!tableIsConfigured(group.dailyTable)
+      || !tableIsConfigured(group.chatDailyRawTable)
+      || !tableIsConfigured(group.dailyFactTable)) {
+      return { skipped: true, reason: 'dailyTable, chatDailyRawTable or dailyFactTable not configured' };
     }
 
     const timezone = options.timezone || DEFAULT_TIMEZONE;
@@ -199,49 +201,177 @@ export class BitableService {
     const endDate = options.endDate || formatYmd(now, timezone);
     const lookbackDays = Number(options.lookbackDays ?? 7);
     const startDate = options.startDate || addDaysToYmd(endDate, -Math.max(lookbackDays - 1, 0));
-    const sourceRecords = await this.listRecords(group.dailyTable, 'dailyFactSync.source.list');
-    const targetRecords = await this.listRecords(group.dailyFactTable, 'dailyFactSync.target.list', { includeView: false });
-    const targetBySourceRecordId = indexRecordsByField(targetRecords, group.dailyFactTable.fields.sourceRecordId);
+    const formRecords = await this.listRecords(group.dailyTable, 'dailyFactSync.form.list');
+    const chatRawRecords = await this.listRecords(group.chatDailyRawTable, 'dailyFactSync.chatRaw.list', { includeView: false });
+    const targetRecords = await this.listRecords(group.dailyFactTable, 'dailyFactSync.fact.list', { includeView: false });
+    const targetByFactKey = indexRecordsByField(targetRecords, group.dailyFactTable.fields.factKey);
 
     let created = 0;
     let updated = 0;
-    let skipped = 0;
+    let unchanged = 0;
+    let conflicts = 0;
+    let filtered = 0;
     const errors = [];
+    const sourceCounts = {
+      form: formRecords.length,
+      chatRaw: chatRawRecords.length,
+      formFacts: 0,
+      chatFacts: 0,
+    };
 
-    for (const sourceRecord of sourceRecords) {
-      const report = normalizeDailyRecord(sourceRecord, group.dailyTable.fields, group);
+    for (const formRecord of formRecords) {
+      const report = normalizeDailyRecord(formRecord, group.dailyTable.fields, group);
       if (!report.reportDate || report.reportDate < startDate || report.reportDate > endDate) {
-        skipped += 1;
+        filtered += 1;
         continue;
       }
 
       try {
-        const result = await this.upsertDailyFactRecordFromSource(group, sourceRecord, report, {
-          now,
-          timezone,
-          existingRecord: targetBySourceRecordId.get(String(sourceRecord.record_id || '')),
+        const contact = await this.findTeamContactForReport(group, report, formRecord.record_id);
+        const reporterName = contact?.teamMember || report.reporterName;
+        const memberOpenId = contact?.teamMemberId || report.senderOpenId;
+        const input = {
+          factKey: buildFactKey({
+            openId: memberOpenId,
+            name: reporterName,
+            reportDate: report.reportDate,
+          }),
+          sourceRecordId: formRecord.record_id || '',
+          source: 'form',
+          reportDate: report.reportDate,
+          reporterName,
+          memberOpenId,
+          senderOpenId: report.senderOpenId,
+          workSummaryText: report.workSummaryText || report.workItems,
+          tomorrowPlanItems: report.tomorrowPlanItems,
+          riskItems: report.riskItems,
+          rawText: report.rawText,
+          project: contact?.teamName || report.project || group.project || '',
+          agileGroup: contact?.agileGroup || report.agileGroup || group.agileGroup || '',
+          supervisor: contact?.supervisor || report.supervisor || '',
+          supervisorOpenId: contact?.supervisorOpenId || report.supervisorOpenId || '',
+          divisionalLeader: contact?.divisionalLeader || '',
+          divisionalLeaderOpenId: contact?.divisionalLeaderOpenId || '',
+          matchingStatus: contact?.matchingStatus || '未匹配',
+          matchMethod: contact?.matchMethod || '',
+          messageId: report.messageId,
+          chatId: report.chatId,
+          messageTime: report.messageTime,
+          syncedAt: formatDateTime(now, timezone),
+        };
+        const result = await this.upsertDailyFactRecord(group, input, {
+          existingRecord: targetByFactKey.get(input.factKey),
         });
+        updateFactRecordIndex(targetByFactKey, input.factKey, result.record, result.fields);
+        sourceCounts.formFacts += 1;
         if (result.created) created += 1;
         else if (result.updated) updated += 1;
+        else if (result.unchanged) unchanged += 1;
+        if (isConflictResult(group.dailyFactTable, result)) conflicts += 1;
       } catch (err) {
         errors.push({
-          sourceRecordId: sourceRecord.record_id,
+          source: 'form',
+          sourceRecordId: formRecord.record_id,
           message: err?.message || String(err),
         });
       }
     }
 
+    for (const rawRecord of chatRawRecords) {
+      const raw = normalizeChatRawRecord(rawRecord, group.chatDailyRawTable.fields, group);
+      if (raw.rawRecordStatus === '历史版本') {
+        filtered += 1;
+        continue;
+      }
+
+      const reportDates = raw.reportDates.length ? raw.reportDates : [raw.reportDate].filter(Boolean);
+      if (!reportDates.length) {
+        filtered += 1;
+        continue;
+      }
+
+      for (const reportDate of reportDates) {
+        if (!reportDate || reportDate < startDate || reportDate > endDate) {
+          filtered += 1;
+          continue;
+        }
+
+        try {
+          const input = {
+            factKey: buildFactKey({
+              openId: raw.senderOpenId,
+              name: raw.reporterName,
+              reportDate,
+            }),
+            sourceRecordId: rawRecord.record_id || '',
+            messageId: raw.messageId,
+            source: 'chat',
+            reportDate,
+            reporterName: raw.reporterName,
+            memberOpenId: raw.senderOpenId,
+            senderOpenId: raw.senderOpenId,
+            workSummaryText: raw.workSummaryText,
+            rawText: raw.rawText,
+            chatId: raw.chatId,
+            project: raw.project,
+            agileGroup: raw.agileGroup,
+            reportType: raw.reportType,
+            dateRange: raw.dateRange,
+            messageTime: raw.messageTime,
+            syncedAt: formatDateTime(now, timezone),
+          };
+          const result = await this.upsertDailyFactRecord(group, input, {
+            existingRecord: targetByFactKey.get(input.factKey),
+          });
+          updateFactRecordIndex(targetByFactKey, input.factKey, result.record, result.fields);
+          sourceCounts.chatFacts += 1;
+          if (result.created) created += 1;
+          else if (result.updated) updated += 1;
+          else if (result.unchanged) unchanged += 1;
+          if (isConflictResult(group.dailyFactTable, result)) conflicts += 1;
+        } catch (err) {
+          errors.push({
+            source: 'chat',
+            sourceRecordId: rawRecord.record_id,
+            messageId: raw.messageId,
+            reportDate,
+            message: err?.message || String(err),
+          });
+        }
+      }
+    }
+
     return {
       skipped: false,
-      sourceCount: sourceRecords.length,
+      sourceCount: formRecords.length + chatRawRecords.length,
+      sourceCounts,
       rangeStart: startDate,
       rangeEnd: endDate,
       created,
       updated,
-      filtered: skipped,
+      unchanged,
+      conflicts,
+      filtered,
       errors,
-      existingTargetCount: targetBySourceRecordId.size,
+      existingTargetCount: targetRecords.length,
     };
+  }
+
+  async findTeamContactForReport(group, report, sourceRecordId) {
+    try {
+      return await this.findTeamContact(group, {
+        reporterName: report.reporterName,
+        senderOpenId: report.senderOpenId,
+      });
+    } catch (err) {
+      console.warn('[daily-fact-sync] contact lookup failed; continue unmatched', {
+        sourceRecordId,
+        reporterName: report.reporterName,
+        code: err?.response?.data?.code || err?.code,
+        msg: err?.response?.data?.msg || err?.message,
+      });
+      return null;
+    }
   }
 
   async upsertDailyFactRecordFromSource(group, sourceRecord, report, options = {}) {
@@ -304,11 +434,14 @@ export class BitableService {
     return { created: true, record: extractRecordFromResponse(res), fields };
   }
 
-  async upsertDailyFactRecord(group, input) {
+  async upsertDailyFactRecord(group, input, options = {}) {
     assertTable(group.dailyFactTable, 'dailyFactTable');
-    const existing = await this.findDailyFactRecordByFactKey(group, input.factKey);
+    const existing = options.existingRecord || await this.findDailyFactRecordByFactKey(group, input.factKey);
     const fields = buildDailyFactFields(group.dailyFactTable, input, existing);
     if (existing) {
+      if (fieldsEqualForUpdate(fields, existing.fields || {}, group.dailyFactTable.fields.syncedAt)) {
+        return { unchanged: true, record: existing, fields };
+      }
       const res = await withBitableErrorContext('dailyFact.update', group.dailyFactTable, () => (
         this.client.bitable.appTableRecord.update({
           path: {
@@ -537,6 +670,7 @@ function normalizeDailyRecord(record, fields, group) {
   const f = record.fields || {};
   const reporter = normalizePersonValue(f[fields.reporterName]);
   const supervisor = normalizePersonValue(fields.supervisor ? f[fields.supervisor] : '');
+  const workItems = splitMultiline(f[fields.workItems]);
   return {
     recordId: record.record_id,
     messageId: normalizeFieldValue(fields.messageId ? f[fields.messageId] : ''),
@@ -549,12 +683,35 @@ function normalizeDailyRecord(record, fields, group) {
     supervisor: supervisor.name,
     supervisorOpenId: supervisor.id,
     rawText: normalizeFieldValue(fields.rawText ? f[fields.rawText] : ''),
-    workItems: splitMultiline(f[fields.workItems]),
+    workItems,
+    workSummaryText: normalizeFieldValue(fields.workItems ? f[fields.workItems] : '') || workItems,
     tomorrowPlanItems: splitMultiline(fields.tomorrowPlanItems ? f[fields.tomorrowPlanItems] : ''),
     riskItems: splitMultiline(f[fields.riskItems]),
     source: normalizeFieldValue(fields.source ? f[fields.source] : ''),
     parseStatus: normalizeFieldValue(fields.parseStatus ? f[fields.parseStatus] : ''),
     messageTime: normalizeFieldValue(fields.messageTime ? f[fields.messageTime] : ''),
+  };
+}
+
+function normalizeChatRawRecord(record, fields, group) {
+  const f = record.fields || {};
+  return {
+    recordId: record.record_id,
+    messageId: normalizeFieldValue(fields.messageId ? f[fields.messageId] : ''),
+    chatId: normalizeFieldValue(fields.chatId ? f[fields.chatId] : '') || group.chatId || '',
+    senderOpenId: normalizeFieldValue(fields.senderOpenId ? f[fields.senderOpenId] : ''),
+    reporterName: normalizeFieldValue(fields.reporterName ? f[fields.reporterName] : ''),
+    reportDate: normalizeDateFieldValue(fields.reportDate ? f[fields.reportDate] : ''),
+    dateRange: normalizeFieldValue(fields.reportDateRange ? f[fields.reportDateRange] : '')
+      || normalizeFieldValue(fields.dateRange ? f[fields.dateRange] : ''),
+    reportDates: splitMultiline(fields.reportDates ? f[fields.reportDates] : ''),
+    rawText: normalizeFieldValue(fields.rawText ? f[fields.rawText] : ''),
+    workSummaryText: normalizeFieldValue(fields.workSummaryText ? f[fields.workSummaryText] : ''),
+    project: normalizeFieldValue(fields.project ? f[fields.project] : '') || group.project || '',
+    agileGroup: normalizeFieldValue(fields.agileGroup ? f[fields.agileGroup] : '') || group.agileGroup || '',
+    reportType: normalizeFieldValue(fields.reportType ? f[fields.reportType] : ''),
+    messageTime: normalizeFieldValue(fields.messageTime ? f[fields.messageTime] : ''),
+    rawRecordStatus: normalizeFieldValue(fields.rawRecordStatus ? f[fields.rawRecordStatus] : ''),
   };
 }
 
@@ -608,30 +765,101 @@ function buildDailyFactFields(table, input, existing) {
   const conflictStatus = mergeStatus === '内容冲突' ? '内容冲突' : '无冲突';
   const factStatus = mergeStatus === '内容冲突' ? '待人工确认' : '有效';
   const useIncomingContent = input.source === 'form' || (input.source === 'chat' && !existingHasForm);
+  const useIncomingCanonical = input.source === 'form' || !existingHasForm;
   const existingRefs = normalizeFieldValue(fields.sourceRefs ? existingFields[fields.sourceRefs] : '');
-  const incomingRefs = buildSourceRefs({ sourceRecordId: input.sourceRecordId, messageId: input.messageId });
+  const incomingRefs = buildSourceRefs({
+    source: input.source,
+    sourceRecordId: input.sourceRecordId,
+    messageId: input.messageId,
+  });
+  const setCanonicalField = (recordFields, key, value, context = {}) => {
+    if (useIncomingCanonical) {
+      setMappedField(recordFields, table, key, value, context);
+      return;
+    }
+
+    const fieldName = fields[key];
+    if (!fieldName) return;
+    if (existingFields[fieldName] !== undefined) {
+      recordFields[fieldName] = existingFields[fieldName];
+    }
+  };
 
   const recordFields = {};
   setMappedField(recordFields, table, 'factKey', input.factKey);
   setMappedField(recordFields, table, 'reportDate', input.reportDate);
-  setMappedField(recordFields, table, 'reporterName', input.reporterName || '', {
+  setCanonicalField(recordFields, 'project', input.project || '');
+  setCanonicalField(recordFields, 'agileGroup', input.agileGroup || '');
+  setCanonicalField(recordFields, 'reporterName', input.reporterName || '', {
     senderOpenId: input.memberOpenId || '',
   });
-  setMappedField(recordFields, table, 'reporterNameText', input.reporterName || '');
-  setMappedField(recordFields, table, 'memberOpenId', input.memberOpenId || '');
+  setCanonicalField(recordFields, 'reporterNameText', input.reporterName || '');
+  setCanonicalField(recordFields, 'memberOpenId', input.memberOpenId || '');
+  setCanonicalField(recordFields, 'senderOpenId', input.senderOpenId || input.memberOpenId || '');
   setMappedField(recordFields, table, 'workItems', useIncomingContent ? incomingWorkItems : existingWorkItems);
   setMappedField(recordFields, table, 'tomorrowPlanItems', useIncomingContent ? incomingTomorrowPlanItems : existingTomorrowPlanItems);
   setMappedField(recordFields, table, 'riskItems', useIncomingContent ? incomingRiskItems : existingRiskItems);
   setMappedField(recordFields, table, 'contentFingerprint', useIncomingContent ? incomingFingerprint : existingFingerprint);
   setMappedField(recordFields, table, 'source', mergedSource);
-  setMappedField(recordFields, table, 'sourceRecordId', input.sourceRecordId || normalizeFieldValue(fields.sourceRecordId ? existingFields[fields.sourceRecordId] : ''));
+  setCanonicalField(recordFields, 'sourceRecordId', input.sourceRecordId || '');
   setMappedField(recordFields, table, 'messageId', input.messageId || normalizeFieldValue(fields.messageId ? existingFields[fields.messageId] : ''));
   setMappedField(recordFields, table, 'sourceRefs', mergeSourceRefs(existingRefs, incomingRefs));
   setMappedField(recordFields, table, 'mergeStatus', mergeStatus);
   setMappedField(recordFields, table, 'conflictStatus', conflictStatus);
   setMappedField(recordFields, table, 'factStatus', factStatus);
-  setMappedField(recordFields, table, 'syncedAt', formatDateTime(new Date(), DEFAULT_TIMEZONE));
+  setCanonicalField(recordFields, 'rawText', input.rawText || '');
+  setCanonicalField(recordFields, 'chatId', input.chatId || '');
+  setCanonicalField(recordFields, 'supervisor', input.supervisor || '', {
+    supervisorOpenId: input.supervisorOpenId || '',
+  });
+  setCanonicalField(recordFields, 'divisionalLeader', input.divisionalLeader || '', {
+    divisionalLeaderOpenId: input.divisionalLeaderOpenId || '',
+  });
+  setCanonicalField(recordFields, 'matchingStatus', input.matchingStatus || '');
+  setCanonicalField(recordFields, 'matchMethod', input.matchMethod || '');
+  setMappedField(recordFields, table, 'reportType', input.reportType || '');
+  setMappedField(recordFields, table, 'dateRange', input.dateRange || '');
+  setCanonicalField(recordFields, 'messageTime', input.messageTime || '');
+  setMappedField(recordFields, table, 'syncedAt', input.syncedAt || formatDateTime(new Date(), DEFAULT_TIMEZONE));
   return recordFields;
+}
+
+function isConflictResult(table, result) {
+  const fieldName = table?.fields?.conflictStatus;
+  return fieldName ? result?.fields?.[fieldName] === '内容冲突' : false;
+}
+
+function updateFactRecordIndex(index, factKey, record, fields) {
+  if (!factKey) return;
+  const indexedRecord = record || index.get(factKey) || {};
+  index.set(factKey, {
+    ...indexedRecord,
+    fields: fields || indexedRecord.fields || {},
+  });
+}
+
+function fieldsEqualForUpdate(incomingFields, existingFields, syncedAtFieldName) {
+  for (const [fieldName, value] of Object.entries(incomingFields || {})) {
+    if (fieldName === syncedAtFieldName) continue;
+    if (!fieldValuesEqual(value, existingFields?.[fieldName])) return false;
+  }
+  return true;
+}
+
+function fieldValuesEqual(a, b) {
+  return JSON.stringify(normalizeComparableFieldValue(a)) === JSON.stringify(normalizeComparableFieldValue(b));
+}
+
+function normalizeComparableFieldValue(value) {
+  if (Array.isArray(value)) return value.map(item => normalizeComparableFieldValue(item));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, item]) => [key, normalizeComparableFieldValue(item)]),
+    );
+  }
+  return value;
 }
 
 function sourceHas(source, part) {

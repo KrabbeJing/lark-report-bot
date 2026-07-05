@@ -27,9 +27,10 @@ export function buildFactKey({ openId = '', name = '', reportDate }) {
   return `name:${displayName}:${date}`;
 }
 
-export function buildSourceRefs({ sourceRecordId = '', messageId = '' } = {}) {
+export function buildSourceRefs({ source = 'form', sourceRecordId = '', messageId = '' } = {}) {
+  const sourceRecordPrefix = source === 'chat' ? 'chat_raw' : source || 'form';
   return [
-    sourceRecordId ? `form:${sourceRecordId}` : '',
+    sourceRecordId ? `${sourceRecordPrefix}:${sourceRecordId}` : '',
     messageId ? `chat:${messageId}` : '',
   ].filter(Boolean).join('\n');
 }

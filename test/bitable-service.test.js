@@ -157,8 +157,14 @@ test('reconciles form and chat sources with form priority and conflict status', 
         fields: {
           factKey: '事实唯一键',
           reportDate: '日报日期',
+          reporterName: '实际日报提交人',
           reporterNameText: '日报提交人姓名',
           memberOpenId: '成员OpenID',
+          senderOpenId: '发送人OpenID',
+          project: '所属板块',
+          agileGroup: '敏捷小组',
+          supervisor: '直属上级',
+          divisionalLeader: '分管领导',
           workItems: '今日工作总结',
           tomorrowPlanItems: '明日工作计划',
           riskItems: '遇到的问题',
@@ -167,11 +173,21 @@ test('reconciles form and chat sources with form priority and conflict status', 
           sourceRecordId: '来源记录ID',
           messageId: '来源消息ID',
           sourceRefs: '来源组合',
+          matchMethod: '匹配方式',
+          matchingStatus: '匹配状态',
           mergeStatus: '合并状态',
           conflictStatus: '冲突状态',
           factStatus: '事实记录状态',
+          rawText: '原始内容',
+          chatId: '群ID',
+          messageTime: '消息时间',
         },
-        fieldTypes: { reportDate: 'date' },
+        fieldTypes: {
+          reportDate: 'date',
+          reporterName: 'user',
+          supervisor: 'user',
+          divisionalLeader: 'user',
+        },
       },
     }],
   }).groups[0];
@@ -237,21 +253,37 @@ test('marks same-content form and chat facts as duplicate merged without conflic
         fields: {
           factKey: '事实唯一键',
           reportDate: '日报日期',
+          reporterName: '实际日报提交人',
           reporterNameText: '日报提交人姓名',
           memberOpenId: '成员OpenID',
+          senderOpenId: '发送人OpenID',
           workItems: '今日工作总结',
           tomorrowPlanItems: '明日工作计划',
           riskItems: '遇到的问题',
+          project: '所属板块',
+          agileGroup: '敏捷小组',
+          supervisor: '直属上级',
+          divisionalLeader: '分管领导',
+          rawText: '原始内容',
+          chatId: '群ID',
           contentFingerprint: '内容指纹',
           source: '日报来源',
           sourceRecordId: '来源记录ID',
           messageId: '来源消息ID',
           sourceRefs: '来源组合',
+          messageTime: '消息时间',
+          matchMethod: '匹配方式',
+          matchingStatus: '匹配状态',
           mergeStatus: '合并状态',
           conflictStatus: '冲突状态',
           factStatus: '事实记录状态',
         },
-        fieldTypes: { reportDate: 'date' },
+        fieldTypes: {
+          reportDate: 'date',
+          reporterName: 'user',
+          supervisor: 'user',
+          divisionalLeader: 'user',
+        },
       },
     }],
   }).groups[0];
@@ -319,21 +351,37 @@ test('preserves existing form content when later chat source conflicts', async (
         fields: {
           factKey: '事实唯一键',
           reportDate: '日报日期',
+          reporterName: '实际日报提交人',
           reporterNameText: '日报提交人姓名',
           memberOpenId: '成员OpenID',
+          senderOpenId: '发送人OpenID',
+          project: '所属板块',
+          agileGroup: '敏捷小组',
+          supervisor: '直属上级',
+          divisionalLeader: '分管领导',
           workItems: '今日工作总结',
           tomorrowPlanItems: '明日工作计划',
           riskItems: '遇到的问题',
+          rawText: '原始内容',
+          chatId: '群ID',
           contentFingerprint: '内容指纹',
           source: '日报来源',
           sourceRecordId: '来源记录ID',
           messageId: '来源消息ID',
           sourceRefs: '来源组合',
+          messageTime: '消息时间',
+          matchMethod: '匹配方式',
+          matchingStatus: '匹配状态',
           mergeStatus: '合并状态',
           conflictStatus: '冲突状态',
           factStatus: '事实记录状态',
         },
-        fieldTypes: { reportDate: 'date' },
+        fieldTypes: {
+          reportDate: 'date',
+          reporterName: 'user',
+          supervisor: 'user',
+          divisionalLeader: 'user',
+        },
       },
     }],
   }).groups[0];
@@ -353,12 +401,26 @@ test('preserves existing form content when later chat source conflicts', async (
               record_id: 'rec_fact',
               fields: {
                 事实唯一键: 'open_id:ou_liu:2026-07-01',
+                实际日报提交人: [{ id: 'ou_liu', name: '刘喜双' }],
+                日报提交人姓名: '刘喜双',
+                成员OpenID: 'ou_liu',
+                发送人OpenID: 'ou_form_sender',
+                所属板块: '表单板块',
+                敏捷小组: '表单敏捷组',
                 今日工作总结: { text: '1、表单内容' },
                 明日工作计划: ['2、表单明日计划'],
                 遇到的问题: { text: '3、表单风险' },
                 内容指纹: existingFingerprint,
                 日报来源: 'form+chat',
+                来源记录ID: 'rec_form',
                 来源组合: 'form:rec_form',
+                直属上级: [{ id: 'ou_mgr', name: '王经理' }],
+                分管领导: [{ id: 'ou_leader', name: '赵总' }],
+                匹配方式: 'open_id',
+                匹配状态: '已匹配',
+                原始内容: '表单原始内容',
+                群ID: 'oc_form',
+                消息时间: '2026/07/01 09:00:00',
               },
             }],
           },
@@ -380,19 +442,39 @@ test('preserves existing form content when later chat source conflicts', async (
     tomorrowPlanItems: '2、群聊不同计划',
     riskItems: '3、群聊不同风险',
     source: 'chat',
+    sourceRecordId: 'rec_raw',
     messageId: 'om_chat',
+    project: '群聊板块',
+    agileGroup: '群聊敏捷组',
+    rawText: '群聊原始内容',
+    chatId: 'oc_chat',
+    messageTime: '2026/07/01 18:00:00',
   });
 
   assert.equal(result.updated, true);
   assert.equal(updatePayload.data.fields['日报来源'], 'form+chat');
+  assert.deepEqual(updatePayload.data.fields['实际日报提交人'], [{ id: 'ou_liu', name: '刘喜双' }]);
+  assert.equal(updatePayload.data.fields['日报提交人姓名'], '刘喜双');
+  assert.equal(updatePayload.data.fields['成员OpenID'], 'ou_liu');
+  assert.equal(updatePayload.data.fields['发送人OpenID'], 'ou_form_sender');
+  assert.equal(updatePayload.data.fields['来源记录ID'], 'rec_form');
+  assert.equal(updatePayload.data.fields['所属板块'], '表单板块');
+  assert.equal(updatePayload.data.fields['敏捷小组'], '表单敏捷组');
   assert.equal(updatePayload.data.fields['今日工作总结'], '1、表单内容');
   assert.equal(updatePayload.data.fields['明日工作计划'], '2、表单明日计划');
   assert.equal(updatePayload.data.fields['遇到的问题'], '3、表单风险');
+  assert.deepEqual(updatePayload.data.fields['直属上级'], [{ id: 'ou_mgr', name: '王经理' }]);
+  assert.deepEqual(updatePayload.data.fields['分管领导'], [{ id: 'ou_leader', name: '赵总' }]);
+  assert.equal(updatePayload.data.fields['匹配方式'], 'open_id');
+  assert.equal(updatePayload.data.fields['匹配状态'], '已匹配');
+  assert.equal(updatePayload.data.fields['原始内容'], '表单原始内容');
+  assert.equal(updatePayload.data.fields['群ID'], 'oc_form');
+  assert.equal(updatePayload.data.fields['消息时间'], '2026/07/01 09:00:00');
   assert.equal(updatePayload.data.fields['内容指纹'], existingFingerprint);
   assert.equal(updatePayload.data.fields['合并状态'], '内容冲突');
   assert.equal(updatePayload.data.fields['冲突状态'], '内容冲突');
   assert.equal(updatePayload.data.fields['事实记录状态'], '待人工确认');
-  assert.equal(updatePayload.data.fields['来源组合'], 'form:rec_form\nchat:om_chat');
+  assert.equal(updatePayload.data.fields['来源组合'], 'form:rec_form\nchat_raw:rec_raw\nchat:om_chat');
 });
 
 test('merges existing chat source refs when incoming form source wins', async () => {
@@ -958,6 +1040,10 @@ test('syncs source form daily records into fact table with contact enrichment', 
           supervisor: '直属上级',
         },
       },
+      chatDailyRawTable: {
+        appToken: 'bas_test',
+        tableId: 'tbl_chat_raw',
+      },
       dailyFactTable: {
         appToken: 'bas_test',
         tableId: 'tbl_fact',
@@ -1017,6 +1103,9 @@ test('syncs source form daily records into fact table with contact enrichment', 
               },
             };
           }
+          if (path.table_id === 'tbl_chat_raw') {
+            return { data: { items: [] } };
+          }
           if (path.table_id === 'tbl_fact') {
             return { data: { items: [] } };
           }
@@ -1069,6 +1158,294 @@ test('syncs source form daily records into fact table with contact enrichment', 
 2、整理千分卡考核指标，完成填报`);
   assert.deepEqual(createPayload.data.fields['直属上级'], [{ id: 'ou_mgr', name: '王经理' }]);
   assert.equal(createPayload.data.fields['匹配状态'], '已匹配');
+});
+
+test('skips daily fact sync when any source or fact table is not configured', async () => {
+  const configured = {
+    dailyTable: { appToken: 'bas_test', tableId: 'tbl_source' },
+    chatDailyRawTable: { appToken: 'bas_test', tableId: 'tbl_chat_raw' },
+    dailyFactTable: { appToken: 'bas_test', tableId: 'tbl_fact' },
+  };
+  const cases = [
+    { dailyTable: null },
+    { chatDailyRawTable: null },
+    { dailyFactTable: null },
+  ];
+
+  for (const override of cases) {
+    const group = normalizeConfig({
+      groups: [{
+        chatId: 'oc_test',
+        ...configured,
+        ...override,
+      }],
+    }).groups[0];
+    const service = new BitableService({});
+    const result = await service.syncDailyFactRecordsForGroup(group);
+    assert.equal(result.skipped, true);
+    assert.match(result.reason, /not configured/);
+  }
+});
+
+test('syncs main chat raw records into fact table for each report date', async () => {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      project: '支付平台',
+      agileGroup: 'A组',
+      dailyTable: {
+        appToken: 'bas_test',
+        tableId: 'tbl_source',
+      },
+      chatDailyRawTable: {
+        appToken: 'bas_test',
+        tableId: 'tbl_chat_raw',
+        fields: {
+          messageId: '消息ID',
+          chatId: '群ID',
+          senderOpenId: '发送人OpenID',
+          reporterName: '标题姓名',
+          reportDateRange: '日报日期范围',
+          reportDates: '拆分日期列表',
+          rawText: '原始消息文本',
+          workSummaryText: '解析后工作总结',
+          messageTime: '消息时间',
+          rawRecordStatus: '原始记录状态',
+        },
+      },
+      dailyFactTable: {
+        appToken: 'bas_test',
+        tableId: 'tbl_fact',
+        fields: {
+          factKey: '事实唯一键',
+          reportDate: '日报日期',
+          reporterNameText: '日报提交人姓名',
+          memberOpenId: '成员OpenID',
+          project: '所属板块',
+          agileGroup: '敏捷小组',
+          workItems: '今日工作总结',
+          rawText: '原始消息文本',
+          chatId: '群ID',
+          source: '日报来源',
+          sourceRecordId: '来源记录ID',
+          messageId: '来源消息ID',
+          sourceRefs: '来源组合',
+          reportType: '日报类型',
+          dateRange: '日期覆盖范围',
+          mergeStatus: '合并状态',
+          conflictStatus: '冲突状态',
+          factStatus: '事实记录状态',
+        },
+        fieldTypes: { reportDate: 'date' },
+      },
+    }],
+  }).groups[0];
+
+  const creates = [];
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async ({ path }) => {
+          if (path.table_id === 'tbl_source') return { data: { items: [] } };
+          if (path.table_id === 'tbl_fact') return { data: { items: [] } };
+          if (path.table_id === 'tbl_chat_raw') {
+            return {
+              data: {
+                items: [
+                  {
+                    record_id: 'rec_raw_main',
+                    fields: {
+                      消息ID: 'om_chat',
+                      群ID: 'oc_test',
+                      发送人OpenID: 'ou_liu',
+                      标题姓名: '刘喜双',
+                      日报日期范围: '2026-07-01~2026-07-02',
+                      拆分日期列表: '2026-07-01\n2026-07-02',
+                      原始消息文本: '刘喜双7.1-7.2日报',
+                      解析后工作总结: '1、完成数据提取',
+                      消息时间: '2026/07/02 10:00:00',
+                      原始记录状态: '主版本',
+                    },
+                  },
+                  {
+                    record_id: 'rec_raw_history',
+                    fields: {
+                      消息ID: 'om_old',
+                      发送人OpenID: 'ou_liu',
+                      标题姓名: '刘喜双',
+                      拆分日期列表: '2026-07-01',
+                      原始记录状态: '历史版本',
+                    },
+                  },
+                ],
+              },
+            };
+          }
+          return { data: { items: [] } };
+        },
+        create: async (payload) => {
+          creates.push(payload);
+          return { data: { data: { record: { record_id: `rec_fact_${creates.length}`, fields: payload.data.fields } } } };
+        },
+      },
+    },
+  });
+
+  const result = await service.syncDailyFactRecordsForGroup(group, {
+    now: new Date('2026-07-03T10:10:00.000Z'),
+    timezone: 'Asia/Shanghai',
+    lookbackDays: 3,
+  });
+
+  assert.equal(result.created, 2);
+  assert.equal(result.filtered, 1);
+  assert.equal(result.sourceCounts.chatRaw, 2);
+  assert.equal(result.sourceCounts.chatFacts, 2);
+  assert.deepEqual(creates.map(payload => payload.data.fields['日报日期']), [
+    Date.UTC(2026, 6, 1),
+    Date.UTC(2026, 6, 2),
+  ]);
+  assert.equal(creates[0].data.fields['事实唯一键'], 'open_id:ou_liu:2026-07-01');
+  assert.equal(creates[0].data.fields['日报来源'], 'chat');
+  assert.equal(creates[0].data.fields['来源记录ID'], 'rec_raw_main');
+  assert.equal(creates[0].data.fields['来源消息ID'], 'om_chat');
+  assert.equal(creates[0].data.fields['来源组合'], 'chat_raw:rec_raw_main\nchat:om_chat');
+  assert.equal(creates[0].data.fields['今日工作总结'], '1、完成数据提取');
+  assert.equal(creates[0].data.fields['原始消息文本'], '刘喜双7.1-7.2日报');
+  assert.equal(creates[0].data.fields['日期覆盖范围'], '2026-07-01~2026-07-02');
+});
+
+test('reuses newly created form fact when syncing matching chat raw in the same run', async () => {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      project: '支付平台',
+      dailyTable: {
+        appToken: 'bas_test',
+        tableId: 'tbl_source',
+        fields: {
+          reportDate: '日报日期',
+          reporterName: '日报提交人',
+          workItems: '今日工作总结',
+        },
+      },
+      chatDailyRawTable: {
+        appToken: 'bas_test',
+        tableId: 'tbl_chat_raw',
+        fields: {
+          messageId: '消息ID',
+          senderOpenId: '发送人OpenID',
+          reporterName: '标题姓名',
+          reportDates: '拆分日期列表',
+          workSummaryText: '解析后工作总结',
+          rawRecordStatus: '原始记录状态',
+        },
+      },
+      dailyFactTable: {
+        appToken: 'bas_test',
+        tableId: 'tbl_fact',
+        fields: {
+          factKey: '事实唯一键',
+          reportDate: '日报日期',
+          reporterNameText: '日报提交人姓名',
+          memberOpenId: '成员OpenID',
+          workItems: '今日工作总结',
+          contentFingerprint: '内容指纹',
+          source: '日报来源',
+          sourceRecordId: '来源记录ID',
+          messageId: '来源消息ID',
+          sourceRefs: '来源组合',
+          mergeStatus: '合并状态',
+          conflictStatus: '冲突状态',
+          factStatus: '事实记录状态',
+        },
+        fieldTypes: { reportDate: 'date' },
+      },
+      contactTable: {
+        appToken: 'bas_test',
+        tableId: 'tbl_contacts',
+      },
+    }],
+  }).groups[0];
+
+  const creates = [];
+  const updates = [];
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async ({ path }) => {
+          if (path.table_id === 'tbl_source') {
+            return {
+              data: {
+                items: [{
+                  record_id: 'rec_form',
+                  fields: {
+                    日报日期: Date.UTC(2026, 6, 1),
+                    日报提交人: [{ id: 'ou_liu', name: '刘喜双' }],
+                    今日工作总结: '1、表单内容',
+                  },
+                }],
+              },
+            };
+          }
+          if (path.table_id === 'tbl_chat_raw') {
+            return {
+              data: {
+                items: [{
+                  record_id: 'rec_raw',
+                  fields: {
+                    消息ID: 'om_chat',
+                    发送人OpenID: 'ou_liu',
+                    标题姓名: '刘喜双',
+                    拆分日期列表: '2026-07-01',
+                    解析后工作总结: '1、群聊内容',
+                    原始记录状态: '主版本',
+                  },
+                }],
+              },
+            };
+          }
+          if (path.table_id === 'tbl_contacts') {
+            return {
+              data: {
+                items: [{
+                  record_id: 'rec_contact',
+                  fields: {
+                    团队成员: [{ id: 'ou_liu', name: '刘喜双' }],
+                  },
+                }],
+              },
+            };
+          }
+          if (path.table_id === 'tbl_fact') return { data: { items: [] } };
+          return { data: { items: [] } };
+        },
+        create: async (payload) => {
+          creates.push(payload);
+          return { data: { data: { record: { record_id: 'rec_fact', fields: payload.data.fields } } } };
+        },
+        update: async (payload) => {
+          updates.push(payload);
+          return { data: { data: { record: { record_id: payload.path.record_id, fields: payload.data.fields } } } };
+        },
+      },
+    },
+  });
+
+  const result = await service.syncDailyFactRecordsForGroup(group, {
+    now: new Date('2026-07-03T10:10:00.000Z'),
+    timezone: 'Asia/Shanghai',
+    lookbackDays: 3,
+  });
+
+  assert.equal(result.created, 1);
+  assert.equal(result.updated, 1);
+  assert.equal(creates.length, 1);
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].path.record_id, 'rec_fact');
+  assert.equal(updates[0].data.fields['日报来源'], 'form+chat');
+  assert.equal(updates[0].data.fields['来源记录ID'], 'rec_form');
+  assert.equal(updates[0].data.fields['来源组合'], 'form:rec_form\nchat_raw:rec_raw\nchat:om_chat');
 });
 
 test('throws when bitable returns a non-zero business code', async () => {

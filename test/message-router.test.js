@@ -176,7 +176,18 @@ test('writes configured chat reports to raw table and fact table', async () => {
     client: {},
     messenger: { replyText: async () => {} },
     bitable: {
-      findTeamContact: async () => ({ teamMember: '刘喜双', teamMemberId: 'ou_liu', matchingStatus: '已匹配' }),
+      findTeamContact: async () => ({
+        teamName: '渠道创新建设',
+        agileGroup: 'A组',
+        teamMember: '刘喜双',
+        teamMemberId: 'ou_liu',
+        supervisor: '王经理',
+        supervisorOpenId: 'ou_mgr',
+        divisionalLeader: '赵总',
+        divisionalLeaderOpenId: 'ou_leader',
+        matchingStatus: '已匹配',
+        matchMethod: 'open_id',
+      }),
       createChatDailyRawRecord: async (group, parsed, context) => {
         calls.push({ type: 'raw', group, parsed, context });
         return { created: true, record: { record_id: 'rec_raw' } };
@@ -196,6 +207,18 @@ test('writes configured chat reports to raw table and fact table', async () => {
   assert.equal(calls[1].type, 'fact');
   assert.equal(calls[1].input.factKey, 'open_id:ou_liu:2026-06-30');
   assert.equal(calls[1].input.source, 'chat');
+  assert.equal(calls[1].input.chatId, 'oc_test');
+  assert.equal(calls[1].input.senderOpenId, 'ou_liu');
+  assert.equal(calls[1].input.rawText, `刘喜双6.30工作日报
+1、补发昨日数据提取进展`);
+  assert.equal(calls[1].input.project, '渠道创新建设');
+  assert.equal(calls[1].input.agileGroup, 'A组');
+  assert.equal(calls[1].input.supervisor, '王经理');
+  assert.equal(calls[1].input.supervisorOpenId, 'ou_mgr');
+  assert.equal(calls[1].input.divisionalLeader, '赵总');
+  assert.equal(calls[1].input.divisionalLeaderOpenId, 'ou_leader');
+  assert.equal(calls[1].input.matchingStatus, '已匹配');
+  assert.equal(calls[1].input.matchMethod, 'open_id');
 });
 
 test('writes raw and fact records without legacy daily table configured', async () => {

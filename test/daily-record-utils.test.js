@@ -28,3 +28,10 @@ test('builds fact key with open id first and name fallback', () => {
 test('builds compact source refs', () => {
   assert.equal(buildSourceRefs({ sourceRecordId: 'rec_1', messageId: 'om_1' }), 'form:rec_1\nchat:om_1');
 });
+
+test('labels chat raw source record refs separately from form refs', () => {
+  assert.equal(
+    buildSourceRefs({ source: 'chat', sourceRecordId: 'rec_raw_1', messageId: 'om_1' }),
+    'chat_raw:rec_raw_1\nchat:om_1',
+  );
+});
