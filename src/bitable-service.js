@@ -325,27 +325,40 @@ export class BitableService {
         }
 
         try {
+          const contact = await this.findTeamContactForReport(group, {
+            reporterName: raw.reporterName,
+            senderOpenId: raw.senderOpenId,
+          }, rawRecord.record_id);
+          const reporterName = contact?.teamMember || raw.reporterName;
+          const memberOpenId = contact?.teamMemberId || raw.senderOpenId;
           const input = {
             factKey: buildFactKey({
-              openId: raw.senderOpenId,
-              name: raw.reporterName,
+              openId: memberOpenId,
+              name: reporterName,
               reportDate,
             }),
             sourceRecordId: rawRecord.record_id || '',
             messageId: raw.messageId,
             source: 'chat',
             reportDate,
-            reporterName: raw.reporterName,
-            memberOpenId: raw.senderOpenId,
+            reporterName,
+            memberOpenId,
             senderOpenId: raw.senderOpenId,
             workSummaryText: raw.workSummaryText,
             rawText: raw.rawText,
             chatId: raw.chatId,
-            project: raw.project,
-            agileGroup: raw.agileGroup,
+            project: contact?.teamName || raw.project,
+            agileGroup: contact?.agileGroup || raw.agileGroup,
+            supervisor: contact?.supervisor || '',
+            supervisorOpenId: contact?.supervisorOpenId || '',
+            divisionalLeader: contact?.divisionalLeader || '',
+            divisionalLeaderOpenId: contact?.divisionalLeaderOpenId || '',
+            matchingStatus: contact?.matchingStatus || (contact ? '已匹配' : '未匹配'),
+            matchMethod: contact?.matchMethod || '',
             reportType: raw.reportType,
             dateRange: raw.dateRange,
             messageTime: raw.messageTime,
+            contact,
             syncedAt: formatDateTime(now, timezone),
           };
           const result = await this.upsertDailyFactRecord(group, input, {

@@ -1435,6 +1435,133 @@ test('syncs main chat raw records into fact table for each report date', async (
   assert.equal(creates[0].data.fields['日期覆盖范围'], '2026-07-01~2026-07-02');
 });
 
+test('syncs chat raw facts with reporter real name from contact table', async () => {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      project: '默认板块',
+      dailyTable: {
+        appToken: 'bas_test',
+        tableId: 'tbl_source',
+      },
+      chatDailyRawTable: {
+        appToken: 'bas_test',
+        tableId: 'tbl_chat_raw',
+        fields: {
+          messageId: '消息ID',
+          senderOpenId: '发送人OpenID',
+          reporterName: '标题姓名',
+          reportDates: '拆分日期列表',
+          workSummaryText: '解析后工作总结',
+          rawRecordStatus: '原始记录状态',
+        },
+      },
+      dailyFactTable: {
+        appToken: 'bas_test',
+        tableId: 'tbl_fact',
+        fields: {
+          factKey: '事实唯一键',
+          reportDate: '日报日期',
+          reporterName: '实际日报提交人',
+          reporterNameText: '日报提交人姓名',
+          memberOpenId: '成员OpenID',
+          project: '所属板块',
+          agileGroup: '敏捷小组',
+          supervisor: '直属上级',
+          workItems: '今日工作总结',
+          source: '日报来源',
+          sourceRecordId: '来源记录ID',
+        },
+        fieldTypes: {
+          reportDate: 'date',
+          reporterName: 'user',
+          supervisor: 'user',
+        },
+      },
+      contactTable: {
+        appToken: 'bas_test',
+        tableId: 'tbl_contacts',
+        fields: {
+          teamName: '团队名称',
+          teamMember: '团队成员',
+          memberRealName: '成员真实姓名',
+          memberAliases: '成员别名',
+          currentOpenId: '当前OpenID',
+          agileGroup: '敏捷小组',
+          supervisor: '直属上级',
+        },
+      },
+    }],
+  }).groups[0];
+
+  let createPayload = null;
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async ({ path }) => {
+          if (path.table_id === 'tbl_source') return { data: { items: [] } };
+          if (path.table_id === 'tbl_fact') return { data: { items: [] } };
+          if (path.table_id === 'tbl_chat_raw') {
+            return {
+              data: {
+                items: [{
+                  record_id: 'rec_raw',
+                  fields: {
+                    消息ID: 'om_chat',
+                    发送人OpenID: 'ou_external',
+                    标题姓名: '小刘',
+                    拆分日期列表: '2026-07-01',
+                    解析后工作总结: '1、完成数据提取',
+                    原始记录状态: '主版本',
+                  },
+                }],
+              },
+            };
+          }
+          if (path.table_id === 'tbl_contacts') {
+            return {
+              data: {
+                items: [{
+                  record_id: 'rec_contact',
+                  fields: {
+                    团队名称: '渠道创新建设',
+                    团队成员: [{ id: 'ou_external', name: '用户709677' }],
+                    成员真实姓名: '刘喜双',
+                    成员别名: '小刘',
+                    当前OpenID: 'ou_external',
+                    敏捷小组: '收单项目组',
+                    直属上级: [{ id: 'ou_mgr', name: '王经理' }],
+                  },
+                }],
+              },
+            };
+          }
+          return { data: { items: [] } };
+        },
+        create: async (payload) => {
+          createPayload = payload;
+          return { data: { data: { record: { record_id: 'rec_fact', fields: payload.data.fields } } } };
+        },
+      },
+    },
+  });
+
+  const result = await service.syncDailyFactRecordsForGroup(group, {
+    now: new Date('2026-07-03T10:10:00.000Z'),
+    timezone: 'Asia/Shanghai',
+    lookbackDays: 3,
+  });
+
+  assert.equal(result.created, 1);
+  assert.equal(createPayload.data.fields['事实唯一键'], 'open_id:ou_external:2026-07-01');
+  assert.deepEqual(createPayload.data.fields['实际日报提交人'], [{ id: 'ou_external', name: '刘喜双' }]);
+  assert.equal(createPayload.data.fields['日报提交人姓名'], '刘喜双');
+  assert.equal(createPayload.data.fields['成员OpenID'], 'ou_external');
+  assert.equal(createPayload.data.fields['所属板块'], '渠道创新建设');
+  assert.equal(createPayload.data.fields['敏捷小组'], '收单项目组');
+  assert.deepEqual(createPayload.data.fields['直属上级'], [{ id: 'ou_mgr', name: '王经理' }]);
+});
+
 test('reuses newly created form fact when syncing matching chat raw in the same run', async () => {
   const group = normalizeConfig({
     groups: [{
