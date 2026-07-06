@@ -52,6 +52,7 @@
         "fields": {
           "teamName": "团队名称",
           "teamMember": "团队成员",
+          "agileGroup": "敏捷小组",
           "teamRole": "团队身份",
           "supervisor": "直属上级"
         }
@@ -70,6 +71,8 @@
         },
         "fieldTypes": {
           "reportDate": "date",
+          "reporterName": "user",
+          "supervisor": "user",
           "messageTime": "datetime",
           "syncedAt": "datetime"
         }

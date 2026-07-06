@@ -68,14 +68,19 @@ test('normalizes chat raw and daily fact table configs', () => {
   assert.equal(group.dailyFactTable.fields.contentFingerprint, '内容指纹');
 });
 
-test('local group configs keep daily fact supervisor as text field', () => {
+test('local group configs map supervisor users and contact agile groups', () => {
   for (const filePath of ['config/groups.json', 'config/groups.personal.json']) {
     const config = normalizeConfig(JSON.parse(readFileSync(filePath, 'utf8')));
     for (const group of config.groups) {
-      assert.notEqual(
+      assert.equal(
         group.dailyFactTable?.fieldTypes?.supervisor,
         'user',
-        `${filePath} ${group.chatId} dailyFactTable.直属上级 是多行文本，不能配置为 user`,
+        `${filePath} ${group.chatId} dailyFactTable.直属上级 应配置为人员字段 user`,
+      );
+      assert.equal(
+        group.contactTable?.fields?.agileGroup,
+        '敏捷小组',
+        `${filePath} ${group.chatId} contactTable 需要映射敏捷小组字段`,
       );
     }
   }
