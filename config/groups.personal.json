@@ -4,7 +4,7 @@
   "errorReporting": {
     "notifyInChat": false,
     "adminOpenIds": [],
-    "adminChatIds": []
+    "adminChatIds": ["oc_62db465477f911b8825e5a01d01f520b"]
   },
   "weeklyPush": {
     "enabled": true,
@@ -55,6 +55,7 @@
         "wikiUrl": "https://acncyn3n5k6i.feishu.cn/wiki/TOnDw6LUAiDNi4kc8yYcITpRnde?fromScene=spaceOverview&table=tbl0JWIeyHu8WSCU&view=vewf9t6U5V",
         "fieldTypes": {
           "reportDate": "date",
+          "reporterName": "user",
           "messageTime": "datetime",
           "syncedAt": "datetime"
         }

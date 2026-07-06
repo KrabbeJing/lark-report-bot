@@ -987,7 +987,7 @@ function formatFieldValue(table, key, value, context = {}) {
     const id = getUserFieldOpenId(key, context);
     const name = Array.isArray(value) ? value.join('\n') : String(value || '');
     if (id) return [{ id, name }];
-    if (!name) return undefined;
+    return undefined;
   }
 
   if (Array.isArray(value)) return value.join('\n');

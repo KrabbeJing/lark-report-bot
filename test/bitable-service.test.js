@@ -1059,6 +1059,35 @@ test('formats configured datetime fields as millisecond timestamps', () => {
   assert.equal(fields['消息时间'], Date.parse('2026-07-06T03:13:50.000Z'));
 });
 
+test('skips configured user fields when no open id is available', () => {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      project: '支付平台',
+      dailyFactTable: {
+        appToken: 'bas_test',
+        tableId: 'tbl_fact',
+        fieldTypes: {
+          reporterName: 'user',
+        },
+      },
+    }],
+  }).groups[0];
+  const service = new BitableService({});
+  const fields = service.buildDailyRecordFields(group, {
+    highConfidence: true,
+    reportDate: '2026-07-06',
+    reporterName: '王治坤',
+    rawText: '原文',
+    workItems: ['事项1'],
+    riskItems: [],
+  }, {
+    table: group.dailyFactTable,
+  });
+
+  assert.equal(fields['实际日报提交人'], undefined);
+});
+
 test('writes only configured daily fields and preserves numbered summary text', () => {
   const group = normalizeConfig({
     groups: [{
