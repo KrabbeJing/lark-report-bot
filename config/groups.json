@@ -2,7 +2,7 @@
   "timezone": "Asia/Shanghai",
   "botNames": ["数金小助手"],
   "weeklyPush": {
-    "enabled": false,
+    "enabled": true,
     "dayOfWeek": 6,
     "time": "10:00",
     "timezone": "Asia/Shanghai"
@@ -22,14 +22,12 @@
     {
       "enabled": true,
       "chatId": "oc_127d0a4ec12a42a31de3110fdf9b51f3",
-      "name": "示例项目组日报群",
-      "project": "示例项目组",
+      "name": "测试周报生成",
+      "project": "公司项目组",
       "agileGroup": "示例敏捷小组",
       "pushChatId": "oc_127d0a4ec12a42a31de3110fdf9b51f3",
       "dailyTable": {
-        "appToken": "Ic8FbuOr2aYeBasWrelcFw6enxe",
-        "tableId": "tblHjXGd1QpSXFQX",
-        "viewId": "vewXSKRchw",
+        "wikiUrl": "https://acncyn3n5k6i.feishu.cn/wiki/TOnDw6LUAiDNi4kc8yYcITpRnde?fromScene=spaceOverview&table=tblVaTl5iD5bCXz5&view=vewXSKRchw",
         "fields": {
           "reportDate": "日报日期",
           "project": "所属板块",
@@ -39,16 +37,14 @@
           "riskItems": "遇到的问题",
           "aiSummary": "AI汇总",
           "supervisor": "直属上级"
-        },
-        "fieldTypes": {
-          "reportDate": "date",
-          "reporterName": "user",
-          "supervisor": "user"
-        },
-        "writeFields": ["reportDate", "reporterName", "workItems", "supervisor"]
+        }
       },
-      "chatDailyRawTable": null,
-      "dailyFactTable": null,
+      "chatDailyRawTable": {
+        "wikiUrl": "https://acncyn3n5k6i.feishu.cn/wiki/TOnDw6LUAiDNi4kc8yYcITpRnde?fromScene=spaceOverview&table=tblBwFOi8DzPeXdb&view=vewlDsLhVE",
+      },
+      "dailyFactTable": {
+        "wikiUrl": "https://acncyn3n5k6i.feishu.cn/wiki/TOnDw6LUAiDNi4kc8yYcITpRnde?fromScene=spaceOverview&table=tbl0JWIeyHu8WSCU&view=vewf9t6U5V",
+      },
       "contactTable": {
         "appToken": "Ic8FbuOr2aYeBasWrelcFw6enxe",
         "tableId": "tblz5tlDWsLyFzv7",
@@ -64,9 +60,9 @@
       "weeklySheet": {
         "enabled": false,
         "spreadsheetToken": "",
-        "wikiNodeToken": "BaTOwZsM6ikYjJkhSqOc8e0Ynrh",
-        "spreadsheetUrl": "https://acncyn3n5k6i.feishu.cn/wiki/BaTOwZsM6ikYjJkhSqOc8e0Ynrh?sheet=4dcda2",
-        "templateSheetId": "z51e64",
+        "wikiNodeToken": "AyekwGsr6iGxClkrMM1cb5YCn1d",
+        "spreadsheetUrl": "https://acncyn3n5k6i.feishu.cn/wiki/AyekwGsr6iGxClkrMM1cb5YCn1d?fromScene=spaceOverview&sheet=0Yytpw",
+        "templateSheetId": "R0qnOz",
         "titlePattern": "数字金融部周报 {{weekStart}}-{{weekEnd}}",
         "copyTemplate": true,
         "reportScope": "allDailyTable",
