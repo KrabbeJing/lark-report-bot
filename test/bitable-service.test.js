@@ -83,6 +83,65 @@ test('creates daily record when no technical message id field exists', async () 
   assert.equal(createPayload.params.client_token, undefined);
 });
 
+test('resolves bitable wiki node token before writing records', async () => {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      dailyTable: {
+        wikiUrl: 'https://example.feishu.cn/wiki/WikiNodeToken123?table=tbl_daily&view=vew_daily',
+      },
+    }],
+  }).groups[0];
+  const calls = [];
+  const service = new BitableService({
+    request: async (payload) => {
+      calls.push(payload);
+      return {
+        data: {
+          node: {
+            obj_token: 'bas_from_wiki',
+            obj_type: 'bitable',
+          },
+        },
+      };
+    },
+    bitable: {
+      appTableRecord: {
+        list: async () => ({
+          data: {
+            items: [],
+          },
+        }),
+        create: async (payload) => {
+          calls.push(payload);
+          return {
+            data: {
+              record: {
+                record_id: 'rec_created',
+              },
+            },
+          };
+        },
+      },
+    },
+  });
+
+  await service.createDailyReportRecord(group, {
+    highConfidence: true,
+    reportDate: '2026-07-06',
+    reporterName: '王治坤',
+    rawText: '原文',
+    workItems: ['事项1'],
+    riskItems: [],
+  }, {
+    messageId: 'om_1',
+  });
+
+  assert.equal(calls[0].url, '/open-apis/wiki/v2/spaces/get_node?token=WikiNodeToken123');
+  assert.equal(calls.find(call => call.path)?.path.app_token, 'bas_from_wiki');
+  assert.equal(group.dailyTable.appToken, 'bas_from_wiki');
+});
+
 test('creates chat daily records in fact table when configured', async () => {
   const group = normalizeConfig({
     groups: [{

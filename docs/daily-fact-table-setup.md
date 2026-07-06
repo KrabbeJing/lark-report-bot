@@ -38,7 +38,6 @@
 - 所属板块：文本
 - 敏捷小组：文本
 - 直属上级：人员或文本
-- 分管领导：人员或文本
 - 原文：长文本
 - 今日工作总结：长文本
 - 明日工作计划：长文本
@@ -67,13 +66,47 @@
 - 账号类型：单选或文本
 - 成员状态：单选或文本
 - 敏捷小组：文本
-- 分管领导：人员或文本
+
+第一版不需要增加 `分管领导`。`直属上级` 用于组织汇报关系；如果后续周报/月报的填写人或审核人不是直属上级，再单独增加 `日报实际负责人`、`周报负责人` 或 `审核人` 字段。
+
+## 个人组织与正式组织配置
+
+建议保留两套配置文件：
+
+- `config/groups.personal.json`：个人组织沙盒测试。
+- `config/groups.formal.example.json`：正式组织迁移模板，默认禁用。
+
+启动时通过 `GROUPS_CONFIG_PATH` 切换：
+
+```bash
+GROUPS_CONFIG_PATH=config/groups.personal.json npm start
+```
+
+迁移到正式组织时，只替换 `.env` 的飞书应用凭证，并将 `GROUPS_CONFIG_PATH` 指向正式组织配置。表名、字段名、业务含义应保持一致；`chatId`、`appToken`、`tableId`、`viewId`、人员 `open_id` 不要求也无法保持一致。
+
+表配置支持两种写法：
+
+```json
+{
+  "appToken": "BaseAppToken",
+  "tableId": "tblxxxxxxxxxxxx",
+  "viewId": "vewxxxxxxxx"
+}
+```
+
+也可以直接使用知识库中的多维表格链接，机器人会在请求前解析 wiki 节点对应的 Base token：
+
+```json
+{
+  "wikiUrl": "https://example.feishu.cn/wiki/WikiNodeToken?table=tblxxxxxxxxxxxx&view=vewxxxxxxxx"
+}
+```
 
 ## 启用步骤
 
 1. 建好两张新表和字段。
-2. 在 URL 或多维表格 API 中确认新表 `tableId`。
-3. 更新 `config/groups.json` 的 `chatDailyRawTable` 和 `dailyFactTable`。
+2. 在 URL 或多维表格 API 中确认新表 `tableId`，或直接复制带 `table` 参数的 wiki 链接。
+3. 更新当前环境配置文件的 `chatDailyRawTable` 和 `dailyFactTable`。
 4. 保持 `dailyFactSync.enabled=false`，先用群聊日报手动测试实时链路。
 5. 测试通过后设置 `dailyFactSync.enabled=true`。
 6. 重启机器人服务。

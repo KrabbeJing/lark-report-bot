@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeConfig, parseWeeklySheetLink } from '../src/config.js';
+import { normalizeConfig, parseBitableLink, parseWeeklySheetLink } from '../src/config.js';
 
 test('parses weekly sheet wiki link', () => {
   const parsed = parseWeeklySheetLink('https://acncyn3n5k6i.feishu.cn/wiki/BaTOwZsM6ikYjJkhSqOc8e0Ynrh?sheet=4dcda2');
@@ -65,4 +65,27 @@ test('normalizes chat raw and daily fact table configs', () => {
   assert.equal(group.chatDailyRawTable.fields.reportDateRange, '日报日期范围');
   assert.equal(group.dailyFactTable.fields.factKey, '事实唯一键');
   assert.equal(group.dailyFactTable.fields.contentFingerprint, '内容指纹');
+});
+
+test('parses bitable wiki link with table and view ids', () => {
+  const parsed = parseBitableLink('https://scnbvf7ldg2u.feishu.cn/wiki/WNumwlQuKi8ucak6ZEBcYiYtnH8?table=tblT1DtMmxmHx3cs&view=vewXSKRchw');
+  assert.equal(parsed.wikiNodeToken, 'WNumwlQuKi8ucak6ZEBcYiYtnH8');
+  assert.equal(parsed.tableId, 'tblT1DtMmxmHx3cs');
+  assert.equal(parsed.viewId, 'vewXSKRchw');
+  assert.equal(parsed.appToken, '');
+});
+
+test('normalizes table config from wiki url', () => {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      dailyTable: {
+        wikiUrl: 'https://scnbvf7ldg2u.feishu.cn/wiki/WNumwlQuKi8ucak6ZEBcYiYtnH8?table=tblT1DtMmxmHx3cs&view=vewXSKRchw',
+      },
+    }],
+  }).groups[0];
+
+  assert.equal(group.dailyTable.wikiNodeToken, 'WNumwlQuKi8ucak6ZEBcYiYtnH8');
+  assert.equal(group.dailyTable.tableId, 'tblT1DtMmxmHx3cs');
+  assert.equal(group.dailyTable.viewId, 'vewXSKRchw');
 });

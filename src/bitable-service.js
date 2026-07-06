@@ -5,6 +5,32 @@ import { buildContentFingerprint, buildFactKey, buildSourceRefs, hasSameContentF
 export class BitableService {
   constructor(client) {
     this.client = client;
+    this.tableAppTokenCache = new Map();
+  }
+
+  async resolveTableConfig(table, name = 'table') {
+    if (!table || table.appToken || !table.wikiNodeToken) return table;
+
+    const cached = this.tableAppTokenCache.get(table.wikiNodeToken);
+    if (cached) {
+      table.appToken = cached;
+      return table;
+    }
+
+    if (typeof this.client.request !== 'function') {
+      throw new Error(`${name} 配置了 wikiNodeToken，但当前 client 不支持 wiki 节点解析`);
+    }
+
+    const res = await this.client.request({
+      method: 'GET',
+      url: `/open-apis/wiki/v2/spaces/get_node?token=${table.wikiNodeToken}`,
+    });
+    const node = res?.data?.node;
+    if (!node?.obj_token) throw new Error(`未找到 wiki 节点或节点无 obj_token：${table.wikiNodeToken}`);
+
+    table.appToken = node.obj_token;
+    this.tableAppTokenCache.set(table.wikiNodeToken, table.appToken);
+    return table;
   }
 
   buildDailyRecordFields(group, report, context = {}) {
@@ -53,7 +79,7 @@ export class BitableService {
   }
 
   async createDailyReportRecord(group, report, context = {}) {
-    const table = getDailyWriteTable(group);
+    const table = await this.resolveTableConfig(getDailyWriteTable(group), 'dailyTable');
     assertTable(table, table === group.dailyFactTable ? 'dailyFactTable' : 'dailyTable');
     const existing = await this.findDailyRecordByMessageId(group, context.messageId);
     if (existing) {
@@ -101,13 +127,14 @@ export class BitableService {
   }
 
   async createChatDailyRawRecord(group, report, context = {}) {
-    assertTable(group.chatDailyRawTable, 'chatDailyRawTable');
-    const fields = buildChatRawFields(group.chatDailyRawTable, report, context);
-    const res = await withBitableErrorContext('chatDailyRaw.create', group.chatDailyRawTable, () => (
+    const table = await this.resolveTableConfig(group.chatDailyRawTable, 'chatDailyRawTable');
+    assertTable(table, 'chatDailyRawTable');
+    const fields = buildChatRawFields(table, report, context);
+    const res = await withBitableErrorContext('chatDailyRaw.create', table, () => (
       this.client.bitable.appTableRecord.create({
         path: {
-          app_token: group.chatDailyRawTable.appToken,
-          table_id: group.chatDailyRawTable.tableId,
+          app_token: table.appToken,
+          table_id: table.tableId,
         },
         params: { user_id_type: 'open_id' },
         data: { fields },
@@ -124,8 +151,9 @@ export class BitableService {
 
   async markPreviousChatRawRecordsHistorical(group, report, context = {}) {
     if (!tableIsConfigured(group.chatDailyRawTable)) return { updated: 0 };
-    const records = await this.listRecords(group.chatDailyRawTable, 'chatDailyRaw.findPrevious', { includeView: false });
-    const fields = group.chatDailyRawTable.fields;
+    const table = await this.resolveTableConfig(group.chatDailyRawTable, 'chatDailyRawTable');
+    const records = await this.listRecords(table, 'chatDailyRaw.findPrevious', { includeView: false });
+    const fields = table.fields;
     const dates = new Set((report.reportDates || [report.reportDate]).map(date => String(date || '').trim()).filter(Boolean));
     const incomingSender = String(context.senderOpenId || '').trim();
     const incomingName = String(report.reporterName || '').trim();
@@ -147,11 +175,11 @@ export class BitableService {
     });
 
     for (const record of candidates) {
-      await withBitableErrorContext('chatDailyRaw.markHistorical', group.chatDailyRawTable, () => (
+      await withBitableErrorContext('chatDailyRaw.markHistorical', table, () => (
         this.client.bitable.appTableRecord.update({
           path: {
-            app_token: group.chatDailyRawTable.appToken,
-            table_id: group.chatDailyRawTable.tableId,
+            app_token: table.appToken,
+            table_id: table.tableId,
             record_id: record.record_id,
           },
           data: { fields: { [fields.rawRecordStatus]: '历史版本' } },
@@ -375,7 +403,8 @@ export class BitableService {
   }
 
   async upsertDailyFactRecordFromSource(group, sourceRecord, report, options = {}) {
-    assertTable(group.dailyFactTable, 'dailyFactTable');
+    const table = await this.resolveTableConfig(group.dailyFactTable, 'dailyFactTable');
+    assertTable(table, 'dailyFactTable');
     const sourceRecordId = sourceRecord.record_id || '';
     const existing = options.existingRecord || await this.findDailyFactRecordBySourceRecordId(group, sourceRecordId);
     let contact = null;
@@ -393,7 +422,7 @@ export class BitableService {
       });
     }
     const fields = this.buildDailyRecordFields(group, report, {
-      table: group.dailyFactTable,
+      table,
       sourceRecordId,
       source: 'form',
       senderOpenId: report.senderOpenId,
@@ -403,11 +432,11 @@ export class BitableService {
     });
 
     if (existing) {
-      const res = await withBitableErrorContext('dailyFactSync.target.update', group.dailyFactTable, () => (
+      const res = await withBitableErrorContext('dailyFactSync.target.update', table, () => (
         this.client.bitable.appTableRecord.update({
           path: {
-            app_token: group.dailyFactTable.appToken,
-            table_id: group.dailyFactTable.tableId,
+            app_token: table.appToken,
+            table_id: table.tableId,
             record_id: existing.record_id,
           },
           params: {
@@ -419,11 +448,11 @@ export class BitableService {
       return { updated: true, record: extractRecordFromResponse(res), fields };
     }
 
-    const res = await withBitableErrorContext('dailyFactSync.target.create', group.dailyFactTable, () => (
+    const res = await withBitableErrorContext('dailyFactSync.target.create', table, () => (
       this.client.bitable.appTableRecord.create({
         path: {
-          app_token: group.dailyFactTable.appToken,
-          table_id: group.dailyFactTable.tableId,
+          app_token: table.appToken,
+          table_id: table.tableId,
         },
         params: {
           user_id_type: 'open_id',
@@ -435,18 +464,19 @@ export class BitableService {
   }
 
   async upsertDailyFactRecord(group, input, options = {}) {
-    assertTable(group.dailyFactTable, 'dailyFactTable');
+    const table = await this.resolveTableConfig(group.dailyFactTable, 'dailyFactTable');
+    assertTable(table, 'dailyFactTable');
     const existing = options.existingRecord || await this.findDailyFactRecordByFactKey(group, input.factKey);
-    const fields = buildDailyFactFields(group.dailyFactTable, input, existing);
+    const fields = buildDailyFactFields(table, input, existing);
     if (existing) {
-      if (fieldsEqualForUpdate(fields, existing.fields || {}, group.dailyFactTable.fields.syncedAt)) {
+      if (fieldsEqualForUpdate(fields, existing.fields || {}, table.fields.syncedAt)) {
         return { unchanged: true, record: existing, fields };
       }
-      const res = await withBitableErrorContext('dailyFact.update', group.dailyFactTable, () => (
+      const res = await withBitableErrorContext('dailyFact.update', table, () => (
         this.client.bitable.appTableRecord.update({
           path: {
-            app_token: group.dailyFactTable.appToken,
-            table_id: group.dailyFactTable.tableId,
+            app_token: table.appToken,
+            table_id: table.tableId,
             record_id: existing.record_id,
           },
           params: { user_id_type: 'open_id' },
@@ -456,11 +486,11 @@ export class BitableService {
       return { updated: true, record: extractRecordFromResponse(res), fields };
     }
 
-    const res = await withBitableErrorContext('dailyFact.create', group.dailyFactTable, () => (
+    const res = await withBitableErrorContext('dailyFact.create', table, () => (
       this.client.bitable.appTableRecord.create({
         path: {
-          app_token: group.dailyFactTable.appToken,
-          table_id: group.dailyFactTable.tableId,
+          app_token: table.appToken,
+          table_id: table.tableId,
         },
         params: { user_id_type: 'open_id' },
         data: { fields },
@@ -494,7 +524,7 @@ export class BitableService {
   }
 
   async listAllDailyReportsForRange(group, startDate, endDate) {
-    const table = getDailyReadTable(group);
+    const table = await this.resolveTableConfig(getDailyReadTable(group), 'dailyReadTable');
     assertTable(table, table === group.dailyFactTable ? 'dailyFactTable' : 'dailyTable');
     const records = await this.listRecords(table, 'dailyTable.listAll');
     const fields = table.fields;
@@ -507,7 +537,7 @@ export class BitableService {
   }
 
   async listDailyReportsForRange(group, startDate, endDate) {
-    const table = getDailyReadTable(group);
+    const table = await this.resolveTableConfig(getDailyReadTable(group), 'dailyReadTable');
     assertTable(table, table === group.dailyFactTable ? 'dailyFactTable' : 'dailyTable');
     const records = await this.listRecords(table, 'dailyTable.listRange');
     const fields = table.fields;
@@ -540,14 +570,15 @@ export class BitableService {
       return { skipped: true };
     }
 
+    const table = await this.resolveTableConfig(group.weeklyTable, 'weeklyTable');
     const existing = await this.findWeeklySummaryRecord(group, summary.weekStart);
     const fields = buildWeeklyFields(group, summary, context);
     if (existing) {
-      const res = await withBitableErrorContext('upsertWeeklySummary.update', group.weeklyTable, () => (
+      const res = await withBitableErrorContext('upsertWeeklySummary.update', table, () => (
         this.client.bitable.appTableRecord.update({
           path: {
-            app_token: group.weeklyTable.appToken,
-            table_id: group.weeklyTable.tableId,
+            app_token: table.appToken,
+            table_id: table.tableId,
             record_id: existing.record_id,
           },
           data: { fields },
@@ -556,11 +587,11 @@ export class BitableService {
       return { updated: true, record: extractRecordFromResponse(res), fields };
     }
 
-    const res = await withBitableErrorContext('upsertWeeklySummary.create', group.weeklyTable, () => (
+    const res = await withBitableErrorContext('upsertWeeklySummary.create', table, () => (
       this.client.bitable.appTableRecord.create({
         path: {
-          app_token: group.weeklyTable.appToken,
-          table_id: group.weeklyTable.tableId,
+          app_token: table.appToken,
+          table_id: table.tableId,
         },
         data: { fields },
       })
@@ -580,19 +611,20 @@ export class BitableService {
   }
 
   async listRecords(table, label = 'table.listRecords', options = {}) {
-    assertTable(table, 'table');
+    const resolvedTable = await this.resolveTableConfig(table, 'table');
+    assertTable(resolvedTable, 'table');
     const includeView = options.includeView !== false;
     const items = [];
     let pageToken;
     do {
-      const res = await withBitableErrorContext(label, table, () => (
+      const res = await withBitableErrorContext(label, resolvedTable, () => (
         this.client.bitable.appTableRecord.list({
           path: {
-            app_token: table.appToken,
-            table_id: table.tableId,
+            app_token: resolvedTable.appToken,
+            table_id: resolvedTable.tableId,
           },
           params: {
-            view_id: includeView ? table.viewId || undefined : undefined,
+            view_id: includeView ? resolvedTable.viewId || undefined : undefined,
             page_size: 500,
             page_token: pageToken,
             user_id_type: 'open_id',

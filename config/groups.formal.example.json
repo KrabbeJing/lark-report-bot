@@ -1,0 +1,79 @@
+{
+  "timezone": "Asia/Shanghai",
+  "botNames": ["数金小助手"],
+  "weeklyPush": {
+    "enabled": false,
+    "dayOfWeek": 6,
+    "time": "10:00",
+    "timezone": "Asia/Shanghai"
+  },
+  "dailySupervisorPush": {
+    "enabled": false,
+    "time": "17:00",
+    "timezone": "Asia/Shanghai"
+  },
+  "dailyFactSync": {
+    "enabled": false,
+    "time": "18:10",
+    "timezone": "Asia/Shanghai",
+    "lookbackDays": 7
+  },
+  "groups": [
+    {
+      "enabled": false,
+      "chatId": "正式组织日报群chatId",
+      "name": "正式组织日报群",
+      "project": "正式组织项目组或板块",
+      "agileGroup": "",
+      "pushChatId": "正式组织日报群chatId",
+      "dailyTable": {
+        "wikiUrl": "https://scnbvf7ldg2u.feishu.cn/wiki/WNumwlQuKi8ucak6ZEBcYiYtnH8?table=tblT1DtMmxmHx3cs&view=vewXSKRchw",
+        "fields": {
+          "reportDate": "日报日期",
+          "project": "所属板块",
+          "reporterName": "日报提交人",
+          "workItems": "今日工作总结",
+          "tomorrowPlanItems": "明日工作计划",
+          "riskItems": "遇到的问题",
+          "aiSummary": "AI汇总",
+          "supervisor": "直属上级"
+        },
+        "fieldTypes": {
+          "reportDate": "date"
+        }
+      },
+      "contactTable": {
+        "wikiUrl": "正式组织团队通讯录表wiki链接，需带table和view参数",
+        "fields": {
+          "teamName": "团队名称",
+          "teamMember": "团队成员",
+          "teamRole": "团队身份",
+          "supervisor": "直属上级"
+        }
+      },
+      "chatDailyRawTable": {
+        "wikiUrl": "正式组织群聊日报原始表wiki链接，需带table参数"
+      },
+      "dailyFactTable": {
+        "wikiUrl": "正式组织日报统一事实表wiki链接，需带table参数",
+        "fields": {
+          "divisionalLeader": ""
+        },
+        "fieldTypes": {
+          "reportDate": "date"
+        }
+      },
+      "weeklyTable": null,
+      "weeklySheet": {
+        "enabled": false,
+        "spreadsheetUrl": "正式组织周报模板wiki链接",
+        "templateSheetId": "周报模板sheetId",
+        "titlePattern": "数字金融部周报 {{weekStart}}-{{weekEnd}}",
+        "copyTemplate": true,
+        "reportScope": "allDailyTable",
+        "reuseExisting": true,
+        "skipPushIfExisting": true
+      }
+    }
+  ]
+}

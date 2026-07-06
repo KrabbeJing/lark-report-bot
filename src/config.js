@@ -57,7 +57,7 @@ export const DAILY_FACT_FIELD_KEYS = {
   project: '所属板块',
   agileGroup: '敏捷小组',
   supervisor: '直属上级',
-  divisionalLeader: '分管领导',
+  divisionalLeader: '',
   rawText: '原文',
   workItems: '今日工作总结',
   tomorrowPlanItems: '明日工作计划',
@@ -90,7 +90,7 @@ export const CONTACT_FIELD_KEYS = {
   teamRole: '团队身份',
   agileGroup: '敏捷小组',
   supervisor: '直属上级',
-  divisionalLeader: '分管领导',
+  divisionalLeader: '',
 };
 
 export const WEEKLY_FIELD_KEYS = {
@@ -221,6 +221,8 @@ export function normalizeConfig(raw) {
 
 function normalizeTableConfig(table, defaults) {
   if (!table) return null;
+  const tableUrl = table.url || table.wikiUrl || table.wiki_url || table.baseUrl || table.base_url || '';
+  const parsedLink = parseBitableLink(tableUrl);
   const configuredFields = Object.fromEntries(
     Object.entries({
       ...defaults,
@@ -228,9 +230,11 @@ function normalizeTableConfig(table, defaults) {
     }).filter(([, fieldName]) => Boolean(fieldName)),
   );
   return {
-    appToken: table.appToken || table.app_token || '',
-    tableId: table.tableId || table.table_id || '',
-    viewId: table.viewId || table.view_id || '',
+    appToken: table.appToken || table.app_token || parsedLink.appToken || '',
+    tableId: table.tableId || table.table_id || parsedLink.tableId || '',
+    viewId: table.viewId || table.view_id || parsedLink.viewId || '',
+    wikiNodeToken: table.wikiNodeToken || table.wiki_node_token || parsedLink.wikiNodeToken || '',
+    url: tableUrl,
     fields: configuredFields,
     fieldTypes: table.fieldTypes || table.field_types || {},
     writeFields: table.writeFields || table.write_fields || null,
@@ -268,6 +272,20 @@ export function parseWeeklySheetLink(url) {
   };
 }
 
+export function parseBitableLink(url) {
+  const text = String(url || '');
+  const baseMatch = text.match(/\/base\/([A-Za-z0-9]+)/);
+  const wikiMatch = text.match(/\/wiki\/([A-Za-z0-9]+)/);
+  const tableMatch = text.match(/[?#&]table=([A-Za-z0-9_-]+)/);
+  const viewMatch = text.match(/[?#&]view=([A-Za-z0-9_-]+)/);
+  return {
+    appToken: baseMatch ? baseMatch[1] : '',
+    wikiNodeToken: wikiMatch ? wikiMatch[1] : '',
+    tableId: tableMatch ? tableMatch[1] : '',
+    viewId: viewMatch ? viewMatch[1] : '',
+  };
+}
+
 function mergeWeeklySheetCellMap(defaultMap, overrideMap) {
   return {
     ...defaultMap,
@@ -288,5 +306,5 @@ export function findGroupByChatId(config, chatId) {
 }
 
 export function tableIsConfigured(table) {
-  return Boolean(table?.appToken && table?.tableId);
+  return Boolean((table?.appToken || table?.wikiNodeToken) && table?.tableId);
 }
