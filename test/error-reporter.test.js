@@ -53,6 +53,8 @@ test('sends handler errors to configured admin open ids and chat ids', async () 
   assert.equal(calls[0][1], 'ou_admin');
   assert.match(calls[0][2], /DatetimeFieldConvFail/);
   assert.match(calls[0][2], /om_1/);
+  assert.match(calls[0][3], /^[A-Za-z0-9-]{1,64}$/);
+  assert.match(calls[1][3], /^[A-Za-z0-9-]{1,64}$/);
   assert.equal(calls[1][0], 'sendText');
   assert.equal(calls[1][1], 'oc_admin');
 });

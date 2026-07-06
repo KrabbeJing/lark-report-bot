@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 export async function reportHandlerError({ err, message, messenger, config }) {
   const errorReporting = config?.errorReporting || {};
   const summary = buildErrorSummary(err, message);
@@ -41,12 +43,11 @@ export function buildErrorSummary(err, message) {
 }
 
 function buildErrorUuid(kind, id, message) {
-  return [
-    'handler-error',
-    kind,
-    id,
-    message?.message_id || Date.now(),
-  ].join('-').slice(0, 64);
+  const digest = createHash('sha256')
+    .update([kind, id, message?.message_id || Date.now()].join('|'))
+    .digest('hex')
+    .slice(0, 32);
+  return `handler-error-${kind}-${digest}`;
 }
 
 function truncateText(text, maxLength) {

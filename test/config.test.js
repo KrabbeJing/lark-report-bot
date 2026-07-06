@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { normalizeConfig, parseBitableLink, parseWeeklySheetLink } from '../src/config.js';
 
 test('parses weekly sheet wiki link', () => {
@@ -65,6 +66,19 @@ test('normalizes chat raw and daily fact table configs', () => {
   assert.equal(group.chatDailyRawTable.fields.reportDateRange, '日报日期范围');
   assert.equal(group.dailyFactTable.fields.factKey, '事实唯一键');
   assert.equal(group.dailyFactTable.fields.contentFingerprint, '内容指纹');
+});
+
+test('local group configs keep daily fact supervisor as text field', () => {
+  for (const filePath of ['config/groups.json', 'config/groups.personal.json']) {
+    const config = normalizeConfig(JSON.parse(readFileSync(filePath, 'utf8')));
+    for (const group of config.groups) {
+      assert.notEqual(
+        group.dailyFactTable?.fieldTypes?.supervisor,
+        'user',
+        `${filePath} ${group.chatId} dailyFactTable.直属上级 是多行文本，不能配置为 user`,
+      );
+    }
+  }
 });
 
 test('parses bitable wiki link with table and view ids', () => {

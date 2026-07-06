@@ -56,7 +56,6 @@
         "fieldTypes": {
           "reportDate": "date",
           "reporterName": "user",
-          "supervisor": "user",
           "messageTime": "datetime",
           "syncedAt": "datetime"
         }
