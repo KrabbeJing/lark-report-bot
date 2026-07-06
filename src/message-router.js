@@ -94,6 +94,7 @@ export async function handleMessageEvent({
     const context = {
       messageId: message.message_id,
       chatId: message.chat_id,
+      chatName: group?.name || group?.project || '',
       senderOpenId,
       source: mentioned ? 'mention_chat' : 'chat',
       messageTimeText: formatDateTime(messageTime, config.timezone),

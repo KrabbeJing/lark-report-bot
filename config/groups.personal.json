@@ -56,6 +56,7 @@
         "fieldTypes": {
           "reportDate": "date",
           "reporterName": "user",
+          "supervisor": "user",
           "messageTime": "datetime",
           "syncedAt": "datetime"
         }
@@ -67,6 +68,7 @@
         "fields": {
           "teamName": "团队名称",
           "teamMember": "团队成员",
+          "memberRealName": "成员真实名称",
           "teamRole": "团队身份",
           "supervisor": "直属上级"
         }

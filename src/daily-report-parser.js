@@ -14,7 +14,6 @@ const DATE_PATTERNS = [
 
 const ITEM_RE = /^\s*(?:[【\[]\s*)?(?:\d+|[一二三四五六七八九十]+)(?:\s*[】\]]|[.、)\）])\s*(.+)$/;
 const BULLET_RE = /^\s*[-*•]\s*(.+)$/;
-const RISK_RE = /(风险|阻塞|困难|问题|依赖|待协调|延期|延迟|卡点|无法|未完成|需关注|异常)/;
 const SECTION_RE = /^(今日工作总结|今日工作|今天工作|本日工作|工作总结|明日工作计划|明日计划|明天计划|明天工作|遇到的问题或需求的协助|遇到的问题|问题|风险|阻塞|需求协助)\s*[：:]\s*(.*)$/;
 
 export function parseDailyReportText(text, options = {}) {
@@ -37,11 +36,7 @@ export function parseDailyReportText(text, options = {}) {
   const workSummaryText = buildWorkSummaryText(lines.slice(1), sections);
   const tomorrowPlanItems = extractWorkItems(sections.plan);
   const explicitRiskItems = extractWorkItems(sections.risk);
-  const riskItems = [
-    ...explicitRiskItems,
-    ...workItems.filter(item => RISK_RE.test(item)),
-    ...tomorrowPlanItems.filter(item => RISK_RE.test(item)),
-  ].filter((item, index, arr) => arr.indexOf(item) === index);
+  const riskItems = explicitRiskItems;
 
   let confidence = 0;
   if (hasReportKeyword) confidence += 0.45;

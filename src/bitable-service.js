@@ -1037,7 +1037,9 @@ function normalizeContactRecord(record, fields) {
   const member = normalizePersonValue(fields.teamMember ? f[fields.teamMember] : '');
   const supervisor = normalizePersonValue(fields.supervisor ? f[fields.supervisor] : '');
   const divisionalLeader = normalizePersonValue(fields.divisionalLeader ? f[fields.divisionalLeader] : '');
-  const realName = normalizeFieldValue(fields.memberRealName ? f[fields.memberRealName] : '');
+  const realName = normalizeFieldValue(fields.memberRealName ? f[fields.memberRealName] : '')
+    || normalizeFieldValue(f['成员真实名称'])
+    || normalizeFieldValue(f['成员真实姓名']);
   const aliases = splitMultiline(fields.memberAliases ? f[fields.memberAliases] : '');
   const currentOpenId = normalizeFieldValue(fields.currentOpenId ? f[fields.currentOpenId] : '') || member.id;
   return {

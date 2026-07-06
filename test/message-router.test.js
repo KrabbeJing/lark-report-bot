@@ -264,6 +264,50 @@ test('writes configured chat reports to raw table and fact table', async () => {
   assert.equal(calls[1].input.matchMethod, 'open_id');
 });
 
+test('passes configured group name to chat raw records', async () => {
+  const config = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      name: '测试日报群',
+      project: '支付平台',
+      chatDailyRawTable: { appToken: 'bas', tableId: 'tbl_chat_raw' },
+      dailyFactTable: { appToken: 'bas', tableId: 'tbl_fact' },
+    }],
+  });
+  const rawContexts = [];
+
+  await handleMessageEvent({
+    data: {
+      sender: { sender_id: { open_id: 'ou_liu' } },
+      message: {
+        message_id: 'om_chat_name',
+        chat_id: 'oc_test',
+        chat_type: 'group',
+        message_type: 'text',
+        create_time: String(new Date('2026-07-01T09:00:00+08:00').getTime()),
+        content: JSON.stringify({
+          text: `刘喜双7.1工作日报
+1、完成数据提取`,
+        }),
+      },
+    },
+    client: {},
+    messenger: { replyText: async () => {} },
+    bitable: {
+      createChatDailyRawRecord: async (_group, _parsed, context) => {
+        rawContexts.push(context);
+        return { created: true, record: { record_id: 'rec_raw' } };
+      },
+      upsertDailyFactRecord: async () => ({ created: true, record: { record_id: 'rec_fact' } }),
+    },
+    config,
+    aiProvider: {},
+    outDir: '/tmp',
+  });
+
+  assert.equal(rawContexts[0].chatName, '测试日报群');
+});
+
 test('writes raw and fact records without legacy daily table configured', async () => {
   const config = normalizeConfig({
     groups: [{

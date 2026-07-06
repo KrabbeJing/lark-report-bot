@@ -30,8 +30,8 @@ test('parses full date and bullet items', () => {
   });
 
   assert.equal(parsed.reportDate, '2026-06-26');
-  assert.equal(parsed.riskItems.length, 1);
-  assert.match(parsed.riskItems[0], /待协调/);
+  assert.deepEqual(parsed.workItems, ['完成支付平台接口联调', '发现上线依赖待协调']);
+  assert.deepEqual(parsed.riskItems, []);
 });
 
 test('uses message date when title has no date', () => {
@@ -150,6 +150,30 @@ test('keeps original numbered body text after removing report title', () => {
     '与技术沟通开发区一中云充值取数逻辑问题，完成数据提取',
     '整理千分卡考核指标，完成填报',
   ]);
+});
+
+test('does not infer risk items from ordinary chat work items', () => {
+  const parsed = parseDailyReportText(`刘喜双7.1工作日报
+1、与技术沟通开发区一中云充值取数逻辑问题，完成数据提取
+2、整理千分卡考核指标，完成填报`, {
+    messageTime: new Date('2026-07-01T09:00:00+08:00'),
+    timezone: 'Asia/Shanghai',
+  });
+
+  assert.deepEqual(parsed.riskItems, []);
+});
+
+test('keeps explicit risk section items', () => {
+  const parsed = parseDailyReportText(`刘喜双7.1工作日报
+今日工作总结：
+1、完成数据提取
+遇到的问题：
+1、接口权限待协调`, {
+    messageTime: new Date('2026-07-01T09:00:00+08:00'),
+    timezone: 'Asia/Shanghai',
+  });
+
+  assert.deepEqual(parsed.riskItems, ['接口权限待协调']);
 });
 
 test('parses date range daily report into multiple report dates', () => {

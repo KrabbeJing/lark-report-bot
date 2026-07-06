@@ -1830,6 +1830,50 @@ test('matches contact by alias when open id is unavailable', async () => {
   assert.equal(contact.matchingStatus, '姓名匹配');
 });
 
+test('matches contact by member real name field alias', async () => {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      contactTable: {
+        appToken: 'bas',
+        tableId: 'tbl_contacts',
+        fields: {
+          teamName: '团队名称',
+          teamMember: '团队成员',
+          teamRole: '团队身份',
+          supervisor: '直属上级',
+        },
+      },
+    }],
+  }).groups[0];
+
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async () => ({
+          data: {
+            items: [{
+              record_id: 'rec_contact',
+              fields: {
+                团队名称: '公司项目组',
+                团队成员: [{ id: 'ou_external', name: '用户709677' }],
+                成员真实名称: '刘喜双',
+                直属上级: [{ id: 'ou_mgr', name: '王经理' }],
+              },
+            }],
+          },
+        }),
+      },
+    },
+  });
+
+  const contact = await service.findTeamContact(group, { reporterName: '刘喜双' });
+  assert.equal(contact.teamMember, '刘喜双');
+  assert.equal(contact.teamMemberId, 'ou_external');
+  assert.equal(contact.supervisor, '王经理');
+  assert.equal(contact.supervisorOpenId, 'ou_mgr');
+});
+
 test('builds contact-enriched daily fields from real directory identity', () => {
   const group = normalizeConfig({
     groups: [{
