@@ -126,6 +126,31 @@ GROUPS_CONFIG_PATH=config/groups.personal.json npm start
 
 如果这些字段在多维表格里建成了普通文本，则不要配置对应的 `fieldTypes`。
 
+## 错误通知
+
+机器人默认不会把内部异常回复到同事群。错误会写入服务器日志；如果需要主动通知管理员，在当前环境配置中增加：
+
+```json
+{
+  "errorReporting": {
+    "notifyInChat": false,
+    "adminOpenIds": ["管理员open_id"],
+    "adminChatIds": ["运维通知群chat_id"]
+  }
+}
+```
+
+- `notifyInChat=false`：不在原群回复错误。
+- `adminOpenIds`：私聊通知指定管理员。
+- `adminChatIds`：通知指定运维群。
+
+也可以通过环境变量配置，多个 ID 用英文逗号分隔：
+
+```bash
+ERROR_REPORT_OPEN_IDS=ou_xxx,ou_yyy
+ERROR_REPORT_CHAT_IDS=oc_xxx
+```
+
 ## 启用步骤
 
 1. 建好两张新表和字段。

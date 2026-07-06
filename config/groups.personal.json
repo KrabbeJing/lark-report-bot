@@ -1,6 +1,11 @@
 {
   "timezone": "Asia/Shanghai",
   "botNames": ["数金小助手"],
+  "errorReporting": {
+    "notifyInChat": false,
+    "adminOpenIds": [],
+    "adminChatIds": []
+  },
   "weeklyPush": {
     "enabled": true,
     "dayOfWeek": 6,

@@ -6,6 +6,7 @@ import { createAiProvider } from './ai-providers.js';
 import { BitableService } from './bitable-service.js';
 import { syncDailyFactsForAllGroups } from './daily-fact-sync.js';
 import { pushDailyReportsToSupervisors } from './daily-supervisor-push.js';
+import { reportHandlerError } from './error-reporter.js';
 import { loadGroupConfig } from './config.js';
 import { LarkMessenger } from './lark-messenger.js';
 import { handleMessageEvent } from './message-router.js';
@@ -71,9 +72,7 @@ const eventDispatcher = new lark.EventDispatcher({}).register({
       outDir: OUT_DIR,
     }).catch(async (err) => {
       console.error('[handler] failed', err?.response?.data || err);
-      try {
-        await messenger.replyText(messageId, `出错了：${err?.response?.data?.msg || err.message || err}`);
-      } catch {}
+      await reportHandlerError({ err, message, messenger, config });
     });
   },
 });

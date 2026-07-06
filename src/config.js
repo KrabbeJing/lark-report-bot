@@ -176,6 +176,7 @@ export function loadGroupConfig(configPath = process.env.GROUPS_CONFIG_PATH || D
 export function normalizeConfig(raw) {
   const timezone = raw.timezone || process.env.TZ || DEFAULT_TIMEZONE;
   const botNames = raw.botNames?.length ? raw.botNames : ['数金小助手'];
+  const errorReporting = normalizeErrorReporting(raw.errorReporting || raw.error_reporting || {});
   const weeklyPush = {
     enabled: raw.weeklyPush?.enabled !== false,
     dayOfWeek: Number(raw.weeklyPush?.dayOfWeek ?? 6),
@@ -212,11 +213,28 @@ export function normalizeConfig(raw) {
   return {
     timezone,
     botNames,
+    errorReporting,
     weeklyPush,
     dailySupervisorPush,
     dailyFactSync,
     groups,
   };
+}
+
+function normalizeErrorReporting(raw) {
+  return {
+    notifyInChat: raw.notifyInChat === true || raw.notify_in_chat === true,
+    adminOpenIds: normalizeStringList(raw.adminOpenIds || raw.admin_open_ids || process.env.ERROR_REPORT_OPEN_IDS),
+    adminChatIds: normalizeStringList(raw.adminChatIds || raw.admin_chat_ids || process.env.ERROR_REPORT_CHAT_IDS),
+  };
+}
+
+function normalizeStringList(value) {
+  if (Array.isArray(value)) return value.map(item => String(item || '').trim()).filter(Boolean);
+  return String(value || '')
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean);
 }
 
 function normalizeTableConfig(table, defaults) {
