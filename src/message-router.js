@@ -101,91 +101,70 @@ export async function handleMessageEvent({
       contact,
     };
 
-    const useRawFactTables = tableIsConfigured(group.chatDailyRawTable)
-      && tableIsConfigured(group.dailyFactTable)
-      && typeof bitable.createChatDailyRawRecord === 'function'
-      && typeof bitable.upsertDailyFactRecord === 'function';
+    ensureChatDailyTables(group, bitable);
 
-    let result;
-    if (useRawFactTables) {
-      const rawResult = await bitable.createChatDailyRawRecord(group, parsed, context);
-      const rawRecordId = rawResult.record?.record_id || rawResult.record?.recordId || '';
-      const reportDates = (parsed.reportDates?.length ? parsed.reportDates : [parsed.reportDate])
-        .map(date => String(date || '').trim())
-        .filter(Boolean);
-      const factResults = [];
+    const rawResult = await bitable.createChatDailyRawRecord(group, parsed, context);
+    const rawRecordId = rawResult.record?.record_id || rawResult.record?.recordId || '';
+    const reportDates = (parsed.reportDates?.length ? parsed.reportDates : [parsed.reportDate])
+      .map(date => String(date || '').trim())
+      .filter(Boolean);
+    const factResults = [];
 
-      for (const reportDate of reportDates) {
-        const reporterName = contact?.teamMember || parsed.reporterName;
-        const memberOpenId = contact?.teamMemberId || senderOpenId;
-        const factInput = {
-          factKey: buildFactKey({
-            openId: memberOpenId,
-            name: reporterName,
-            reportDate,
-          }),
+    for (const reportDate of reportDates) {
+      const reporterName = contact?.teamMember || parsed.reporterName;
+      const memberOpenId = contact?.teamMemberId || senderOpenId;
+      const factInput = {
+        factKey: buildFactKey({
+          openId: memberOpenId,
+          name: reporterName,
           reportDate,
-          reporterName,
-          memberOpenId,
-          senderOpenId,
-          workSummaryText: parsed.workSummaryText,
-          tomorrowPlanItems: parsed.tomorrowPlanItems,
-          riskItems: parsed.riskItems,
-          source: 'chat',
-          messageId: message.message_id,
-          sourceRecordId: rawRecordId,
-          rawRecordId,
-          rawText: parsed.rawText,
-          chatId: message.chat_id,
-          project: contact?.teamName || group.project || '',
-          agileGroup: contact?.agileGroup || group.agileGroup || '',
-          supervisor: contact?.supervisor || '',
-          supervisorOpenId: contact?.supervisorOpenId || '',
-          divisionalLeader: contact?.divisionalLeader || '',
-          divisionalLeaderOpenId: contact?.divisionalLeaderOpenId || '',
-          matchingStatus: contact?.matchingStatus || (contact ? '已匹配' : '未匹配'),
-          matchMethod: contact?.matchMethod || '',
-          reportType: parsed.reportType,
-          dateRange: parsed.dateRange,
-          messageTime: context.messageTimeText,
-          contact,
-        };
-        factResults.push(await bitable.upsertDailyFactRecord(group, factInput));
-      }
-
-      result = {
-        created: rawResult.created || factResults.some(factResult => factResult.created),
-        record: rawResult.record || factResults[0]?.record,
-      };
-
-      console.log('[daily-report] chat raw/fact write result', {
+        }),
+        reportDate,
+        reporterName,
+        memberOpenId,
+        senderOpenId,
+        workSummaryText: parsed.workSummaryText,
+        tomorrowPlanItems: parsed.tomorrowPlanItems,
+        riskItems: parsed.riskItems,
+        source: 'chat',
         messageId: message.message_id,
-        chatId: message.chat_id,
-        reporterName: parsed.reporterName,
-        reportDate: parsed.reportDate,
-        reportDates,
-        rawCreated: rawResult.created,
+        sourceRecordId: rawRecordId,
         rawRecordId,
-        factResultCount: factResults.length,
-        factRecordIds: factResults.map(factResult => factResult.record?.record_id || factResult.record?.recordId || ''),
-        workItemCount: parsed.workItems.length,
-      });
-    } else {
-      await ensureDailyTable(group);
-      result = await bitable.createDailyReportRecord(group, parsed, context);
-
-      console.log('[daily-report] record write result', {
-        messageId: message.message_id,
+        rawText: parsed.rawText,
         chatId: message.chat_id,
-        reporterName: parsed.reporterName,
-        reportDate: parsed.reportDate,
-        created: result.created,
-        recordId: result.record?.record_id || result.record?.recordId || '',
-        verifiedOutsideView: result.verifiedOutsideView || false,
-        responseSummary: result.responseSummary,
-        workItemCount: parsed.workItems.length,
-      });
+        project: contact?.teamName || group.project || '',
+        agileGroup: contact?.agileGroup || group.agileGroup || '',
+        supervisor: contact?.supervisor || '',
+        supervisorOpenId: contact?.supervisorOpenId || '',
+        divisionalLeader: contact?.divisionalLeader || '',
+        divisionalLeaderOpenId: contact?.divisionalLeaderOpenId || '',
+        matchingStatus: contact?.matchingStatus || (contact ? '已匹配' : '未匹配'),
+        matchMethod: contact?.matchMethod || '',
+        reportType: parsed.reportType,
+        dateRange: parsed.dateRange,
+        messageTime: context.messageTimeText,
+        contact,
+      };
+      factResults.push(await bitable.upsertDailyFactRecord(group, factInput));
     }
+
+    const result = {
+      created: rawResult.created || factResults.some(factResult => factResult.created),
+      record: rawResult.record || factResults[0]?.record,
+    };
+
+    console.log('[daily-report] chat raw/fact write result', {
+      messageId: message.message_id,
+      chatId: message.chat_id,
+      reporterName: parsed.reporterName,
+      reportDate: parsed.reportDate,
+      reportDates,
+      rawCreated: rawResult.created,
+      rawRecordId,
+      factResultCount: factResults.length,
+      factRecordIds: factResults.map(factResult => factResult.record?.record_id || factResult.record?.recordId || ''),
+      workItemCount: parsed.workItems.length,
+    });
 
     if (mentioned) {
       const verb = result.created ? '已收集' : '这条日报已收集过';
@@ -229,6 +208,15 @@ async function ensureGroupTables(group) {
 async function ensureDailyTable(group) {
   if (!tableIsConfigured(group.dailyTable)) {
     throw new Error(`群 ${group.chatId} 的 dailyTable 未配置 appToken/tableId`);
+  }
+}
+
+function ensureChatDailyTables(group, bitable) {
+  if (!tableIsConfigured(group.chatDailyRawTable) || !tableIsConfigured(group.dailyFactTable)) {
+    throw new Error(`群 ${group.chatId} 的 chatDailyRawTable/dailyFactTable 未配置，群聊日报不写 dailyTable`);
+  }
+  if (typeof bitable.createChatDailyRawRecord !== 'function' || typeof bitable.upsertDailyFactRecord !== 'function') {
+    throw new Error('群聊日报写入服务未实现 chatDailyRawTable/dailyFactTable 写入方法，群聊日报不写 dailyTable');
   }
 }
 

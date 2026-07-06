@@ -9,7 +9,8 @@ test('routes high-confidence daily report into bitable service', async () => {
       chatId: 'oc_test',
       project: '支付平台',
       agileGroup: 'A组',
-      dailyTable: { appToken: 'bas_test', tableId: 'tbl_daily' },
+      chatDailyRawTable: { appToken: 'bas_test', tableId: 'tbl_raw' },
+      dailyFactTable: { appToken: 'bas_test', tableId: 'tbl_fact' },
       weeklyTable: { appToken: 'bas_test', tableId: 'tbl_weekly' },
     }],
   });
@@ -34,9 +35,10 @@ test('routes high-confidence daily report into bitable service', async () => {
     client: {},
     messenger: { replyText: async () => {} },
     bitable: {
-      createDailyReportRecord: async (group, parsed, context) => {
-        calls.push({ group, parsed, context });
-        return { created: true };
+      createChatDailyRawRecord: async () => ({ created: true, record: { record_id: 'rec_raw' } }),
+      upsertDailyFactRecord: async (group, input) => {
+        calls.push({ group, input });
+        return { created: true, record: { record_id: 'rec_fact' } };
       },
     },
     config,
@@ -46,8 +48,8 @@ test('routes high-confidence daily report into bitable service', async () => {
 
   assert.equal(calls.length, 1);
   assert.equal(calls[0].group.project, '支付平台');
-  assert.equal(calls[0].parsed.reporterName, '王治坤');
-  assert.equal(calls[0].context.senderOpenId, 'ou_1');
+  assert.equal(calls[0].input.reporterName, '王治坤');
+  assert.equal(calls[0].input.senderOpenId, 'ou_1');
 });
 
 test('strips bot mention before parsing mentioned daily report', async () => {
@@ -56,7 +58,8 @@ test('strips bot mention before parsing mentioned daily report', async () => {
     groups: [{
       chatId: 'oc_test',
       project: '支付平台',
-      dailyTable: { appToken: 'bas_test', tableId: 'tbl_daily' },
+      chatDailyRawTable: { appToken: 'bas_test', tableId: 'tbl_raw' },
+      dailyFactTable: { appToken: 'bas_test', tableId: 'tbl_fact' },
     }],
   });
   const calls = [];
@@ -81,9 +84,10 @@ test('strips bot mention before parsing mentioned daily report', async () => {
     client: {},
     messenger: { replyText: async (_id, text) => replies.push(text) },
     bitable: {
-      createDailyReportRecord: async (group, parsed, context) => {
-        calls.push({ group, parsed, context });
-        return { created: true };
+      createChatDailyRawRecord: async () => ({ created: true, record: { record_id: 'rec_raw' } }),
+      upsertDailyFactRecord: async (group, input) => {
+        calls.push({ group, input });
+        return { created: true, record: { record_id: 'rec_fact' } };
       },
     },
     config,
@@ -92,7 +96,7 @@ test('strips bot mention before parsing mentioned daily report', async () => {
   });
 
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].parsed.reporterName, '王治坤');
+  assert.equal(calls[0].input.reporterName, '王治坤');
   assert.match(replies[0], /已收集/);
 });
 
@@ -102,7 +106,8 @@ test('continues daily report collection when contact lookup is forbidden', async
     groups: [{
       chatId: 'oc_test',
       project: '支付平台',
-      dailyTable: { appToken: 'bas_test', tableId: 'tbl_daily' },
+      chatDailyRawTable: { appToken: 'bas_test', tableId: 'tbl_raw' },
+      dailyFactTable: { appToken: 'bas_test', tableId: 'tbl_fact' },
       contactTable: { appToken: 'bas_test', tableId: 'tbl_contacts' },
     }],
   });
@@ -131,9 +136,10 @@ test('continues daily report collection when contact lookup is forbidden', async
         err.response = { data: { code: 91403, msg: 'Forbidden' } };
         throw err;
       },
-      createDailyReportRecord: async (group, parsed, context) => {
-        calls.push({ group, parsed, context });
-        return { created: true };
+      createChatDailyRawRecord: async () => ({ created: true, record: { record_id: 'rec_raw' } }),
+      upsertDailyFactRecord: async (group, input) => {
+        calls.push({ group, input });
+        return { created: true, record: { record_id: 'rec_fact' } };
       },
     },
     config,
@@ -142,11 +148,11 @@ test('continues daily report collection when contact lookup is forbidden', async
   });
 
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].context.contact, null);
-  assert.equal(calls[0].parsed.reporterName, '王治坤');
+  assert.equal(calls[0].input.contact, null);
+  assert.equal(calls[0].input.reporterName, '王治坤');
 });
 
-test('falls back to legacy daily table write when raw and fact tables are absent', async () => {
+test('rejects chat daily report when raw and fact tables are absent', async () => {
   const config = normalizeConfig({
     groups: [{
       chatId: 'oc_test',
@@ -156,7 +162,7 @@ test('falls back to legacy daily table write when raw and fact tables are absent
   });
   const calls = [];
 
-  await handleMessageEvent({
+  await assert.rejects(handleMessageEvent({
     data: {
       sender: { sender_id: { open_id: 'ou_1' } },
       message: {
@@ -182,11 +188,9 @@ test('falls back to legacy daily table write when raw and fact tables are absent
     config,
     aiProvider: {},
     outDir: '/tmp',
-  });
+  }), /chatDailyRawTable\/dailyFactTable 未配置/);
 
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].parsed.reporterName, '王治坤');
-  assert.equal(calls[0].context.senderOpenId, 'ou_1');
+  assert.equal(calls.length, 0);
 });
 
 test('writes configured chat reports to raw table and fact table', async () => {
