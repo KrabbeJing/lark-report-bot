@@ -52,7 +52,11 @@
         }
       },
       "chatDailyRawTable": {
-        "wikiUrl": "正式组织群聊日报原始表wiki链接，需带table参数"
+        "wikiUrl": "正式组织群聊日报原始表wiki链接，需带table参数",
+        "fieldTypes": {
+          "messageTime": "datetime",
+          "receivedAt": "datetime"
+        }
       },
       "dailyFactTable": {
         "wikiUrl": "正式组织日报统一事实表wiki链接，需带table参数",
@@ -60,7 +64,9 @@
           "divisionalLeader": ""
         },
         "fieldTypes": {
-          "reportDate": "date"
+          "reportDate": "date",
+          "messageTime": "datetime",
+          "syncedAt": "datetime"
         }
       },
       "weeklyTable": null,

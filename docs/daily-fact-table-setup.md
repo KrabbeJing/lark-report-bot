@@ -102,6 +102,30 @@ GROUPS_CONFIG_PATH=config/groups.personal.json npm start
 }
 ```
 
+如果飞书字段建成了“日期”或“日期时间”，需要在配置里声明 `fieldTypes`，机器人才会把文本时间转换成飞书 API 要求的 unix timestamp：
+
+```json
+{
+  "chatDailyRawTable": {
+    "wikiUrl": "https://example.feishu.cn/wiki/WikiNodeToken?table=tbl_raw&view=vew_raw",
+    "fieldTypes": {
+      "messageTime": "datetime",
+      "receivedAt": "datetime"
+    }
+  },
+  "dailyFactTable": {
+    "wikiUrl": "https://example.feishu.cn/wiki/WikiNodeToken?table=tbl_fact&view=vew_fact",
+    "fieldTypes": {
+      "reportDate": "date",
+      "messageTime": "datetime",
+      "syncedAt": "datetime"
+    }
+  }
+}
+```
+
+如果这些字段在多维表格里建成了普通文本，则不要配置对应的 `fieldTypes`。
+
 ## 启用步骤
 
 1. 建好两张新表和字段。

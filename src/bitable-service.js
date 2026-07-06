@@ -980,7 +980,7 @@ function shouldWriteDailyField(table, key) {
 function formatFieldValue(table, key, value, context = {}) {
   const fieldType = table?.fieldTypes?.[key] || '';
   if (fieldType === 'date' || fieldType === 'datetime') {
-    return toBitableDateTimestamp(value);
+    return toBitableDateTimestamp(value, fieldType);
   }
 
   if (fieldType === 'user') {
@@ -1001,12 +1001,35 @@ function getUserFieldOpenId(key, context = {}) {
   return '';
 }
 
-function toBitableDateTimestamp(value) {
+function toBitableDateTimestamp(value, fieldType = 'date') {
   const text = Array.isArray(value) ? value[0] : value;
   if (typeof text === 'number' && Number.isFinite(text)) return text;
-  const parsed = parseYmd(String(text || ''));
+  const normalized = String(text || '').trim();
+  if (fieldType === 'datetime') {
+    const parsedDateTime = parseShanghaiDateTime(normalized);
+    if (parsedDateTime != null) return parsedDateTime;
+  }
+  const parsed = parseYmd(normalized);
   if (!parsed) return value == null || value === '' ? undefined : value;
   return Date.UTC(parsed.year, parsed.month - 1, parsed.day);
+}
+
+function parseShanghaiDateTime(text) {
+  const match = String(text || '').match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$/);
+  if (match) {
+    const [, year, month, day, hour = '0', minute = '0', second = '0'] = match;
+    return Date.UTC(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hour) - 8,
+      Number(minute),
+      Number(second),
+    );
+  }
+
+  const parsed = Date.parse(text);
+  return Number.isNaN(parsed) ? null : parsed;
 }
 
 function normalizeContactRecord(record, fields) {
