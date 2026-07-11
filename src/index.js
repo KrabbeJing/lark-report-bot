@@ -6,7 +6,7 @@ import { createAiProvider } from './ai-providers.js';
 import { BitableService } from './bitable-service.js';
 import { syncDailyFactsForAllGroups } from './daily-fact-sync.js';
 import { pushDailyReportsToSupervisors } from './daily-supervisor-push.js';
-import { reportHandlerError } from './error-reporter.js';
+import { formatLarkErrorForLog, reportHandlerError } from './error-reporter.js';
 import { loadGroupConfig } from './config.js';
 import { LarkMessenger } from './lark-messenger.js';
 import { handleMessageEvent } from './message-router.js';
@@ -94,7 +94,7 @@ startWeeklyScheduler({
           sheetWriter,
         });
       } catch (err) {
-        console.error(`[weekly] failed for ${group.project || group.chatId}`, err?.response?.data || err);
+        console.error(`[weekly] failed for ${group.project || group.chatId}`, formatLarkErrorForLog(err));
       }
     }
   },
@@ -113,7 +113,7 @@ startDailySupervisorScheduler({
           now,
         });
       } catch (err) {
-        console.error(`[daily-supervisor] failed for ${group.project || group.chatId}`, err?.response?.data || err);
+        console.error(`[daily-supervisor] failed for ${group.project || group.chatId}`, formatLarkErrorForLog(err));
       }
     }
   },
@@ -122,11 +122,15 @@ startDailySupervisorScheduler({
 startDailyFactSyncScheduler({
   config,
   onRun: async (now) => {
-    await syncDailyFactsForAllGroups({
-      config,
-      bitable,
-      now,
-    });
+    try {
+      await syncDailyFactsForAllGroups({
+        config,
+        bitable,
+        now,
+      });
+    } catch (err) {
+      console.error('[daily-fact] failed', formatLarkErrorForLog(err));
+    }
   },
 });
 

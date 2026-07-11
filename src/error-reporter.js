@@ -1,5 +1,14 @@
 import { createHash } from 'node:crypto';
 
+export function formatLarkErrorForLog(err) {
+  const data = err?.response?.data;
+  if (data) return JSON.stringify(data, null, 2);
+  return JSON.stringify({
+    code: err?.code || '',
+    message: err?.message || String(err || ''),
+  }, null, 2);
+}
+
 export async function reportHandlerError({ err, message, messenger, config }) {
   const errorReporting = config?.errorReporting || {};
   const summary = buildErrorSummary(err, message);

@@ -1,7 +1,25 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildErrorSummary, reportHandlerError } from '../src/error-reporter.js';
+import { buildErrorSummary, formatLarkErrorForLog, reportHandlerError } from '../src/error-reporter.js';
 import { normalizeConfig } from '../src/config.js';
+
+test('formats nested Feishu field violations for PM2 logs', () => {
+  const output = formatLarkErrorForLog({
+    response: {
+      data: {
+        code: 99992402,
+        msg: 'field validation failed',
+        error: {
+          log_id: 'log_test',
+          field_violations: [{ field: 'uuid', description: 'max length is 50' }],
+        },
+      },
+    },
+  });
+  assert.match(output, /uuid/);
+  assert.match(output, /max length is 50/);
+  assert.match(output, /log_test/);
+});
 
 test('does not reply in chat when error reporting has no recipients', async () => {
   const calls = [];
