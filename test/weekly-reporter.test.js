@@ -118,3 +118,40 @@ test('does not push again when scheduled weekly sheet already exists', async () 
   assert.equal(result.reason, 'weekly_sheet_exists');
   assert.equal(sendCount, 0);
 });
+
+test('deduplicates multi-day fact rows before calling AI provider', async () => {
+  const group = normalizeConfig({ groups: [{
+    chatId: 'oc_test', project: '数字金融部',
+    dailyTable: { appToken: 'bas_test', tableId: 'tbl_daily' },
+    weeklySheet: { enabled: true, spreadsheetToken: 'sheet', templateSheetId: 'tpl' },
+  }] }).groups[0];
+  let aiReports;
+  await generateWeeklyReportForGroup({
+    group,
+    bitable: {
+      findWeeklySummaryRecord: async () => null,
+      listDailyReportsForWeek: async () => [
+        { recordId: 'fact_1', reportDate: '2026-06-29', messageId: 'om_1', effectiveSource: 'chat', workItems: ['完成A'] },
+        { recordId: 'fact_2', reportDate: '2026-06-30', messageId: 'om_1', effectiveSource: 'chat', workItems: ['完成A'] },
+      ],
+      upsertWeeklySummary: async () => ({ skipped: true }),
+    },
+    aiProvider: {
+      summarizeWeeklyReports: async input => {
+        aiReports = input.reports;
+        return { ...input, reportCount: input.reports.length, memberCount: 1, summaryText: '' };
+      },
+      summarizeWeeklySheet: async () => ({ values: {} }),
+    },
+    messenger: { sendText: async () => {} },
+    sheetWriter: {
+      ensureWeeklySheet: async () => ({ spreadsheetToken: 'sheet', sheetId: 'week', title: 'week', reused: false }),
+      writeCells: async () => ({ rangeCount: 0 }),
+    },
+    timezone: 'Asia/Shanghai',
+    now: new Date('2026-07-04T02:00:00.000Z'),
+    delivery: 'send',
+  });
+  assert.equal(aiReports.length, 1);
+  assert.deepEqual(aiReports[0].reportDates, ['2026-06-29', '2026-06-30']);
+});

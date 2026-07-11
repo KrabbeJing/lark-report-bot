@@ -1,6 +1,7 @@
 import { WEEKLY_FIELD_KEYS, tableIsConfigured } from './config.js';
 import { DEFAULT_TIMEZONE, addDaysToYmd, formatDateTime, formatYmd, parseYmd } from './date-utils.js';
-import { buildContentFingerprint, buildFactKey, buildSourceRefs, hasSameContentFingerprint } from './daily-record-utils.js';
+import { buildContentFingerprint, buildFactKey, buildSourceRefs } from './daily-record-utils.js';
+import { resolveIncrementalDailyFact } from './daily-fact-resolution.js';
 
 export class BitableService {
   constructor(client) {
@@ -546,7 +547,8 @@ export class BitableService {
     return records
       .filter(record => {
         const reportDate = normalizeDateFieldValue(record.fields?.[fields.reportDate]);
-        return reportDate >= startDate && reportDate <= endDate;
+        return reportDate >= startDate && reportDate <= endDate
+          && isEffectiveFactRecord(record, fields);
       })
       .map(record => normalizeDailyRecord(record, fields, group));
   }
@@ -562,6 +564,7 @@ export class BitableService {
         const recordProject = normalizeFieldValue(fields.project ? record.fields?.[fields.project] : '');
         const reportDate = normalizeDateFieldValue(record.fields?.[fields.reportDate]);
         if (reportDate < startDate || reportDate > endDate) return false;
+        if (!isEffectiveFactRecord(record, fields)) return false;
         if (recordChatId) return recordChatId === group.chatId;
         if (recordProject) {
           return [group.project, group.name, group.agileGroup].filter(Boolean).includes(recordProject);
@@ -738,7 +741,20 @@ function normalizeDailyRecord(record, fields, group) {
     source: normalizeFieldValue(fields.source ? f[fields.source] : ''),
     parseStatus: normalizeFieldValue(fields.parseStatus ? f[fields.parseStatus] : ''),
     messageTime: normalizeFieldValue(fields.messageTime ? f[fields.messageTime] : ''),
+    sourceRecordId: normalizeFieldValue(fields.sourceRecordId ? f[fields.sourceRecordId] : ''),
+    sourceRefs: normalizeFieldValue(fields.sourceRefs ? f[fields.sourceRefs] : ''),
+    contentFingerprint: normalizeFieldValue(fields.contentFingerprint ? f[fields.contentFingerprint] : ''),
+    effectiveSource: normalizeFieldValue(fields.effectiveSource ? f[fields.effectiveSource] : ''),
+    factStatus: normalizeFieldValue(fields.factStatus ? f[fields.factStatus] : ''),
+    reportType: normalizeFieldValue(fields.reportType ? f[fields.reportType] : ''),
+    dateRange: normalizeFieldValue(fields.dateRange ? f[fields.dateRange] : ''),
+    sourceTime: normalizeSourceTimestamp(fields.sourceTime ? f[fields.sourceTime] : ''),
   };
+}
+
+function isEffectiveFactRecord(record, fields) {
+  if (!fields.factStatus) return true;
+  return normalizeFieldValue(record.fields?.[fields.factStatus]) === '有效';
 }
 
 function normalizeChatRawRecord(record, fields, group) {
@@ -805,16 +821,29 @@ function buildDailyFactFields(table, input, existing) {
   const existingSource = normalizeFieldValue(fields.source ? existingFields[fields.source] : '');
   const existingHasForm = sourceHas(existingSource, 'form');
   const existingHasChat = sourceHas(existingSource, 'chat');
-  const hasChatAndForm = (existingHasChat && input.source === 'form')
-    || (existingHasForm && input.source === 'chat')
-    || (existingHasForm && existingHasChat);
-  const sameContent = hasSameContentFingerprint(existingFingerprint, incomingFingerprint);
-  const mergedSource = hasChatAndForm ? 'form+chat' : input.source;
-  const mergeStatus = hasChatAndForm ? (sameContent ? '重复已合并' : '内容冲突') : '单来源';
-  const conflictStatus = mergeStatus === '内容冲突' ? '内容冲突' : '无冲突';
-  const factStatus = mergeStatus === '内容冲突' ? '待人工确认' : '有效';
-  const useIncomingContent = input.source === 'form' || (input.source === 'chat' && !existingHasForm);
-  const useIncomingCanonical = input.source === 'form' || !existingHasForm;
+  const incomingCandidate = {
+    source: input.source,
+    sourceTime: normalizeSourceTimestamp(input.sourceTime),
+    fingerprint: incomingFingerprint,
+    matchingStatus: input.matchingStatus || '',
+  };
+  const resolution = resolveIncrementalDailyFact({
+    existing: existing ? {
+      source: existingSource,
+      effectiveSource: normalizeFieldValue(fields.effectiveSource ? existingFields[fields.effectiveSource] : ''),
+      sourceTime: existingSourceTime,
+      fingerprint: existingFingerprint,
+      matchingStatus: normalizeFieldValue(fields.matchingStatus ? existingFields[fields.matchingStatus] : ''),
+      factStatus: normalizeFieldValue(fields.factStatus ? existingFields[fields.factStatus] : ''),
+      mergeStatus: normalizeFieldValue(fields.mergeStatus ? existingFields[fields.mergeStatus] : ''),
+      conflictStatus: normalizeFieldValue(fields.conflictStatus ? existingFields[fields.conflictStatus] : ''),
+      autoResolutionNote: normalizeFieldValue(fields.autoResolutionNote ? existingFields[fields.autoResolutionNote] : ''),
+    } : null,
+    incoming: incomingCandidate,
+  });
+  const mergedSource = resolution.hasBothSources ? 'form+chat' : input.source;
+  const useIncomingContent = resolution.winner === incomingCandidate;
+  const useIncomingCanonical = useIncomingContent;
   const existingRefs = normalizeFieldValue(fields.sourceRefs ? existingFields[fields.sourceRefs] : '');
   const incomingRefs = buildSourceRefs({
     source: input.source,
@@ -849,14 +878,20 @@ function buildDailyFactFields(table, input, existing) {
   setMappedField(recordFields, table, 'tomorrowPlanItems', useIncomingContent ? incomingTomorrowPlanItems : existingTomorrowPlanItems);
   setMappedField(recordFields, table, 'riskItems', useIncomingContent ? incomingRiskItems : existingRiskItems);
   setMappedField(recordFields, table, 'contentFingerprint', useIncomingContent ? incomingFingerprint : existingFingerprint);
-  setMappedField(recordFields, table, 'sourceTime', useIncomingContent ? normalizeSourceTimestamp(input.sourceTime) : existingSourceTime);
+  setMappedField(recordFields, table, 'sourceTime', resolution.sourceTime);
   setMappedField(recordFields, table, 'source', mergedSource);
-  setCanonicalField(recordFields, 'sourceRecordId', input.sourceRecordId || '');
-  setMappedField(recordFields, table, 'messageId', input.messageId || normalizeFieldValue(fields.messageId ? existingFields[fields.messageId] : ''));
+  setMappedField(recordFields, table, 'sourceRecordId', input.source === 'form'
+    ? input.sourceRecordId || ''
+    : existingHasForm ? normalizeFieldValue(fields.sourceRecordId ? existingFields[fields.sourceRecordId] : '') : input.sourceRecordId || '');
+  setMappedField(recordFields, table, 'messageId', input.source === 'chat'
+    ? input.messageId || ''
+    : normalizeFieldValue(fields.messageId ? existingFields[fields.messageId] : ''));
   setMappedField(recordFields, table, 'sourceRefs', mergeSourceRefs(existingRefs, incomingRefs));
-  setMappedField(recordFields, table, 'mergeStatus', mergeStatus);
-  setMappedField(recordFields, table, 'conflictStatus', conflictStatus);
-  setMappedField(recordFields, table, 'factStatus', factStatus);
+  setMappedField(recordFields, table, 'effectiveSource', resolution.effectiveSource);
+  setMappedField(recordFields, table, 'autoResolutionNote', resolution.autoResolutionNote);
+  setMappedField(recordFields, table, 'mergeStatus', resolution.mergeStatus);
+  setMappedField(recordFields, table, 'conflictStatus', resolution.conflictStatus);
+  setMappedField(recordFields, table, 'factStatus', resolution.factStatus);
   setCanonicalField(recordFields, 'rawText', input.rawText || '');
   setCanonicalField(recordFields, 'chatId', input.chatId || '');
   setCanonicalField(recordFields, 'supervisor', input.supervisor || '', {
@@ -876,7 +911,7 @@ function buildDailyFactFields(table, input, existing) {
 
 function isConflictResult(table, result) {
   const fieldName = table?.fields?.conflictStatus;
-  return fieldName ? result?.fields?.[fieldName] === '内容冲突' : false;
+  return fieldName ? result?.fields?.[fieldName] === '已自动处理' : false;
 }
 
 function updateFactRecordIndex(index, factKey, record, fields) {
@@ -957,6 +992,8 @@ export function normalizeSourceTimestamp(value) {
   if (value == null || value === '') return 0;
   const numeric = Number(value);
   if (Number.isFinite(numeric)) return numeric < 100000000000 ? numeric * 1000 : numeric;
+  const shanghaiTimestamp = parseShanghaiDateTime(String(value).trim());
+  if (shanghaiTimestamp != null) return shanghaiTimestamp;
   const parsed = new Date(value).getTime();
   return Number.isFinite(parsed) ? parsed : 0;
 }

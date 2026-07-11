@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { getWorkWeekRange } from './date-utils.js';
+import { buildWeeklyAiInputs } from './ai-input-normalizer.js';
 import { WEEKLY_FIELD_KEYS } from './config.js';
 import { normalizeFieldValue } from './bitable-service.js';
 import { renderWeeklySummaryToPng } from './render-weekly.js';
@@ -30,7 +31,8 @@ export async function generateWeeklyReportForGroup({
     }
   }
 
-  const reports = await listReportsForWeeklyOutput(bitable, group, weekStart, weekEnd);
+  const factReports = await listReportsForWeeklyOutput(bitable, group, weekStart, weekEnd);
+  const reports = buildWeeklyAiInputs(factReports);
   const summary = await aiProvider.summarizeWeeklyReports({
     group,
     reports,

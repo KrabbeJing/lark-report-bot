@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BitableService } from '../src/bitable-service.js';
+import { BitableService, normalizeSourceTimestamp } from '../src/bitable-service.js';
 import { normalizeConfig } from '../src/config.js';
 import { buildContentFingerprint } from '../src/daily-record-utils.js';
 
@@ -21,6 +21,19 @@ function createGroup() {
     }],
   }).groups[0];
 }
+
+test('normalizes text source times as Asia Shanghai timestamps', () => {
+  const previousTz = process.env.TZ;
+  process.env.TZ = 'UTC';
+  try {
+    assert.equal(
+      normalizeSourceTimestamp('2026/07/02 10:00:00'),
+      Date.parse('2026-07-02T10:00:00+08:00'),
+    );
+  } finally {
+    process.env.TZ = previousTz;
+  }
+});
 
 test('builds daily record fields using configured field names', () => {
   const group = createGroup();
@@ -296,9 +309,117 @@ test('reconciles form and chat sources with form priority and conflict status', 
   assert.equal(updatePayload.data.fields['今日工作总结'], '1、表单内容');
   assert.equal(updatePayload.data.fields['明日工作计划'], '2、表单明日计划');
   assert.equal(updatePayload.data.fields['遇到的问题'], '3、表单风险');
-  assert.equal(updatePayload.data.fields['合并状态'], '内容冲突');
-  assert.equal(updatePayload.data.fields['冲突状态'], '内容冲突');
-  assert.equal(updatePayload.data.fields['事实记录状态'], '待人工确认');
+  assert.equal(updatePayload.data.fields['合并状态'], '按时间取最新');
+  assert.equal(updatePayload.data.fields['冲突状态'], '已自动处理');
+  assert.equal(updatePayload.data.fields['事实记录状态'], '有效');
+});
+
+test('uses later chat content when updating an earlier form fact', async () => {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      dailyFactTable: {
+        appToken: 'bas',
+        tableId: 'tbl_fact',
+        fieldTypes: {
+          reportDate: 'date',
+          reporterName: 'user',
+          sourceTime: 'datetime',
+        },
+      },
+    }],
+  }).groups[0];
+  let updatePayload = null;
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        update: async (payload) => {
+          updatePayload = payload;
+          return { data: { data: { record: { record_id: 'rec_fact', fields: payload.data.fields } } } };
+        },
+      },
+    },
+  });
+  const existingRecord = {
+    record_id: 'rec_fact',
+    fields: {
+      事实唯一键: 'open_id:ou_liu:2026-07-01',
+      今日工作总结: '1、较早的表单内容',
+      内容指纹: 'form-fingerprint',
+      日报来源: 'form',
+      有效来源: 'form',
+      来源时间: Date.parse('2026-07-01T17:00:00+08:00'),
+      来源记录ID: 'rec_form',
+      事实记录状态: '有效',
+    },
+  };
+
+  await service.upsertDailyFactRecord(group, {
+    factKey: 'open_id:ou_liu:2026-07-01',
+    reportDate: '2026-07-01',
+    reporterName: '刘喜双',
+    memberOpenId: 'ou_liu',
+    workSummaryText: '1、较晚的群聊内容',
+    source: 'chat',
+    sourceTime: Date.parse('2026-07-01T18:00:00+08:00'),
+    messageId: 'om_later',
+  }, { existingRecord });
+
+  assert.equal(updatePayload.data.fields['今日工作总结'], '1、较晚的群聊内容');
+  assert.equal(updatePayload.data.fields['日报来源'], 'form+chat');
+  assert.equal(updatePayload.data.fields['有效来源'], 'chat');
+  assert.equal(updatePayload.data.fields['来源记录ID'], 'rec_form');
+  assert.equal(updatePayload.data.fields['来源消息ID'], 'om_later');
+  assert.equal(updatePayload.data.fields['合并状态'], '按时间取最新');
+  assert.equal(updatePayload.data.fields['冲突状态'], '已自动处理');
+  assert.equal(updatePayload.data.fields['自动处理说明'], '按来源时间采用群聊版本');
+});
+
+test('preserves an ignored fact when a newer source is synchronized', async () => {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      dailyFactTable: { appToken: 'bas', tableId: 'tbl_fact' },
+    }],
+  }).groups[0];
+  let updatePayload = null;
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        update: async (payload) => {
+          updatePayload = payload;
+          return { data: { data: { record: { record_id: 'rec_fact', fields: payload.data.fields } } } };
+        },
+      },
+    },
+  });
+  const existingRecord = {
+    record_id: 'rec_fact',
+    fields: {
+      事实唯一键: 'open_id:ou_liu:2026-07-01',
+      今日工作总结: '1、原内容',
+      内容指纹: 'old-fingerprint',
+      日报来源: 'chat',
+      有效来源: 'chat',
+      来源时间: 1000,
+      事实记录状态: '忽略',
+    },
+  };
+
+  await service.upsertDailyFactRecord(group, {
+    factKey: 'open_id:ou_liu:2026-07-01',
+    reportDate: '2026-07-01',
+    reporterName: '刘喜双',
+    memberOpenId: 'ou_liu',
+    workSummaryText: '1、新内容',
+    source: 'form',
+    sourceTime: 2000,
+    sourceRecordId: 'rec_form',
+  }, { existingRecord });
+
+  assert.equal(updatePayload.data.fields['事实记录状态'], '忽略');
+  assert.equal(updatePayload.data.fields['有效来源'], 'form');
+  assert.equal(updatePayload.data.fields['今日工作总结'], '1、新内容');
 });
 
 test('marks same-content form and chat facts as duplicate merged without conflict', async () => {
@@ -530,9 +651,9 @@ test('preserves existing form content when later chat source conflicts', async (
   assert.equal(updatePayload.data.fields['群ID'], 'oc_form');
   assert.equal(updatePayload.data.fields['消息时间'], '2026/07/01 09:00:00');
   assert.equal(updatePayload.data.fields['内容指纹'], existingFingerprint);
-  assert.equal(updatePayload.data.fields['合并状态'], '内容冲突');
-  assert.equal(updatePayload.data.fields['冲突状态'], '内容冲突');
-  assert.equal(updatePayload.data.fields['事实记录状态'], '待人工确认');
+  assert.equal(updatePayload.data.fields['合并状态'], '按时间取最新');
+  assert.equal(updatePayload.data.fields['冲突状态'], '已自动处理');
+  assert.equal(updatePayload.data.fields['事实记录状态'], '有效');
   assert.equal(updatePayload.data.fields['来源组合'], 'form:rec_form\nchat_raw:rec_raw\nchat:om_chat');
 });
 
@@ -1805,6 +1926,20 @@ test('filters daily records by project and work week', async () => {
   const reports = await service.listDailyReportsForWeek(group, '2026-06-22', '2026-06-26');
   assert.equal(reports.length, 1);
   assert.equal(reports[0].reporterName, 'A');
+});
+
+test('only returns effective fact records for weekly summaries', async () => {
+  const group = normalizeConfig({ groups: [{
+    chatId: 'oc_test', project: '支付平台',
+    dailyFactTable: { appToken: 'bas_test', tableId: 'tbl_fact' },
+  }] }).groups[0];
+  const service = new BitableService({ bitable: { appTableRecord: { list: async () => ({ data: { items: [
+    { record_id: 'rec_ok', fields: { 所属板块: '支付平台', 日报日期: '2026-06-22', 实际日报提交人: 'A', 今日工作总结: '事项A', 事实记录状态: '有效' } },
+    { record_id: 'rec_pending', fields: { 所属板块: '支付平台', 日报日期: '2026-06-23', 实际日报提交人: 'B', 今日工作总结: '事项B', 事实记录状态: '待人工确认' } },
+    { record_id: 'rec_ignored', fields: { 所属板块: '支付平台', 日报日期: '2026-06-24', 实际日报提交人: 'C', 今日工作总结: '事项C', 事实记录状态: '忽略' } },
+  ] } }) } } });
+  const reports = await service.listDailyReportsForWeek(group, '2026-06-22', '2026-06-26');
+  assert.deepEqual(reports.map(report => report.recordId), ['rec_ok']);
 });
 
 test('uses contact table to enrich team name and supervisor', async () => {
