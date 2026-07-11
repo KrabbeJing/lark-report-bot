@@ -182,10 +182,12 @@ function isValidMonthDay(month, day) {
 }
 
 function extractReporterName(title, dateRaw = '') {
-  let name = String(title || '');
-  if (dateRaw) name = name.replace(dateRaw, '');
+  let name = String(title || '').replace(/(?:工作)?日报/g, '');
+  if (dateRaw) {
+    name = name.replace(dateRaw, '');
+    name = name.replace(dateRaw.replace(/日$/, ''), '');
+  }
   name = name
-    .replace(/(?:工作)?日报/g, '')
     .replace(/[：:，,\s_-]+$/g, '')
     .replace(/^[：:，,\s_-]+/g, '')
     .trim();

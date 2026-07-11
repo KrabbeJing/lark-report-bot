@@ -21,6 +21,17 @@ test('parses numbered daily report with short date', () => {
   ]);
 });
 
+test('does not keep the report suffix in names before compact daily report titles', () => {
+  const parsed = parseDailyReportText(`王琳婧7.11日报
+1. 完成冲突验收`, {
+    messageTime: new Date('2026-07-11T23:49:00+08:00'),
+    timezone: 'Asia/Shanghai',
+  });
+
+  assert.equal(parsed.reporterName, '王琳婧');
+  assert.equal(parsed.reportDate, '2026-07-11');
+});
+
 test('parses full date and bullet items', () => {
   const parsed = parseDailyReportText(`王治坤 2026-06-26 工作日报
 - 完成支付平台接口联调
