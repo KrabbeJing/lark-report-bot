@@ -525,7 +525,7 @@ git commit -m "feat: normalize effective facts for AI summaries"
 - Consumes: personal Base tables with the new fields and select values.
 - Produces: verified form/chat conflict rows and deduplicated weekly AI input.
 
-- [ ] **Step 1: Run all local verification**
+- [x] **Step 1: Run all local verification**
 
 Run: `git diff --check`
 
@@ -535,7 +535,7 @@ Run: `npm test`
 
 Expected: all tests pass.
 
-- [ ] **Step 2: Exercise the four fact scenarios in the personal Base**
+- [x] **Step 2: Exercise the four fact scenarios in the personal Base**
 
 Create or submit test data for one member and date per scenario:
 
@@ -553,15 +553,15 @@ Expected statuses respectively:
 按时间取最新 / 已自动处理 / 有效 / 有效来源=form
 ```
 
-- [ ] **Step 3: Verify manual exclusion behavior**
+- [x] **Step 3: Verify manual exclusion behavior**
 
 Set one fact to`忽略`, rerun reconciliation, and confirm it remains`忽略` and is absent from weekly AI input.
 
-- [ ] **Step 4: Verify multi-day AI deduplication**
+- [x] **Step 4: Verify multi-day AI deduplication**
 
 Submit one multi-day chat report covering two dates. Confirm two fact rows exist, then run a weekly summary in reply mode and confirm the source appears once with a two-date coverage range.
 
-- [ ] **Step 5: Record evidence before deployment**
+- [x] **Step 5: Record evidence before deployment**
 
 Capture fact record IDs, status values, effective source, source time, and the weekly AI input count in the test notes. Do not copy full report content into deployment logs.
 
