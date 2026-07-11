@@ -1,4 +1,18 @@
+import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
+
+export function normalizeMessageUuid(value) {
+  const uuid = String(value || '').trim();
+  if (!uuid) return undefined;
+  if (uuid.length <= 50) return uuid;
+  const digest = createHash('sha256').update(uuid).digest('hex').slice(0, 32);
+  return `msg-${digest}`;
+}
+
+function withMessageUuid(data, uuid) {
+  const normalized = normalizeMessageUuid(uuid);
+  return normalized ? { ...data, uuid: normalized } : data;
+}
 
 export class LarkMessenger {
   constructor(client) {
@@ -18,24 +32,22 @@ export class LarkMessenger {
   async sendText(chatId, text, uuid) {
     await this.client.im.message.create({
       params: { receive_id_type: 'chat_id' },
-      data: {
+      data: withMessageUuid({
         receive_id: chatId,
         msg_type: 'text',
         content: JSON.stringify({ text }),
-        uuid,
-      },
+      }, uuid),
     });
   }
 
   async sendTextToOpenId(openId, text, uuid) {
     await this.client.im.message.create({
       params: { receive_id_type: 'open_id' },
-      data: {
+      data: withMessageUuid({
         receive_id: openId,
         msg_type: 'text',
         content: JSON.stringify({ text }),
-        uuid,
-      },
+      }, uuid),
     });
   }
 
@@ -66,12 +78,11 @@ export class LarkMessenger {
   async sendImage(chatId, imageKey, uuid) {
     await this.client.im.message.create({
       params: { receive_id_type: 'chat_id' },
-      data: {
+      data: withMessageUuid({
         receive_id: chatId,
         msg_type: 'image',
         content: JSON.stringify({ image_key: imageKey }),
-        uuid,
-      },
+      }, uuid),
     });
   }
 }
