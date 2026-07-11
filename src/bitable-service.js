@@ -229,7 +229,7 @@ export class BitableService {
     const endDate = options.endDate || formatYmd(now, timezone);
     const lookbackDays = Number(options.lookbackDays ?? 7);
     const startDate = options.startDate || addDaysToYmd(endDate, -Math.max(lookbackDays - 1, 0));
-    const formRecords = await this.listRecords(group.dailyTable, 'dailyFactSync.form.list');
+    const formRecords = await this.listRecords(group.dailyTable, 'dailyFactSync.form.list', { automaticFields: true });
     const chatRawRecords = await this.listRecords(group.chatDailyRawTable, 'dailyFactSync.chatRaw.list', { includeView: false });
     const targetRecords = await this.listRecords(group.dailyFactTable, 'dailyFactSync.fact.list', { includeView: false });
     const targetByFactKey = indexRecordsByField(targetRecords, group.dailyFactTable.fields.factKey);
@@ -285,6 +285,7 @@ export class BitableService {
           messageId: report.messageId,
           chatId: report.chatId,
           messageTime: report.messageTime,
+          sourceTime: normalizeSourceTimestamp(formRecord.last_modified_time || formRecord.created_time),
           syncedAt: formatDateTime(now, timezone),
         };
         const result = await this.upsertDailyFactRecord(group, input, {
@@ -358,6 +359,7 @@ export class BitableService {
             reportType: raw.reportType,
             dateRange: raw.dateRange,
             messageTime: raw.messageTime,
+            sourceTime: normalizeSourceTimestamp(raw.messageTime),
             contact,
             syncedAt: formatDateTime(now, timezone),
           };
@@ -641,6 +643,7 @@ export class BitableService {
             page_size: 500,
             page_token: pageToken,
             user_id_type: 'open_id',
+            automatic_fields: options.automaticFields === true || undefined,
           },
         })
       ));
@@ -798,6 +801,7 @@ function buildDailyFactFields(table, input, existing) {
     riskItems: incomingRiskItems,
   });
   const existingFingerprint = normalizeFieldValue(fields.contentFingerprint ? existingFields[fields.contentFingerprint] : '');
+  const existingSourceTime = normalizeSourceTimestamp(fields.sourceTime ? existingFields[fields.sourceTime] : '');
   const existingSource = normalizeFieldValue(fields.source ? existingFields[fields.source] : '');
   const existingHasForm = sourceHas(existingSource, 'form');
   const existingHasChat = sourceHas(existingSource, 'chat');
@@ -845,6 +849,7 @@ function buildDailyFactFields(table, input, existing) {
   setMappedField(recordFields, table, 'tomorrowPlanItems', useIncomingContent ? incomingTomorrowPlanItems : existingTomorrowPlanItems);
   setMappedField(recordFields, table, 'riskItems', useIncomingContent ? incomingRiskItems : existingRiskItems);
   setMappedField(recordFields, table, 'contentFingerprint', useIncomingContent ? incomingFingerprint : existingFingerprint);
+  setMappedField(recordFields, table, 'sourceTime', useIncomingContent ? normalizeSourceTimestamp(input.sourceTime) : existingSourceTime);
   setMappedField(recordFields, table, 'source', mergedSource);
   setCanonicalField(recordFields, 'sourceRecordId', input.sourceRecordId || '');
   setMappedField(recordFields, table, 'messageId', input.messageId || normalizeFieldValue(fields.messageId ? existingFields[fields.messageId] : ''));
@@ -946,6 +951,14 @@ export function normalizeFieldValue(value) {
     return value.text || value.name || value.id || JSON.stringify(value);
   }
   return String(value).trim();
+}
+
+export function normalizeSourceTimestamp(value) {
+  if (value == null || value === '') return 0;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) return numeric < 100000000000 ? numeric * 1000 : numeric;
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function normalizeDateFieldValue(value, timezone = DEFAULT_TIMEZONE) {

@@ -67,13 +67,15 @@
       "dailyFactTable": {
         "wikiUrl": "正式组织日报统一事实表wiki链接，需带table参数",
         "fields": {
-          "divisionalLeader": ""
+          "divisionalLeader": "分管领导"
         },
         "fieldTypes": {
           "reportDate": "date",
           "reporterName": "user",
           "supervisor": "user",
+          "divisionalLeader": "user",
           "messageTime": "datetime",
+          "sourceTime": "datetime",
           "syncedAt": "datetime"
         }
       },

@@ -1617,15 +1617,19 @@ test('reuses newly created form fact when syncing matching chat raw in the same 
 
   const creates = [];
   const updates = [];
+  let sourceListParams;
   const service = new BitableService({
     bitable: {
       appTableRecord: {
-        list: async ({ path }) => {
+        list: async ({ path, params }) => {
           if (path.table_id === 'tbl_source') {
+            sourceListParams = params;
             return {
               data: {
                 items: [{
                   record_id: 'rec_form',
+                  created_time: 1783690000000,
+                  last_modified_time: 1783699200123,
                   fields: {
                     日报日期: Date.UTC(2026, 6, 1),
                     日报提交人: [{ id: 'ou_liu', name: '刘喜双' }],
@@ -1686,6 +1690,7 @@ test('reuses newly created form fact when syncing matching chat raw in the same 
   });
 
   assert.equal(result.created, 1);
+  assert.equal(sourceListParams.automatic_fields, true);
   assert.equal(result.updated, 1);
   assert.equal(creates.length, 1);
   assert.equal(updates.length, 1);
@@ -1693,6 +1698,7 @@ test('reuses newly created form fact when syncing matching chat raw in the same 
   assert.equal(updates[0].data.fields['日报来源'], 'form+chat');
   assert.equal(updates[0].data.fields['来源记录ID'], 'rec_form');
   assert.equal(updates[0].data.fields['来源组合'], 'form:rec_form\nchat_raw:rec_raw\nchat:om_chat');
+  assert.equal(updates[0].data.fields['来源时间'], 1783699200123);
 });
 
 test('throws when bitable returns a non-zero business code', async () => {

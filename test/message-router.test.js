@@ -406,4 +406,11 @@ test('writes one fact record per report date with raw source record id', async (
   assert.deepEqual(factInputs.map(input => input.reportDate), ['2026-06-29', '2026-06-30']);
   assert.deepEqual(factInputs.map(input => input.sourceRecordId), ['rec_raw', 'rec_raw']);
   assert.deepEqual(factInputs.map(input => input.source), ['chat', 'chat']);
+  assert.deepEqual(
+    factInputs.map(input => input.sourceTime),
+    [
+      new Date('2026-07-01T00:30:00+08:00').getTime(),
+      new Date('2026-07-01T00:30:00+08:00').getTime(),
+    ],
+  );
 });

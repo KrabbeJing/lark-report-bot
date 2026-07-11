@@ -57,7 +57,7 @@ export const DAILY_FACT_FIELD_KEYS = {
   project: '所属板块',
   agileGroup: '敏捷小组',
   supervisor: '直属上级',
-  divisionalLeader: '',
+  divisionalLeader: '分管领导',
   rawText: '原文',
   workItems: '今日工作总结',
   tomorrowPlanItems: '明日工作计划',
@@ -75,6 +75,9 @@ export const DAILY_FACT_FIELD_KEYS = {
   mergeStatus: '合并状态',
   conflictStatus: '冲突状态',
   factStatus: '事实记录状态',
+  sourceTime: '来源时间',
+  effectiveSource: '有效来源',
+  autoResolutionNote: '自动处理说明',
   syncedAt: '同步时间',
 };
 
@@ -90,7 +93,7 @@ export const CONTACT_FIELD_KEYS = {
   teamRole: '团队身份',
   agileGroup: '敏捷小组',
   supervisor: '直属上级',
-  divisionalLeader: '',
+  divisionalLeader: '分管领导',
 };
 
 export const WEEKLY_FIELD_KEYS = {

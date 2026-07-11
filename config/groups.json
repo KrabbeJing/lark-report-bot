@@ -57,7 +57,9 @@
           "reportDate": "date",
           "reporterName": "user",
           "supervisor": "user",
+          "divisionalLeader": "user",
           "messageTime": "datetime",
+          "sourceTime": "datetime",
           "syncedAt": "datetime"
         }
       },

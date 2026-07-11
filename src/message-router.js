@@ -143,6 +143,7 @@ export async function handleMessageEvent({
         reportType: parsed.reportType,
         dateRange: parsed.dateRange,
         messageTime: context.messageTimeText,
+        sourceTime: messageTime.getTime(),
         contact,
       };
       factResults.push(await bitable.upsertDailyFactRecord(group, factInput));

@@ -66,6 +66,10 @@ test('normalizes chat raw and daily fact table configs', () => {
   assert.equal(group.chatDailyRawTable.fields.reportDateRange, '日报日期范围');
   assert.equal(group.dailyFactTable.fields.factKey, '事实唯一键');
   assert.equal(group.dailyFactTable.fields.contentFingerprint, '内容指纹');
+  assert.equal(group.dailyFactTable.fields.sourceTime, '来源时间');
+  assert.equal(group.dailyFactTable.fields.effectiveSource, '有效来源');
+  assert.equal(group.dailyFactTable.fields.autoResolutionNote, '自动处理说明');
+  assert.equal(group.dailyFactTable.fields.divisionalLeader, '分管领导');
 });
 
 test('local group configs map supervisor users and contact agile groups', () => {
@@ -77,6 +81,8 @@ test('local group configs map supervisor users and contact agile groups', () => 
         'user',
         `${filePath} ${group.chatId} dailyFactTable.直属上级 应配置为人员字段 user`,
       );
+      assert.equal(group.dailyFactTable?.fieldTypes?.sourceTime, 'datetime');
+      assert.equal(group.dailyFactTable?.fieldTypes?.divisionalLeader, 'user');
       assert.equal(
         group.contactTable?.fields?.agileGroup,
         '敏捷小组',
