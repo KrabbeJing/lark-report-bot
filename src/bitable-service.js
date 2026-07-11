@@ -1068,6 +1068,10 @@ function toBitableDateTimestamp(value, fieldType = 'date') {
   const text = Array.isArray(value) ? value[0] : value;
   if (typeof text === 'number' && Number.isFinite(text)) return text;
   const normalized = String(text || '').trim();
+  if (/^\d{10,13}$/.test(normalized)) {
+    const numeric = Number(normalized);
+    return numeric < 100000000000 ? numeric * 1000 : numeric;
+  }
   if (fieldType === 'datetime') {
     const parsedDateTime = parseShanghaiDateTime(normalized);
     if (parsedDateTime != null) return parsedDateTime;

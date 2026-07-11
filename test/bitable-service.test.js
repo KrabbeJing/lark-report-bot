@@ -1180,6 +1180,33 @@ test('formats configured datetime fields as millisecond timestamps', () => {
   assert.equal(fields['消息时间'], Date.parse('2026-07-06T03:13:50.000Z'));
 });
 
+test('formats numeric datetime strings as millisecond timestamps', () => {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      dailyTable: {
+        appToken: 'bas_test',
+        tableId: 'tbl_daily',
+        fields: { messageTime: '消息时间' },
+        fieldTypes: { messageTime: 'datetime' },
+      },
+    }],
+  }).groups[0];
+  const service = new BitableService({});
+  const timestamp = 1783348291000;
+  const fields = service.buildDailyRecordFields(group, {
+    highConfidence: true,
+    reportDate: '2026-07-06',
+    reporterName: '王治坤',
+    workItems: ['事项1'],
+    riskItems: [],
+  }, {
+    messageTimeText: String(timestamp),
+  });
+
+  assert.equal(fields['消息时间'], timestamp);
+});
+
 test('skips configured user fields when no open id is available', () => {
   const group = normalizeConfig({
     groups: [{
