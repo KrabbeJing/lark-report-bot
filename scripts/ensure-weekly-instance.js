@@ -3,17 +3,18 @@ import * as lark from '@larksuiteoapi/node-sdk';
 import { BitableService } from '../src/bitable-service.js';
 import { loadGroupConfig } from '../src/config.js';
 import { ensureWeeklyInstancesForAllGroups } from '../src/weekly-instance-service.js';
+import { buildLarkClientOptions } from '../src/lark-client.js';
 import { WeeklySheetWriter } from '../src/weekly-sheet-writer.js';
 
 const { APP_ID, APP_SECRET } = process.env;
 if (!APP_ID || !APP_SECRET) throw new Error('APP_ID/APP_SECRET 未配置');
 
 const config = loadGroupConfig();
-const client = new lark.Client({
+const client = new lark.Client(buildLarkClientOptions({
   appId: APP_ID,
   appSecret: APP_SECRET,
   domain: lark.Domain.Feishu,
-});
+}));
 const results = await ensureWeeklyInstancesForAllGroups({
   config,
   bitable: new BitableService(client),

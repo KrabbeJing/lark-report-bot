@@ -8,6 +8,7 @@ import { syncDailyFactsForAllGroups } from './daily-fact-sync.js';
 import { pushDailyReportsToSupervisors } from './daily-supervisor-push.js';
 import { formatLarkErrorForLog, reportHandlerError, reportScheduledError } from './error-reporter.js';
 import { loadGroupConfig } from './config.js';
+import { buildLarkClientOptions } from './lark-client.js';
 import { LarkMessenger } from './lark-messenger.js';
 import { handleMessageEvent } from './message-router.js';
 import {
@@ -31,17 +32,14 @@ if (!APP_ID || !APP_SECRET) {
 }
 
 const config = loadGroupConfig();
-const client = new lark.Client({
+const larkClientOptions = buildLarkClientOptions({
   appId: APP_ID,
   appSecret: APP_SECRET,
   domain: lark.Domain.Feishu,
 });
+const client = new lark.Client(larkClientOptions);
 
-const wsClient = new lark.WSClient({
-  appId: APP_ID,
-  appSecret: APP_SECRET,
-  domain: lark.Domain.Feishu,
-});
+const wsClient = new lark.WSClient(larkClientOptions);
 
 const messenger = new LarkMessenger(client);
 const bitable = new BitableService(client);
