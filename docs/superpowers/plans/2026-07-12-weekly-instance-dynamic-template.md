@@ -376,7 +376,7 @@ git commit -m "feat: locate weekly template targets dynamically"
 - Produces: `WeeklySheetWriter.discoverTemplateTargets(sheetConfig, sheetId, options?)`.
 - Extends `listSheets()` results with `rowCount` and `columnCount`.
 
-- [ ] **Step 1: Write failing API-read and read-only-template tests**
+- [x] **Step 1: Write failing API-read and read-only-template tests**
 
 Add tests to `test/weekly-sheet-writer.test.js` that capture requests:
 
@@ -429,13 +429,13 @@ test('never falls back to writing the template when copy is disabled', async () 
 
 Reuse the Task 1 matrix through a local `buildTemplateRows()` fixture in this test file; do not import test code from another test file.
 
-- [ ] **Step 2: Run writer tests and verify they fail**
+- [x] **Step 2: Run writer tests and verify they fail**
 
 Run: `node --test test/weekly-sheet-writer.test.js`
 
 Expected: FAIL because `discoverTemplateTargets` is missing and `ensureWeeklySheet` still returns the template when copy is disabled.
 
-- [ ] **Step 3: Preserve grid metadata and add the values reader**
+- [x] **Step 3: Preserve grid metadata and add the values reader**
 
 Import the locator:
 
@@ -481,7 +481,7 @@ async discoverTemplateTargets(sheetConfig, sheetId, options = {}) {
 }
 ```
 
-- [ ] **Step 4: Enforce template read-only behavior**
+- [x] **Step 4: Enforce template read-only behavior**
 
 Replace the final `copyTemplate === false` fallback in `ensureWeeklySheet` with:
 
@@ -493,7 +493,7 @@ if (sheetConfig.copyTemplate === false) {
 
 Keep reuse-by-title before this check. Enhance `copyTemplateSheet` to include returned grid metadata when present, while preserving the existing fallback lookup by title.
 
-- [ ] **Step 5: Run focused and full tests**
+- [x] **Step 5: Run focused and full tests**
 
 Run: `node --test test/weekly-sheet-writer.test.js test/weekly-template-locator.test.js`
 
@@ -503,7 +503,7 @@ Run: `npm test`
 
 Expected: all tests pass.
 
-- [ ] **Step 6: Commit Sheet read and validation support**
+- [x] **Step 6: Commit Sheet read and validation support**
 
 ```bash
 git add src/weekly-sheet-writer.js test/weekly-sheet-writer.test.js

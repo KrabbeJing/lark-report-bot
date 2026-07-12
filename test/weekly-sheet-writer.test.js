@@ -18,6 +18,10 @@ test('copies template sheet and writes configured cells', async () => {
                 properties: {
                   sheetId: 'new_sheet_1',
                   title: '数字金融部周报 2026-06-22-2026-06-26',
+                  gridProperties: {
+                    rowCount: 100,
+                    columnCount: 3,
+                  },
                 },
               },
             }],
@@ -43,6 +47,8 @@ test('copies template sheet and writes configured cells', async () => {
   });
 
   assert.equal(sheet.sheetId, 'new_sheet_1');
+  assert.equal(sheet.rowCount, 100);
+  assert.equal(sheet.columnCount, 3);
   assert.equal(calls[1].data.requests[0].copySheet.source.sheetId, 'tpl_sheet');
   assert.equal(calls[1].data.requests[0].copySheet.destination.title, '数字金融部周报 2026-06-22-2026-06-26');
   assert.deepEqual(calls[2].data.valueRanges, [
@@ -113,6 +119,56 @@ test('resolves wiki node before querying spreadsheet sheets', async () => {
   assert.equal(calls[1].url, '/open-apis/sheets/v3/spreadsheets/shtcn_from_wiki/sheets/query');
 });
 
+test('reads copied sheet matrix and returns dynamic targets', async () => {
+  const requests = [];
+  const writer = new WeeklySheetWriter({
+    request: async payload => {
+      requests.push(payload);
+      if (payload.url.includes('/sheets/query')) {
+        return {
+          data: {
+            sheets: [{
+              sheet_id: 'week_1',
+              title: '本周周报',
+              grid_properties: { row_count: 29, column_count: 3 },
+            }],
+          },
+        };
+      }
+      if (payload.url.includes('/values/')) {
+        return { data: { valueRange: { values: buildTemplateRows() } } };
+      }
+      return { data: {} };
+    },
+  });
+
+  const result = await writer.discoverTemplateTargets(
+    { spreadsheetToken: 'sheet_token' },
+    'week_1',
+  );
+
+  assert.equal(result.reportPeriod, 'B2');
+  assert.equal(result.agileProjects['融羲项目组'].current, 'C10');
+  assert.match(requests.at(-1).url, /values/);
+  assert.match(decodeURIComponent(requests.at(-1).url), /week_1!A1:C29/);
+});
+
+test('never falls back to writing the template when copy is disabled', async () => {
+  const writer = new WeeklySheetWriter({
+    request: async () => ({ data: { sheets: [] } }),
+  });
+
+  await assert.rejects(
+    writer.ensureWeeklySheet({
+      spreadsheetToken: 'sheet_token',
+      templateSheetId: 'template',
+      copyTemplate: false,
+      titlePattern: '周报 {{weekStart}}',
+    }, { weekStart: '2026-07-13', weekEnd: '2026-07-17' }),
+    /禁止直接写入周报模板/,
+  );
+});
+
 test('renders title and sheet url', () => {
   assert.equal(
     renderWeeklySheetTitle('周报 {{weekStartCompact}}-{{weekEndCompact}}', {
@@ -129,3 +185,29 @@ test('renders title and sheet url', () => {
     'https://example.feishu.cn/sheets/shtcn_test?sheet=new_sheet_1',
   );
 });
+
+function buildTemplateRows() {
+  return [
+    ['数字金融部周报'],
+    ['报告周期', 'YYYY年MM月DD日-YYYY年MM月DD日'],
+    [],
+    ['一、核心指标完成情况'],
+    ['指标名称', '目标值', '完成情况'],
+    ['手机银行月活', '100万', ''],
+    [],
+    ['二、敏捷项目组工作进展'],
+    ['填写说明'],
+    [[{ text: '融羲项目组\n' }, { text: '【需求分析阶段】' }], '本周重点事项说明', ''],
+    ['', '下周工作计划', ''],
+    [],
+    ['三、部门管理工作'],
+    ['填写说明：每项不超过3条'],
+    ['1.零售客群经营', '本周工作进展', ''],
+    ['', '', ''],
+    ['', '', ''],
+    ['', '', ''],
+    ['', '下周工作计划', ''],
+    ['', '', ''],
+    ['', '', ''],
+  ];
+}

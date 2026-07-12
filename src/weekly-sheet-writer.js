@@ -1,3 +1,5 @@
+import { locateWeeklyTemplateTargets } from './weekly-template-locator.js';
+
 export class WeeklySheetWriter {
   constructor(client) {
     this.client = client;
@@ -15,20 +17,11 @@ export class WeeklySheetWriter {
       }
     }
 
-    if (sheetConfig.copyTemplate !== false) {
-      return this.copyTemplateSheet(resolvedConfig, title);
+    if (sheetConfig.copyTemplate === false) {
+      throw new Error('未找到本周实例，禁止直接写入周报模板');
     }
 
-    if (!sheetConfig.templateSheetId) {
-      throw new Error('weeklySheet.templateSheetId 未配置，无法定位要写入的 sheet');
-    }
-    return {
-      spreadsheetToken: resolvedConfig.spreadsheetToken,
-      sheetId: sheetConfig.templateSheetId,
-      title,
-      reused: true,
-      created: false,
-    };
+    return this.copyTemplateSheet(resolvedConfig, title);
   }
 
   async resolveSheetConfig(sheetConfig) {
@@ -60,12 +53,38 @@ export class WeeklySheetWriter {
       method: 'GET',
       url: `/open-apis/sheets/v3/spreadsheets/${spreadsheetToken}/sheets/query`,
     });
-    return (res?.data?.sheets || []).map(sheet => ({
-      spreadsheetToken,
-      sheetId: sheet.sheet_id || sheet.sheetId,
-      title: sheet.title || '',
-      index: sheet.index,
-    }));
+    return (res?.data?.sheets || []).map(sheet => {
+      const grid = sheet.grid_properties || sheet.gridProperties || {};
+      return {
+        spreadsheetToken,
+        sheetId: sheet.sheet_id || sheet.sheetId,
+        title: sheet.title || '',
+        index: sheet.index,
+        rowCount: Number(grid.row_count || grid.rowCount || 0),
+        columnCount: Number(grid.column_count || grid.columnCount || 0),
+      };
+    });
+  }
+
+  async readSheetValues(sheetConfig, sheetId, { endRow = 0 } = {}) {
+    const resolvedConfig = await this.resolveSheetConfig(sheetConfig);
+    const sheet = (await this.listSheets(resolvedConfig.spreadsheetToken))
+      .find(item => item.sheetId === sheetId);
+    if (!sheet) throw new Error(`周报工作表不存在：${sheetId}`);
+    const rowCount = Number(endRow || sheet.rowCount);
+    if (!rowCount) throw new Error(`周报工作表行数无效：${sheetId}`);
+
+    const range = `${sheetId}!A1:C${rowCount}`;
+    const res = await this.client.request({
+      method: 'GET',
+      url: `/open-apis/sheets/v2/spreadsheets/${resolvedConfig.spreadsheetToken}/values/${encodeURIComponent(range)}`,
+    });
+    return res?.data?.valueRange?.values || res?.data?.value_range?.values || [];
+  }
+
+  async discoverTemplateTargets(sheetConfig, sheetId, options = {}) {
+    const values = await this.readSheetValues(sheetConfig, sheetId, options);
+    return locateWeeklyTemplateTargets(values, options);
   }
 
   async copyTemplateSheet(sheetConfig, title) {
@@ -96,6 +115,8 @@ export class WeeklySheetWriter {
         spreadsheetToken: sheetConfig.spreadsheetToken,
         sheetId: copied.sheetId,
         title: copied.title || title,
+        rowCount: copied.rowCount,
+        columnCount: copied.columnCount,
         reused: false,
         created: true,
       };
@@ -169,9 +190,12 @@ function extractCopiedSheet(res) {
   const reply = replies.find(item => item.copySheet || item.copy_sheet) || {};
   const copied = reply.copySheet || reply.copy_sheet || res?.data?.copySheet || res?.data?.copy_sheet || {};
   const properties = copied.properties || copied.sheet || copied;
+  const grid = properties.gridProperties || properties.grid_properties || {};
   return {
     sheetId: properties.sheetId || properties.sheet_id || copied.sheetId || copied.sheet_id || '',
     title: properties.title || copied.title || '',
+    rowCount: Number(grid.rowCount || grid.row_count || 0),
+    columnCount: Number(grid.columnCount || grid.column_count || 0),
   };
 }
 
