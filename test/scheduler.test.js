@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { shouldRunDailyFactSync, shouldRunDailySupervisorPush, shouldRunWeeklyPush } from '../src/scheduler.js';
+import {
+  shouldRunDailyFactSync,
+  shouldRunDailySupervisorPush,
+  shouldRunWeeklyInstanceCreation,
+  shouldRunWeeklyPush,
+  startWeeklyInstanceScheduler,
+} from '../src/scheduler.js';
 import { normalizeConfig } from '../src/config.js';
 
 test('runs weekly push at configured Saturday time in Asia Shanghai', () => {
@@ -19,6 +25,38 @@ test('does not run at the wrong minute', () => {
     time: '10:00',
     timezone: 'Asia/Shanghai',
   }), false);
+});
+
+test('runs weekly instance creation Monday at configured Shanghai time', () => {
+  const schedule = {
+    enabled: true,
+    dayOfWeek: 1,
+    time: '09:00',
+    timezone: 'Asia/Shanghai',
+  };
+  assert.equal(shouldRunWeeklyInstanceCreation(
+    new Date('2026-07-13T01:00:00.000Z'),
+    schedule,
+  ), true);
+  assert.equal(shouldRunWeeklyInstanceCreation(
+    new Date('2026-07-13T01:01:00.000Z'),
+    schedule,
+  ), false);
+});
+
+test('weekly instance scheduler stays inert when disabled', () => {
+  const logs = [];
+  let runCount = 0;
+  const scheduler = startWeeklyInstanceScheduler({
+    config: { weeklyInstanceCreation: { enabled: false } },
+    onRun: async () => { runCount += 1; },
+    logger: { log: message => logs.push(message), error() {} },
+    intervalMs: 5,
+  });
+
+  scheduler.stop();
+  assert.equal(runCount, 0);
+  assert.deepEqual(logs, ['[scheduler] weekly instance creation disabled']);
 });
 
 test('runs daily supervisor push at configured time in Asia Shanghai', () => {

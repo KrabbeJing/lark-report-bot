@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
+    "weekly:ensure": "node scripts/ensure-weekly-instance.js",
     "test": "node --test"
   },
   "dependencies": {

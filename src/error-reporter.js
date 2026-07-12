@@ -33,6 +33,43 @@ export async function reportHandlerError({ err, message, messenger, config }) {
   }
 }
 
+export async function reportScheduledError({ err, task, scope, messenger, config }) {
+  const errorReporting = config?.errorReporting || {};
+  const summary = [
+    '【数金小助手定时任务异常】',
+    `任务：${task}`,
+    `范围：${scope}`,
+    `时间：${new Date().toLocaleString('zh-CN', { hour12: false })}`,
+    `错误信息：${truncateText(err?.message || String(err || ''), 500)}`,
+  ].filter(line => !line.endsWith('：')).join('\n');
+  const eventId = `${task}-${scope}-${Date.now()}`;
+  const tasks = [
+    ...(errorReporting.adminOpenIds || []).map(openId => (
+      messenger.sendTextToOpenId(
+        openId,
+        summary,
+        buildErrorUuid('scheduled-open', openId, { message_id: eventId }),
+      )
+    )),
+    ...(errorReporting.adminChatIds || []).map(chatId => (
+      messenger.sendText(
+        chatId,
+        summary,
+        buildErrorUuid('scheduled-chat', chatId, { message_id: eventId }),
+      )
+    )),
+  ];
+
+  const results = await Promise.allSettled(tasks);
+  const failed = results.filter(result => result.status === 'rejected');
+  if (failed.length) {
+    console.warn(
+      '[error-report] failed to notify admins',
+      failed.map(result => result.reason?.message || result.reason),
+    );
+  }
+}
+
 export function buildErrorSummary(err, message) {
   const data = err?.response?.data || {};
   const detail = data.error || {};

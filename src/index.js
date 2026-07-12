@@ -6,11 +6,17 @@ import { createAiProvider } from './ai-providers.js';
 import { BitableService } from './bitable-service.js';
 import { syncDailyFactsForAllGroups } from './daily-fact-sync.js';
 import { pushDailyReportsToSupervisors } from './daily-supervisor-push.js';
-import { formatLarkErrorForLog, reportHandlerError } from './error-reporter.js';
+import { formatLarkErrorForLog, reportHandlerError, reportScheduledError } from './error-reporter.js';
 import { loadGroupConfig } from './config.js';
 import { LarkMessenger } from './lark-messenger.js';
 import { handleMessageEvent } from './message-router.js';
-import { startDailyFactSyncScheduler, startDailySupervisorScheduler, startWeeklyScheduler } from './scheduler.js';
+import {
+  startDailyFactSyncScheduler,
+  startDailySupervisorScheduler,
+  startWeeklyInstanceScheduler,
+  startWeeklyScheduler,
+} from './scheduler.js';
+import { ensureWeeklyInstancesForAllGroups } from './weekly-instance-service.js';
 import { generateWeeklyReportForGroup } from './weekly-reporter.js';
 import { WeeklySheetWriter } from './weekly-sheet-writer.js';
 
@@ -74,6 +80,41 @@ const eventDispatcher = new lark.EventDispatcher({}).register({
       console.error('[handler] failed', err?.response?.data || err);
       await reportHandlerError({ err, message, messenger, config });
     });
+  },
+});
+
+startWeeklyInstanceScheduler({
+  config,
+  onRun: async (now) => {
+    const results = await ensureWeeklyInstancesForAllGroups({
+      config,
+      bitable,
+      sheetWriter,
+      now,
+    });
+    for (const result of results) {
+      if (result.error) {
+        console.error(
+          `[weekly-instance] failed for ${result.group}`,
+          formatLarkErrorForLog(result.error),
+        );
+        await reportScheduledError({
+          err: result.error,
+          task: '周报实例创建',
+          scope: result.group,
+          messenger,
+          config,
+        });
+      } else {
+        console.log('[weekly-instance] result', {
+          group: result.group,
+          skipped: result.skipped,
+          reason: result.reason,
+          reused: result.reused,
+          instanceKey: result.instanceKey,
+        });
+      }
+    }
   },
 });
 

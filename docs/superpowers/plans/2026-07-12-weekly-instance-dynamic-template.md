@@ -1180,7 +1180,7 @@ git commit -m "feat: write weekly reports by semantic targets"
 - Produces: `reportScheduledError({ err, task, scope, messenger, config })` for administrator-only failure notification.
 - Produces: `npm run weekly:ensure` for controlled manual execution using the active groups config.
 
-- [ ] **Step 1: Write failing Monday/timezone scheduler tests**
+- [x] **Step 1: Write failing Monday/timezone scheduler tests**
 
 Extend `test/scheduler.test.js`:
 
@@ -1205,13 +1205,13 @@ test('runs weekly instance creation Monday at configured Shanghai time', () => {
 
 Add a fake-timer-free `startWeeklyInstanceScheduler` test by passing an `intervalMs` and a disabled config; assert it logs `weekly instance creation disabled` and returns a working `stop()` method without calling `onRun`.
 
-- [ ] **Step 2: Run scheduler tests and verify they fail**
+- [x] **Step 2: Run scheduler tests and verify they fail**
 
 Run: `node --test test/scheduler.test.js`
 
 Expected: FAIL because the new scheduler exports are missing.
 
-- [ ] **Step 3: Add scheduler functions using the existing weekly pattern**
+- [x] **Step 3: Add scheduler functions using the existing weekly pattern**
 
 Add to `src/scheduler.js`:
 
@@ -1252,7 +1252,7 @@ export function shouldRunWeeklyInstanceCreation(now, schedule) {
 }
 ```
 
-- [ ] **Step 4: Wire the scheduler into the service process**
+- [x] **Step 4: Wire the scheduler into the service process**
 
 First add a failing test to `test/error-reporter.test.js`:
 
@@ -1359,7 +1359,7 @@ startWeeklyInstanceScheduler({
 
 Do not log `sheetId`, token, URL, table ID, or raw record fields.
 
-- [ ] **Step 5: Add the manual command**
+- [x] **Step 5: Add the manual command**
 
 Create `scripts/ensure-weekly-instance.js` using the same environment/config initialization as `src/index.js`, but without starting WSClient:
 
@@ -1402,7 +1402,7 @@ Add to `package.json` scripts:
 "weekly:ensure": "node scripts/ensure-weekly-instance.js"
 ```
 
-- [ ] **Step 6: Run full verification**
+- [x] **Step 6: Run full verification**
 
 Run: `node --test test/scheduler.test.js test/weekly-instance-service.test.js`
 
@@ -1416,7 +1416,7 @@ Run: `rg -n "C(2[0-9]|3[0-9]|4[0-9]|5[0-9]|6[0-9])" src config`
 
 Expected: no static weekly target coordinates in production source or configuration.
 
-- [ ] **Step 7: Commit scheduling and manual execution**
+- [x] **Step 7: Commit scheduling and manual execution**
 
 ```bash
 git add src/scheduler.js test/scheduler.test.js src/index.js src/error-reporter.js test/error-reporter.test.js scripts/ensure-weekly-instance.js package.json

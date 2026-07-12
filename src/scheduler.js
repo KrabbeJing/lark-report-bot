@@ -33,6 +33,39 @@ export function startWeeklyScheduler({ config, onRun, logger = console, interval
   };
 }
 
+export function startWeeklyInstanceScheduler({ config, onRun, logger = console, intervalMs = 60_000 }) {
+  const schedule = config.weeklyInstanceCreation;
+  if (!schedule?.enabled) {
+    logger.log('[scheduler] weekly instance creation disabled');
+    return { stop() {} };
+  }
+
+  const runKeys = new Set();
+  const tick = async () => {
+    const now = new Date();
+    if (!shouldRunWeeklyInstanceCreation(now, schedule)) return;
+
+    const runKey = `${formatYmd(now, schedule.timezone)}-${schedule.time}`;
+    if (runKeys.has(runKey)) return;
+    runKeys.add(runKey);
+
+    logger.log(`[scheduler] weekly instance creation triggered: ${runKey}`);
+    try {
+      await onRun(now);
+    } catch (err) {
+      logger.error('[scheduler] weekly instance creation failed', err);
+    }
+  };
+
+  const timer = setInterval(tick, intervalMs);
+  tick();
+  return {
+    stop() {
+      clearInterval(timer);
+    },
+  };
+}
+
 export function startDailySupervisorScheduler({ config, onRun, logger = console, intervalMs = 60_000 }) {
   const schedule = config.dailySupervisorPush;
   if (!schedule?.enabled) {
@@ -103,6 +136,14 @@ export function shouldRunWeeklyPush(now, schedule) {
   const parts = getLocalParts(now, schedule.timezone || 'Asia/Shanghai');
   const [hour, minute] = String(schedule.time || '10:00').split(':').map(Number);
   return parts.dayOfWeek === Number(schedule.dayOfWeek ?? 6)
+    && parts.hour === hour
+    && parts.minute === minute;
+}
+
+export function shouldRunWeeklyInstanceCreation(now, schedule) {
+  const parts = getLocalParts(now, schedule.timezone || 'Asia/Shanghai');
+  const [hour, minute] = String(schedule.time || '09:00').split(':').map(Number);
+  return parts.dayOfWeek === Number(schedule.dayOfWeek ?? 1)
     && parts.hour === hour
     && parts.minute === minute;
 }

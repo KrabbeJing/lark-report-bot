@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildErrorSummary, formatLarkErrorForLog, reportHandlerError } from '../src/error-reporter.js';
+import {
+  buildErrorSummary,
+  formatLarkErrorForLog,
+  reportHandlerError,
+  reportScheduledError,
+} from '../src/error-reporter.js';
 import { normalizeConfig } from '../src/config.js';
 
 test('formats nested Feishu field violations for PM2 logs', () => {
@@ -118,4 +123,28 @@ test('builds concise error summaries from bitable errors', () => {
   assert.match(summary, /1254064/);
   assert.match(summary, /DatetimeFieldConvFail/);
   assert.match(summary, /log_1/);
+});
+
+test('notifies configured admins about a scheduled task failure', async () => {
+  const sent = [];
+  await reportScheduledError({
+    err: new Error('复制模板失败'),
+    task: '周报实例创建',
+    scope: '公司项目组',
+    messenger: {
+      sendTextToOpenId: async (id, text) => sent.push(['open', id, text]),
+      sendText: async (id, text) => sent.push(['chat', id, text]),
+    },
+    config: {
+      errorReporting: {
+        adminOpenIds: ['ou_admin'],
+        adminChatIds: ['oc_admin'],
+      },
+    },
+  });
+
+  assert.equal(sent.length, 2);
+  assert.match(sent[0][2], /周报实例创建/);
+  assert.match(sent[0][2], /公司项目组/);
+  assert.match(sent[0][2], /复制模板失败/);
 });
