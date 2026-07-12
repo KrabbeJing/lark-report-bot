@@ -135,6 +135,13 @@ function buildPrompt(input, fallbackText) {
 
 function buildWeeklySheetPrompt(input, fallbackValues) {
   const cells = getWeeklySheetExpectedCells(input.cellMap);
+  const targetDescriptions = describeWeeklySheetTargets(input.cellMap);
+  const exampleCells = Object.fromEntries(
+    cells
+      .filter(cell => cell !== input.cellMap?.reportPeriod)
+      .slice(0, 2)
+      .map(cell => [cell, '']),
+  );
   const reports = input.reports.map(report => ({
     date: report.reportDate,
     name: report.reporterName,
@@ -149,21 +156,34 @@ function buildWeeklySheetPrompt(input, fallbackValues) {
     `需要填写的单元格：${cells.join(', ')}`,
     '',
     '单元格含义：',
-    '- C26/C27 融羲项目组本周重点事项/下周计划',
-    '- C28/C29 收单项目组本周重点事项/下周计划',
-    '- C30/C31 线上营业厅项目组本周重点事项/下周计划',
-    '- C32/C33 手机银行项目组本周重点事项/下周计划',
-    '- C34/C35 新核心项目组本周重点事项/下周计划',
-    '- C39:C68 部门管理工作，按零售大众客群、对公客群及场景、渠道创新、风控合规、业务转型分组填写',
+    ...targetDescriptions,
     '',
     '日报数据：',
     JSON.stringify(reports, null, 2),
     '',
-    '请输出 JSON，格式为：{"cells":{"C26":"...","C27":"..."}}。每个单元格内容简洁，最多 3 条；无信息时留空字符串。',
+    `请输出 JSON，格式为：${JSON.stringify({ cells: exampleCells })}。无信息时留空字符串。`,
+    '模块二单元格可写多条，不受三条限制；模块三每个目标单元格只写一条，最多使用三个目标单元格。',
     '',
     '本地规则生成的参考值：',
     JSON.stringify(fallbackValues, null, 2),
   ].join('\n');
+}
+
+function describeWeeklySheetTargets(cellMap = {}) {
+  const descriptions = [];
+  for (const [name, spec] of Object.entries(cellMap.agileProjects || {})) {
+    descriptions.push(`- 模块二/${name}/本周重点事项说明 -> ${spec.current}`);
+    descriptions.push(`- 模块二/${name}/下周工作计划 -> ${spec.next}`);
+  }
+  for (const [name, spec] of Object.entries(cellMap.management || {})) {
+    descriptions.push(`- 模块三/${name}/本周工作进展 -> ${toCellList(spec.current)}`);
+    descriptions.push(`- 模块三/${name}/下周工作计划 -> ${toCellList(spec.next)}`);
+  }
+  return descriptions;
+}
+
+function toCellList(value) {
+  return (Array.isArray(value) ? value : [value]).filter(Boolean).join(', ');
 }
 
 function sanitizeCellValues(values, cellMap) {

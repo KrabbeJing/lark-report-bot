@@ -1,7 +1,10 @@
-import { WEEKLY_SHEET_CELL_MAP } from './config.js';
-
 const FOLLOW_UP_RE = /(下周|明日|计划|待|协调|跟进|推进|确认|联调|评审|上线|发布|优化)/;
 const DEFAULT_EMPTY_VALUE = '';
+const EMPTY_WEEKLY_SHEET_CELL_MAP = {
+  reportPeriod: '',
+  agileProjects: {},
+  management: {},
+};
 
 export function buildWeeklySheetValues({
   group = {},
@@ -9,7 +12,7 @@ export function buildWeeklySheetValues({
   summary = null,
   weekStart = '',
   weekEnd = '',
-  cellMap = WEEKLY_SHEET_CELL_MAP,
+  cellMap = EMPTY_WEEKLY_SHEET_CELL_MAP,
 } = {}) {
   const values = {};
   const buckets = {
@@ -58,7 +61,7 @@ export function buildWeeklySheetValues({
   };
 }
 
-export function getWeeklySheetExpectedCells(cellMap = WEEKLY_SHEET_CELL_MAP) {
+export function getWeeklySheetExpectedCells(cellMap = EMPTY_WEEKLY_SHEET_CELL_MAP) {
   const cells = [];
   if (cellMap.reportPeriod) cells.push(cellMap.reportPeriod);
   for (const spec of Object.values(cellMap.agileProjects || {})) {

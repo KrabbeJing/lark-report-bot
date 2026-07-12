@@ -12,6 +12,12 @@
     "time": "10:00",
     "timezone": "Asia/Shanghai"
   },
+  "weeklyInstanceCreation": {
+    "enabled": false,
+    "dayOfWeek": 1,
+    "time": "09:00",
+    "timezone": "Asia/Shanghai"
+  },
   "dailySupervisorPush": {
     "enabled": false,
     "time": "17:00",
@@ -80,6 +86,31 @@
         }
       },
       "weeklyTable": null,
+      "weeklyInstanceTable": {
+        "appToken": "",
+        "tableId": "",
+        "viewId": "",
+        "fields": {
+          "instanceKey": "周报实例唯一键",
+          "isoYear": "ISO年份",
+          "isoWeek": "ISO周次",
+          "weekStart": "周开始日期",
+          "weekEnd": "周结束日期",
+          "spreadsheetToken": "SpreadsheetToken",
+          "sheetId": "SheetID",
+          "sheetTitle": "工作表名称",
+          "sheetUrl": "周报链接",
+          "status": "实例状态",
+          "createdAt": "创建时间",
+          "updatedAt": "更新时间"
+        },
+        "fieldTypes": {
+          "weekStart": "date",
+          "weekEnd": "date",
+          "createdAt": "datetime",
+          "updatedAt": "datetime"
+        }
+      },
       "weeklySheet": {
         "enabled": false,
         "spreadsheetUrl": "正式组织周报模板wiki链接",

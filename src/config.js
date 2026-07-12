@@ -107,61 +107,35 @@ export const WEEKLY_FIELD_KEYS = {
   pushedAt: '推送时间',
 };
 
-export const WEEKLY_SHEET_CELL_MAP = {
-  reportPeriod: 'B2',
+export const WEEKLY_INSTANCE_FIELD_KEYS = {
+  instanceKey: '周报实例唯一键',
+  isoYear: 'ISO年份',
+  isoWeek: 'ISO周次',
+  weekStart: '周开始日期',
+  weekEnd: '周结束日期',
+  spreadsheetToken: 'SpreadsheetToken',
+  sheetId: 'SheetID',
+  sheetTitle: '工作表名称',
+  sheetUrl: '周报链接',
+  status: '实例状态',
+  createdAt: '创建时间',
+  updatedAt: '更新时间',
+};
+
+export const WEEKLY_SHEET_ENTITY_ALIASES = {
   agileProjects: {
-    融羲项目组: {
-      current: 'C26',
-      next: 'C27',
-      aliases: ['融羲'],
-    },
-    收单项目组: {
-      current: 'C28',
-      next: 'C29',
-      aliases: ['收单'],
-    },
-    线上营业厅项目组: {
-      current: 'C30',
-      next: 'C31',
-      aliases: ['线上营业厅', '对公线上营业厅'],
-    },
-    手机银行项目组: {
-      current: 'C32',
-      next: 'C33',
-      aliases: ['手机银行'],
-    },
-    新核心项目组: {
-      current: 'C34',
-      next: 'C35',
-      aliases: ['新核心'],
-    },
+    融羲项目组: ['融羲'],
+    收单项目组: ['收单'],
+    线上营业厅项目组: ['线上营业厅', '对公线上营业厅'],
+    手机银行项目组: ['手机银行'],
+    新核心项目组: ['新核心'],
   },
   management: {
-    零售大众客群经营: {
-      current: ['C39', 'C40', 'C41'],
-      next: ['C42', 'C43', 'C44'],
-      aliases: ['零售大众客群', '零售', '大众客群', '客群经营', '营销活动'],
-    },
-    对公客群经营及场景建设: {
-      current: ['C45', 'C46', 'C47'],
-      next: ['C48', 'C49', 'C50'],
-      aliases: ['对公客群', '对公', '场景建设', '医院', '企业'],
-    },
-    渠道创新建设: {
-      current: ['C51', 'C52', 'C53'],
-      next: ['C54', 'C55', 'C56'],
-      aliases: ['渠道创新', '渠道', '线上营业厅', '手机银行'],
-    },
-    业务风控合规: {
-      current: ['C57', 'C58', 'C59'],
-      next: ['C60', 'C61', 'C62'],
-      aliases: ['风控', '合规', '风险', '反洗钱', '风险交易', '分级分类', '核查'],
-    },
-    业务转型推动: {
-      current: ['C63', 'C64', 'C65'],
-      next: ['C66', 'C67', 'C68'],
-      aliases: ['业务转型', '转型推动', '新核心', '人工智能', '培训'],
-    },
+    零售客群经营: ['零售大众客群', '零售', '大众客群', '客群经营', '营销活动'],
+    对公客群经营及场景建设: ['对公客群', '对公', '场景建设', '医院', '企业'],
+    渠道创新建设: ['渠道创新', '渠道', '线上营业厅', '手机银行'],
+    业务风控合规: ['风控', '合规', '风险', '反洗钱', '风险交易', '分级分类', '核查'],
+    业务转型推动: ['业务转型', '转型推动', '新核心', '人工智能', '培训'],
   },
 };
 
@@ -185,6 +159,12 @@ export function normalizeConfig(raw) {
     dayOfWeek: Number(raw.weeklyPush?.dayOfWeek ?? 6),
     time: raw.weeklyPush?.time || '10:00',
     timezone: raw.weeklyPush?.timezone || timezone,
+  };
+  const weeklyInstanceCreation = {
+    enabled: raw.weeklyInstanceCreation?.enabled === true,
+    dayOfWeek: Number(raw.weeklyInstanceCreation?.dayOfWeek ?? 1),
+    time: raw.weeklyInstanceCreation?.time || '09:00',
+    timezone: raw.weeklyInstanceCreation?.timezone || timezone,
   };
   const dailySupervisorPush = {
     enabled: raw.dailySupervisorPush?.enabled === true,
@@ -210,6 +190,10 @@ export function normalizeConfig(raw) {
       dailyFactTable: normalizeTableConfig(group.dailyFactTable || group.daily_fact_table, DAILY_FACT_FIELD_KEYS),
       contactTable: normalizeTableConfig(group.contactTable || raw.contactTable, CONTACT_FIELD_KEYS),
       weeklyTable: normalizeTableConfig(group.weeklyTable, WEEKLY_FIELD_KEYS),
+      weeklyInstanceTable: normalizeTableConfig(
+        group.weeklyInstanceTable || raw.weeklyInstanceTable,
+        WEEKLY_INSTANCE_FIELD_KEYS,
+      ),
       weeklySheet: normalizeWeeklySheetConfig(group.weeklySheet || raw.weeklySheet),
     }));
 
@@ -218,6 +202,7 @@ export function normalizeConfig(raw) {
     botNames,
     errorReporting,
     weeklyPush,
+    weeklyInstanceCreation,
     dailySupervisorPush,
     dailyFactSync,
     groups,
@@ -277,7 +262,10 @@ function normalizeWeeklySheetConfig(sheet) {
     reportScope: sheet.reportScope || sheet.report_scope || 'group',
     reuseExisting: sheet.reuseExisting !== false,
     skipPushIfExisting: sheet.skipPushIfExisting !== false,
-    cellMap: mergeWeeklySheetCellMap(WEEKLY_SHEET_CELL_MAP, sheet.cellMap || {}),
+    entityAliases: mergeEntityAliases(
+      WEEKLY_SHEET_ENTITY_ALIASES,
+      sheet.entityAliases || sheet.entity_aliases || {},
+    ),
   };
 }
 
@@ -307,10 +295,8 @@ export function parseBitableLink(url) {
   };
 }
 
-function mergeWeeklySheetCellMap(defaultMap, overrideMap) {
+function mergeEntityAliases(defaultMap, overrideMap) {
   return {
-    ...defaultMap,
-    ...overrideMap,
     agileProjects: {
       ...(defaultMap.agileProjects || {}),
       ...(overrideMap.agileProjects || {}),

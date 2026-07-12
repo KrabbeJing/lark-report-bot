@@ -26,6 +26,34 @@ test('normalizes weeklySheet from wiki url', () => {
   assert.equal(group.weeklySheet.templateSheetId, '4dcda2');
 });
 
+test('normalizes weekly instance schedule, table, and semantic aliases without cell coordinates', () => {
+  const config = normalizeConfig({
+    weeklyInstanceCreation: { enabled: true, time: '09:05' },
+    weeklyInstanceTable: {
+      appToken: 'base_token',
+      tableId: 'instance_table',
+      fieldTypes: {
+        weekStart: 'date',
+        weekEnd: 'date',
+        createdAt: 'datetime',
+        updatedAt: 'datetime',
+      },
+    },
+    weeklySheet: { spreadsheetToken: 'sheet_token', templateSheetId: 'template' },
+    groups: [{ enabled: true, chatId: 'chat_1', project: '公司项目组' }],
+  });
+
+  assert.deepEqual(config.weeklyInstanceCreation, {
+    enabled: true,
+    dayOfWeek: 1,
+    time: '09:05',
+    timezone: 'Asia/Shanghai',
+  });
+  assert.equal(config.groups[0].weeklyInstanceTable.fields.instanceKey, '周报实例唯一键');
+  assert.equal(config.groups[0].weeklySheet.cellMap, undefined);
+  assert.deepEqual(config.groups[0].weeklySheet.entityAliases.agileProjects['融羲项目组'], ['融羲']);
+});
+
 test('normalizes chat raw and daily fact table configs', () => {
   const config = normalizeConfig({
     dailyFactSync: {

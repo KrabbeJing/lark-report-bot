@@ -3,6 +3,44 @@ import assert from 'node:assert/strict';
 import { normalizeConfig } from '../src/config.js';
 import { buildWeeklySheetValues, getWeeklySheetExpectedCells } from '../src/weekly-sheet-content.js';
 
+const cellMap = {
+  reportPeriod: 'B2',
+  agileProjects: {
+    融羲项目组: { current: 'C26', next: 'C27', aliases: ['融羲'] },
+    收单项目组: { current: 'C28', next: 'C29', aliases: ['收单'] },
+    线上营业厅项目组: { current: 'C30', next: 'C31', aliases: ['线上营业厅', '对公线上营业厅'] },
+    手机银行项目组: { current: 'C32', next: 'C33', aliases: ['手机银行'] },
+    新核心项目组: { current: 'C34', next: 'C35', aliases: ['新核心'] },
+  },
+  management: {
+    零售客群经营: {
+      current: ['C39', 'C40', 'C41'],
+      next: ['C42', 'C43', 'C44'],
+      aliases: ['零售大众客群', '零售', '大众客群', '客群经营', '营销活动'],
+    },
+    对公客群经营及场景建设: {
+      current: ['C45', 'C46', 'C47'],
+      next: ['C48', 'C49', 'C50'],
+      aliases: ['对公客群', '对公', '场景建设', '医院', '企业'],
+    },
+    渠道创新建设: {
+      current: ['C51', 'C52', 'C53'],
+      next: ['C54', 'C55', 'C56'],
+      aliases: ['渠道创新', '渠道', '线上营业厅', '手机银行'],
+    },
+    业务风控合规: {
+      current: ['C57', 'C58', 'C59'],
+      next: ['C60', 'C61', 'C62'],
+      aliases: ['风控', '合规', '风险', '反洗钱'],
+    },
+    业务转型推动: {
+      current: ['C63', 'C64', 'C65'],
+      next: ['C66', 'C67', 'C68'],
+      aliases: ['业务转型', '转型推动', '新核心', '人工智能'],
+    },
+  },
+};
+
 function createGroup() {
   return normalizeConfig({
     groups: [{
@@ -24,7 +62,7 @@ test('builds configured weekly sheet cell values from daily reports', () => {
     group,
     weekStart: '2026-06-22',
     weekEnd: '2026-06-26',
-    cellMap: group.weeklySheet.cellMap,
+    cellMap,
     reports: [
       {
         reportDate: '2026-06-26',
@@ -61,7 +99,7 @@ test('builds configured weekly sheet cell values from daily reports', () => {
 
 test('exposes the full configured cell list', () => {
   const group = createGroup();
-  const cells = getWeeklySheetExpectedCells(group.weeklySheet.cellMap);
+  const cells = getWeeklySheetExpectedCells(cellMap);
   assert.equal(cells.includes('C26'), true);
   assert.equal(cells.includes('C68'), true);
   assert.equal(cells.includes('B2'), true);

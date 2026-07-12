@@ -63,6 +63,22 @@ export function getWorkWeekRange(now = new Date(), timeZone = DEFAULT_TIMEZONE) 
   };
 }
 
+export function getIsoWeekInfo(ymd) {
+  const parsed = parseYmd(ymd);
+  if (!parsed) throw new Error(`Invalid YYYY-MM-DD date: ${ymd}`);
+  const date = new Date(Date.UTC(parsed.year, parsed.month - 1, parsed.day));
+  const day = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - day);
+  const isoYear = date.getUTCFullYear();
+  const yearStart = new Date(Date.UTC(isoYear, 0, 1));
+  const isoWeek = Math.ceil((((date - yearStart) / 86400000) + 1) / 7);
+  return {
+    isoYear,
+    isoWeek,
+    key: `${isoYear}-W${String(isoWeek).padStart(2, '0')}`,
+  };
+}
+
 export function coerceLarkTimestamp(value) {
   if (value == null || value === '') return new Date();
   const numeric = Number(value);

@@ -112,6 +112,11 @@ async function generateWeeklySheetForGroup({
     ...group.weeklySheet,
     spreadsheetToken: sheet.spreadsheetToken || group.weeklySheet.spreadsheetToken,
   };
+  const cellMap = await writer.discoverTemplateTargets(
+    effectiveSheetConfig,
+    sheet.sheetId,
+    { aliasMap: group.weeklySheet.entityAliases },
+  );
   const sheetContent = typeof aiProvider.summarizeWeeklySheet === 'function'
     ? await aiProvider.summarizeWeeklySheet({
       group,
@@ -120,7 +125,7 @@ async function generateWeeklySheetForGroup({
       weekStart,
       weekEnd,
       generatedAt: now,
-      cellMap: group.weeklySheet.cellMap,
+      cellMap,
     })
     : buildWeeklySheetValues({
       group,
@@ -128,7 +133,7 @@ async function generateWeeklySheetForGroup({
       summary,
       weekStart,
       weekEnd,
-      cellMap: group.weeklySheet.cellMap,
+      cellMap,
     });
 
   const writeResult = await writer.writeCells(effectiveSheetConfig, sheet.sheetId, sheetContent.values);

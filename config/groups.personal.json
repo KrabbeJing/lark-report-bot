@@ -12,6 +12,12 @@
     "time": "10:00",
     "timezone": "Asia/Shanghai"
   },
+  "weeklyInstanceCreation": {
+    "enabled": false,
+    "dayOfWeek": 1,
+    "time": "09:00",
+    "timezone": "Asia/Shanghai"
+  },
   "dailySupervisorPush": {
     "enabled": false,
     "time": "17:00",
