@@ -888,7 +888,7 @@ git commit -m "feat: persist weekly sheet instances"
 - Produces: `ensureWeeklyInstancesForAllGroups({ config, bitable, sheetWriter, now })`.
 - A template-copy operation is attempted at most three times with a configurable test delay; title reuse makes recovery after an ambiguous first attempt idempotent.
 
-- [ ] **Step 1: Write failing create, reuse, and recovery tests**
+- [x] **Step 1: Write failing create, reuse, and recovery tests**
 
 Create `test/weekly-instance-service.test.js`:
 
@@ -949,13 +949,13 @@ Add a retry test with `retryDelayMs: 0`: make `ensureWeeklySheet` throw twice an
 
 Add an all-groups test asserting disabled/unconfigured groups are skipped with reasons and configured groups run sequentially.
 
-- [ ] **Step 2: Run tests and verify they fail**
+- [x] **Step 2: Run tests and verify they fail**
 
 Run: `node --test test/weekly-instance-service.test.js`
 
 Expected: FAIL with `ERR_MODULE_NOT_FOUND`.
 
-- [ ] **Step 3: Implement orchestration and fail-closed ordering**
+- [x] **Step 3: Implement orchestration and fail-closed ordering**
 
 Create `src/weekly-instance-service.js`:
 
@@ -1054,13 +1054,13 @@ async function retryOperation(operation, { attempts, delayMs }) {
 
 Preserve the ordering exactly: persistent lookup, ensure/reuse copy, dynamic validation, report-period write, Base registration. This ordering allows a retry after Base failure to recover the already copied sheet by title.
 
-- [ ] **Step 4: Run focused tests**
+- [x] **Step 4: Run focused tests**
 
 Run: `node --test test/weekly-instance-service.test.js`
 
 Expected: all orchestrator tests pass.
 
-- [ ] **Step 5: Commit the orchestrator**
+- [x] **Step 5: Commit the orchestrator**
 
 ```bash
 git add src/weekly-instance-service.js test/weekly-instance-service.test.js
