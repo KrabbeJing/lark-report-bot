@@ -2249,3 +2249,128 @@ test('normalizes supervisor user field from daily report records', async () => {
   assert.equal(reports[0].supervisor, '张经理');
   assert.equal(reports[0].supervisorOpenId, 'ou_mgr');
 });
+
+test('finds weekly instance by persistent ISO week key outside a view', async () => {
+  let listPayload;
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async payload => {
+          listPayload = payload;
+          return {
+            data: {
+              items: [
+                { record_id: 'rec_other', fields: { 周报实例唯一键: '2026-W28' } },
+                { record_id: 'rec_week', fields: { 周报实例唯一键: '2026-W29', SheetID: 'week_29' } },
+              ],
+            },
+          };
+        },
+      },
+    },
+  });
+
+  const record = await service.findWeeklyInstanceRecord(buildWeeklyInstanceGroup(), '2026-W29');
+
+  assert.equal(record.record_id, 'rec_week');
+  assert.equal(listPayload.params.view_id, undefined);
+});
+
+test('creates weekly instance with date and datetime field conversion', async () => {
+  let createPayload;
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async () => ({ data: { items: [] } }),
+        create: async payload => {
+          createPayload = payload;
+          return { data: { record: { record_id: 'rec_week' } } };
+        },
+      },
+    },
+  });
+
+  const result = await service.upsertWeeklyInstance(buildWeeklyInstanceGroup(), {
+    instanceKey: '2026-W29',
+    isoYear: 2026,
+    isoWeek: 29,
+    weekStart: '2026-07-13',
+    weekEnd: '2026-07-17',
+    spreadsheetToken: 'sheet_token',
+    sheetId: 'week_29',
+    sheetTitle: '数字金融部周报 2026-07-13-2026-07-17',
+    sheetUrl: 'https://example.invalid/week',
+    status: '已创建',
+  }, {
+    now: new Date('2026-07-13T01:00:00.000Z'),
+    timezone: 'Asia/Shanghai',
+  });
+
+  assert.equal(result.created, true);
+  assert.equal(createPayload.data.fields['周报实例唯一键'], '2026-W29');
+  assert.equal(createPayload.data.fields['周开始日期'], Date.UTC(2026, 6, 13));
+  assert.equal(typeof createPayload.data.fields['创建时间'], 'number');
+});
+
+test('updates existing weekly instance without replacing original creation time', async () => {
+  let updatePayload;
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        update: async payload => {
+          updatePayload = payload;
+          return { data: { record: { record_id: 'rec_week' } } };
+        },
+      },
+    },
+  });
+  const group = buildWeeklyInstanceGroup();
+  const existingRecord = {
+    record_id: 'rec_week',
+    fields: {
+      周报实例唯一键: '2026-W29',
+      创建时间: 1783904400000,
+    },
+  };
+
+  const result = await service.upsertWeeklyInstance(group, {
+    instanceKey: '2026-W29',
+    isoYear: 2026,
+    isoWeek: 29,
+    weekStart: '2026-07-13',
+    weekEnd: '2026-07-17',
+    spreadsheetToken: 'sheet_token',
+    sheetId: 'week_29_recovered',
+    sheetTitle: '数字金融部周报 2026-07-13-2026-07-17',
+    sheetUrl: 'https://example.invalid/week',
+    status: '已创建',
+  }, {
+    existingRecord,
+    now: new Date('2026-07-13T01:05:00.000Z'),
+  });
+
+  assert.equal(result.updated, true);
+  assert.equal(updatePayload.path.record_id, 'rec_week');
+  assert.equal(updatePayload.data.fields.SheetID, 'week_29_recovered');
+  assert.equal(updatePayload.data.fields['创建时间'], undefined);
+  assert.equal(typeof updatePayload.data.fields['更新时间'], 'number');
+});
+
+function buildWeeklyInstanceGroup() {
+  return normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      weeklyInstanceTable: {
+        appToken: 'bas_test',
+        tableId: 'tbl_weekly_instance',
+        viewId: 'vew_filtered',
+        fieldTypes: {
+          weekStart: 'date',
+          weekEnd: 'date',
+          createdAt: 'datetime',
+          updatedAt: 'datetime',
+        },
+      },
+    }],
+  }).groups[0];
+}

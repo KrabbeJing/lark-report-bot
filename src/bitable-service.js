@@ -628,6 +628,65 @@ export class BitableService {
     }) || null;
   }
 
+  async findWeeklyInstanceRecord(group, instanceKey) {
+    if (!tableIsConfigured(group.weeklyInstanceTable) || !instanceKey) return null;
+    const records = await this.listRecords(
+      group.weeklyInstanceTable,
+      'weeklyInstance.findByKey',
+      { includeView: false },
+    );
+    const fieldName = group.weeklyInstanceTable.fields.instanceKey;
+    return records.find(record => (
+      normalizeFieldValue(record.fields?.[fieldName]) === String(instanceKey)
+    )) || null;
+  }
+
+  async upsertWeeklyInstance(group, instance, context = {}) {
+    const table = await this.resolveTableConfig(group.weeklyInstanceTable, 'weeklyInstanceTable');
+    assertTable(table, 'weeklyInstanceTable');
+    const existing = context.existingRecord
+      || await this.findWeeklyInstanceRecord(group, instance.instanceKey);
+    const fields = buildWeeklyInstanceFields(table, instance, {
+      ...context,
+      existing,
+    });
+
+    if (existing) {
+      const res = await withBitableErrorContext('weeklyInstance.update', table, () => (
+        this.client.bitable.appTableRecord.update({
+          path: {
+            app_token: table.appToken,
+            table_id: table.tableId,
+            record_id: existing.record_id,
+          },
+          data: { fields },
+        })
+      ));
+      return {
+        created: false,
+        updated: true,
+        record: extractRecordFromResponse(res),
+        fields,
+      };
+    }
+
+    const res = await withBitableErrorContext('weeklyInstance.create', table, () => (
+      this.client.bitable.appTableRecord.create({
+        path: {
+          app_token: table.appToken,
+          table_id: table.tableId,
+        },
+        data: { fields },
+      })
+    ));
+    return {
+      created: true,
+      updated: false,
+      record: extractRecordFromResponse(res),
+      fields,
+    };
+  }
+
   async listRecords(table, label = 'table.listRecords', options = {}) {
     const resolvedTable = await this.resolveTableConfig(table, 'table');
     assertTable(resolvedTable, 'table');
@@ -974,6 +1033,30 @@ function buildWeeklyFields(group, summary, context = {}) {
   setMappedField(recordFields, group.weeklyTable, 'imageKey', context.imageKey || '', context);
   setMappedField(recordFields, group.weeklyTable, 'pushStatus', context.pushStatus || 'sent', context);
   setMappedField(recordFields, group.weeklyTable, 'pushedAt', formatDateTime(context.pushedAt || new Date(), context.timezone || 'Asia/Shanghai'), context);
+  return recordFields;
+}
+
+function buildWeeklyInstanceFields(table, instance, context = {}) {
+  const recordFields = {};
+  for (const key of [
+    'instanceKey',
+    'isoYear',
+    'isoWeek',
+    'weekStart',
+    'weekEnd',
+    'spreadsheetToken',
+    'sheetId',
+    'sheetTitle',
+    'sheetUrl',
+    'status',
+  ]) {
+    setMappedField(recordFields, table, key, instance[key], context);
+  }
+  const now = context.now || new Date();
+  if (!context.existing) {
+    setMappedField(recordFields, table, 'createdAt', now.getTime(), context);
+  }
+  setMappedField(recordFields, table, 'updatedAt', now.getTime(), context);
   return recordFields;
 }
 

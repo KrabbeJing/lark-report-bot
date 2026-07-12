@@ -732,7 +732,7 @@ git commit -m "feat: configure weekly instance creation"
 - Produces: `BitableService.upsertWeeklyInstance(group, instance, context?)`.
 - `instance` contains `{ instanceKey, isoYear, isoWeek, weekStart, weekEnd, spreadsheetToken, sheetId, sheetTitle, sheetUrl, status }`.
 
-- [ ] **Step 1: Write failing registry lookup and upsert tests**
+- [x] **Step 1: Write failing registry lookup and upsert tests**
 
 Add focused tests to `test/bitable-service.test.js`:
 
@@ -789,13 +789,13 @@ fieldTypes: {
 
 Add an update test asserting an existing row is updated instead of duplicated and its original `创建时间` is not overwritten.
 
-- [ ] **Step 2: Run focused tests and verify they fail**
+- [x] **Step 2: Run focused tests and verify they fail**
 
 Run: `node --test --test-name-pattern="weekly instance" test/bitable-service.test.js`
 
 Expected: FAIL because both registry methods are missing.
 
-- [ ] **Step 3: Implement lookup and upsert**
+- [x] **Step 3: Implement lookup and upsert**
 
 Add methods to `BitableService`:
 
@@ -859,7 +859,7 @@ function buildWeeklyInstanceFields(table, instance, context = {}) {
 }
 ```
 
-- [ ] **Step 4: Run focused and full tests**
+- [x] **Step 4: Run focused and full tests**
 
 Run: `node --test --test-name-pattern="weekly instance" test/bitable-service.test.js`
 
@@ -869,7 +869,7 @@ Run: `npm test`
 
 Expected: all tests pass.
 
-- [ ] **Step 5: Commit persistent instance state**
+- [x] **Step 5: Commit persistent instance state**
 
 ```bash
 git add src/bitable-service.js test/bitable-service.test.js
