@@ -1434,7 +1434,7 @@ git commit -m "feat: schedule weekly instance creation"
 - Consumes: all Stage 2 code and the existing personal Wiki weekly template.
 - Produces: a configured personal `周报实例表`, one controlled weekly instance, and read-back evidence that rerunning is idempotent.
 
-- [ ] **Step 1: Document the exact Base schema before creating resources**
+- [x] **Step 1: Document the exact Base schema before creating resources**
 
 Create `docs/weekly-instance-table-setup.md` with this field table:
 
@@ -1457,7 +1457,7 @@ Create `docs/weekly-instance-table-setup.md` with this field table:
 
 Document that the primary view may filter rows but code lookup always reads outside the view. State that tokens and IDs must not be pasted into verification documents or chat logs.
 
-- [ ] **Step 2: Pause for explicit approval before personal Base changes**
+- [x] **Step 2: Pause for explicit approval before personal Base changes**
 
 Ask the user to choose either:
 
@@ -1466,7 +1466,7 @@ Ask the user to choose either:
 
 Do not create, rename, or delete any live Base field without this approval.
 
-- [ ] **Step 3: Configure the approved personal table while keeping schedules disabled**
+- [x] **Step 3: Configure the approved personal table while keeping schedules disabled**
 
 Add the real personal table link or tokens only to `config/groups.personal.json` under `weeklyInstanceTable`. Configure:
 
@@ -1487,7 +1487,7 @@ Keep:
 
 Do not commit secrets; app/table/sheet identifiers already managed by the repository's established config policy may be committed only if `git diff` confirms no credentials or API keys are present.
 
-- [ ] **Step 4: Run a read-only locator check against the template**
+- [x] **Step 4: Run a read-only locator check against the template**
 
 On the server, use the deployed branch and explicit personal config:
 
@@ -1515,7 +1515,7 @@ console.log(JSON.stringify({
 
 Expected: report period is located, all five agile projects are located, all management widths are `[3,3]`, and no write API is called.
 
-- [ ] **Step 5: Run one controlled creation and read back the result**
+- [x] **Step 5: Run one controlled creation and read back the result**
 
 Temporarily enable only `weeklySheet.enabled` for the selected personal group; keep the scheduler disabled. Commit the completed implementation, push it from the local workspace, and deploy it on the server:
 
@@ -1560,13 +1560,13 @@ Verify in Feishu UI:
 - Module 1 metric values remain unchanged/blank.
 - No AI content, poster, or group message was generated.
 
-- [ ] **Step 6: Rerun to prove persistent idempotency**
+- [x] **Step 6: Rerun to prove persistent idempotency**
 
 Run the same `npm run weekly:ensure` command again.
 
 Expected: `reused: true`, no second copied sheet, and no second Base record. Restarting PM2 before this second run is allowed and should not change the result.
 
-- [ ] **Step 7: Record sanitized verification evidence and keep schedule disabled**
+- [x] **Step 7: Record sanitized verification evidence and keep schedule disabled**
 
 Create the dated verification document with:
 
@@ -1588,7 +1588,7 @@ Create the dated verification document with:
 
 Do not include live tokens, IDs, URLs, OpenIDs, or raw weekly content.
 
-- [ ] **Step 8: Run final local verification and commit documentation/config**
+- [x] **Step 8: Run final local verification and commit documentation/config**
 
 Run: `npm test`
 
