@@ -2309,6 +2309,10 @@ test('creates weekly instance with date and datetime field conversion', async ()
   assert.equal(result.created, true);
   assert.equal(createPayload.data.fields['周报实例唯一键'], '2026-W29');
   assert.equal(createPayload.data.fields['周开始日期'], Date.UTC(2026, 6, 13));
+  assert.deepEqual(createPayload.data.fields['周报链接'], {
+    text: '数字金融部周报 2026-07-13-2026-07-17',
+    link: 'https://example.invalid/week',
+  });
   assert.equal(typeof createPayload.data.fields['创建时间'], 'number');
 });
 
@@ -2367,6 +2371,7 @@ function buildWeeklyInstanceGroup() {
         fieldTypes: {
           weekStart: 'date',
           weekEnd: 'date',
+          sheetUrl: 'url',
           createdAt: 'datetime',
           updatedAt: 'datetime',
         },

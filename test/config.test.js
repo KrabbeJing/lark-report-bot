@@ -35,6 +35,7 @@ test('normalizes weekly instance schedule, table, and semantic aliases without c
       fieldTypes: {
         weekStart: 'date',
         weekEnd: 'date',
+        sheetUrl: 'url',
         createdAt: 'datetime',
         updatedAt: 'datetime',
       },
@@ -50,6 +51,7 @@ test('normalizes weekly instance schedule, table, and semantic aliases without c
     timezone: 'Asia/Shanghai',
   });
   assert.equal(config.groups[0].weeklyInstanceTable.fields.instanceKey, '周报实例唯一键');
+  assert.equal(config.groups[0].weeklyInstanceTable.fieldTypes.sheetUrl, 'url');
   assert.equal(config.groups[0].weeklySheet.cellMap, undefined);
   assert.deepEqual(config.groups[0].weeklySheet.entityAliases.agileProjects['融羲项目组'], ['融羲']);
 });

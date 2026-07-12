@@ -94,6 +94,16 @@
         "reportScope": "allDailyTable",
         "reuseExisting": true,
         "skipPushIfExisting": true
+      },
+      "weeklyInstanceTable": {
+        "wikiUrl": "https://acncyn3n5k6i.feishu.cn/wiki/TOnDw6LUAiDNi4kc8yYcITpRnde?fromScene=spaceOverview&table=tblYoZqsc1AIHJbf&view=vewv5SmrCH",
+        "fieldTypes": {
+          "weekStart": "date",
+          "weekEnd": "date",
+          "sheetUrl": "url",
+          "createdAt": "datetime",
+          "updatedAt": "datetime"
+        }
       }
     }
   ]

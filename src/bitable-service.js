@@ -1050,7 +1050,10 @@ function buildWeeklyInstanceFields(table, instance, context = {}) {
     'sheetUrl',
     'status',
   ]) {
-    setMappedField(recordFields, table, key, instance[key], context);
+    const fieldContext = key === 'sheetUrl'
+      ? { ...context, urlText: instance.sheetTitle || instance.sheetUrl }
+      : context;
+    setMappedField(recordFields, table, key, instance[key], fieldContext);
   }
   const now = context.now || new Date();
   if (!context.existing) {
@@ -1134,6 +1137,15 @@ function formatFieldValue(table, key, value, context = {}) {
     const name = Array.isArray(value) ? value.join('\n') : String(value || '');
     if (id) return [{ id, name }];
     return undefined;
+  }
+
+  if (fieldType === 'url') {
+    const link = String(value || '').trim();
+    if (!link) return undefined;
+    return {
+      text: String(context.urlText || link),
+      link,
+    };
   }
 
   if (Array.isArray(value)) return value.join('\n');

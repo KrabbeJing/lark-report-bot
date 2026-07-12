@@ -107,6 +107,7 @@
         "fieldTypes": {
           "weekStart": "date",
           "weekEnd": "date",
+          "sheetUrl": "url",
           "createdAt": "datetime",
           "updatedAt": "datetime"
         }
