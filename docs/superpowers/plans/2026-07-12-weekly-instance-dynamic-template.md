@@ -37,7 +37,7 @@
 - `WeeklyCellMap` shape: `{ reportPeriod, metrics, agileProjects, management }` where Module 2 values are `{ current, next, aliases }` and Module 3 values are `{ current: string[3], next: string[3], aliases }`.
 - Consumes: a row-major matrix returned by Feishu Sheets values API and optional `{ aliasMap, managementCellLimit }`.
 
-- [ ] **Step 1: Write failing rich-text and semantic-path tests**
+- [x] **Step 1: Write failing rich-text and semantic-path tests**
 
 Create `test/weekly-template-locator.test.js` with a compact matrix that represents merged-cell blanks and rich-text segment arrays:
 
@@ -141,13 +141,13 @@ test('rejects missing required module', () => {
 });
 ```
 
-- [ ] **Step 2: Run the locator test and verify it fails**
+- [x] **Step 2: Run the locator test and verify it fails**
 
 Run: `node --test test/weekly-template-locator.test.js`
 
 Expected: FAIL with `ERR_MODULE_NOT_FOUND` for `weekly-template-locator.js`.
 
-- [ ] **Step 3: Implement normalization, bounded scanning, and A1 conversion**
+- [x] **Step 3: Implement normalization, bounded scanning, and A1 conversion**
 
 Create `src/weekly-template-locator.js` with these exported entry points and constants:
 
@@ -351,13 +351,13 @@ function toA1(columnIndex, rowIndex) {
 }
 ```
 
-- [ ] **Step 4: Run locator tests and make boundary fixtures pass**
+- [x] **Step 4: Run locator tests and make boundary fixtures pass**
 
 Run: `node --test test/weekly-template-locator.test.js`
 
 Expected: all locator tests pass, including rejection when the next content label appears inside the required three-cell region.
 
-- [ ] **Step 5: Commit the pure locator**
+- [x] **Step 5: Commit the pure locator**
 
 ```bash
 git add src/weekly-template-locator.js test/weekly-template-locator.test.js
