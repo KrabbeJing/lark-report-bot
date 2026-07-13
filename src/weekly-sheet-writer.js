@@ -131,6 +131,9 @@ export class WeeklySheetWriter {
 
   async moveSheet(sheetConfig, sheetId, targetIndex = 0) {
     const resolvedConfig = await this.resolveSheetConfig(sheetConfig);
+    if (!String(resolvedConfig.spreadsheetToken || '').trim()) {
+      throw new Error('weeklySheet.spreadsheetToken 为空，无法移动周报工作表');
+    }
     if (!sheetId) throw new Error('sheetId 为空，无法移动周报工作表');
     if (!Number.isInteger(targetIndex) || targetIndex < 0) {
       throw new Error(`工作表目标位置无效：${targetIndex}`);
@@ -197,7 +200,7 @@ export class WeeklySheetWriter {
 }
 
 export function renderWeeklySheetTitle(pattern, { weekStart, weekEnd }) {
-  return String(pattern || '数字金融部周报 {{weekStart}}-{{weekEnd}}')
+  return String(pattern || '数字金融部周报{{weekEndMMDD}}')
     .replaceAll('{{weekStart}}', weekStart || '')
     .replaceAll('{{weekEnd}}', weekEnd || '')
     .replaceAll('{{weekStartCompact}}', compactDate(weekStart))

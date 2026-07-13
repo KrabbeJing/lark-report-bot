@@ -84,6 +84,36 @@ test('reuses existing weekly sheet by title', async () => {
   assert.equal(calls.length, 1);
 });
 
+test('uses the Friday MMDD title default through the public writer path', async () => {
+  for (const titlePattern of [undefined, '']) {
+    const calls = [];
+    const writer = new WeeklySheetWriter({
+      request: async payload => {
+        calls.push(payload);
+        if (payload.url.includes('/sheets/query')) return { data: { sheets: [] } };
+        return {
+          data: {
+            replies: [{
+              copySheet: {
+                properties: { sheetId: 'new_sheet_1', title: payload.data.requests[0].copySheet.destination.title },
+              },
+            }],
+          },
+        };
+      },
+    });
+
+    const sheet = await writer.ensureWeeklySheet({
+      spreadsheetToken: 'sheet_token',
+      templateSheetId: 'template',
+      ...(titlePattern === undefined ? {} : { titlePattern }),
+    }, { weekStart: '2026-07-06', weekEnd: '2026-07-10' });
+
+    assert.equal(sheet.title, '数字金融部周报0710');
+    assert.equal(calls.at(-1).data.requests[0].copySheet.destination.title, '数字金融部周报0710');
+  }
+});
+
 test('moves a sheet to workbook index zero with the verified sheet_ai payload', async () => {
   const calls = [];
   const writer = new WeeklySheetWriter({
@@ -169,6 +199,35 @@ test('validates sheet move arguments and requires the current sheet to exist', a
     writer.moveSheet({ spreadsheetToken: 'sheet_token' }, 'week_28', 0),
     /周报工作表不存在/,
   );
+});
+
+test('rejects a direct empty spreadsheet token before querying sheets', async () => {
+  const calls = [];
+  const writer = new WeeklySheetWriter({ request: async payload => {
+    calls.push(payload);
+    return { data: { sheets: [] } };
+  } });
+
+  await assert.rejects(
+    writer.moveSheet({ spreadsheetToken: '' }, 'week_28', 0),
+    /spreadsheetToken.*为空/,
+  );
+  assert.equal(calls.length, 0);
+});
+
+test('rejects an empty Wiki spreadsheet token before querying or writing', async () => {
+  const calls = [];
+  const writer = new WeeklySheetWriter({ request: async payload => {
+    calls.push(payload);
+    return { data: { node: { obj_type: 'sheet', obj_token: '' } } };
+  } });
+
+  await assert.rejects(
+    writer.moveSheet({ wikiNodeToken: 'wiki_node' }, 'week_28', 0),
+    /spreadsheetToken.*为空/,
+  );
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].url, /wiki\/v2\/spaces\/get_node/);
 });
 
 test('resolves wiki node before querying spreadsheet sheets', async () => {
