@@ -26,6 +26,23 @@ test('rejects invalid or reversed ranges', () => {
   );
 });
 
+test('rejects impossible calendar dates', () => {
+  assert.throws(
+    () => parseDailyFactBackfillArgs(['--start', '2026-02-30', '--end', '2026-03-01']),
+    /YYYY-MM-DD/,
+  );
+});
+
+test('accepts a valid leap day', () => {
+  assert.deepEqual(parseDailyFactBackfillArgs([
+    '--start', '2024-02-29', '--end', '2024-03-01',
+  ]), {
+    startDate: '2024-02-29',
+    endDate: '2024-03-01',
+    repairOrganization: false,
+  });
+});
+
 test('forwards explicit dates and repair policy to every group', async () => {
   const calls = [];
   const result = await runDailyFactBackfill({
