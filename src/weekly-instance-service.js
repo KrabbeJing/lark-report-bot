@@ -1,4 +1,4 @@
-import { tableIsConfigured } from './config.js';
+import { WEEKLY_INSTANCE_FIELD_KEYS, tableIsConfigured } from './config.js';
 import { getIsoWeekInfo, getWorkWeekRange } from './date-utils.js';
 import { buildWeeklySheetUrl } from './weekly-sheet-writer.js';
 
@@ -21,11 +21,20 @@ export async function ensureWeeklyInstanceForGroup({
   const { isoYear, isoWeek, key: instanceKey } = getIsoWeekInfo(weekStart);
   const existing = await bitable.findWeeklyInstanceRecord(group, instanceKey);
   if (existing) {
+    const instance = readWeeklyInstanceRecord(existing, group.weeklyInstanceTable);
     return {
       skipped: false,
       reused: true,
       instanceKey,
       record: existing,
+      instance,
+      sheet: {
+        spreadsheetToken: instance.spreadsheetToken,
+        sheetId: instance.sheetId,
+        title: instance.sheetTitle,
+        reused: true,
+        created: false,
+      },
     };
   }
 
@@ -71,6 +80,34 @@ export async function ensureWeeklyInstanceForGroup({
     instance,
     persisted,
   };
+}
+
+function readWeeklyInstanceRecord(record, table) {
+  const fields = { ...WEEKLY_INSTANCE_FIELD_KEYS, ...table?.fields };
+  const value = key => normalizeInstanceValue(record?.fields?.[fields[key]]);
+  return {
+    instanceKey: value('instanceKey'),
+    isoYear: value('isoYear'),
+    isoWeek: value('isoWeek'),
+    weekStart: value('weekStart'),
+    weekEnd: value('weekEnd'),
+    spreadsheetToken: value('spreadsheetToken'),
+    sheetId: value('sheetId'),
+    sheetTitle: value('sheetTitle'),
+    sheetUrl: normalizeInstanceUrl(record?.fields?.[fields.sheetUrl]),
+    status: value('status'),
+  };
+}
+
+function normalizeInstanceValue(value) {
+  if (Array.isArray(value)) return normalizeInstanceValue(value[0]);
+  if (value && typeof value === 'object') return value.text || value.name || value.id || '';
+  return String(value || '').trim();
+}
+
+function normalizeInstanceUrl(value) {
+  if (value && typeof value === 'object') return String(value.link || value.url || value.text || '').trim();
+  return normalizeInstanceValue(value);
 }
 
 async function runWeeklyStage(stage, operation) {

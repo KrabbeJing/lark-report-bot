@@ -67,3 +67,11 @@
 ## 安全边界
 
 本文不写入姓名、OpenID、ChatID、AppID/AppSecret、Base/table/view/sheet/wiki token、完整飞书链接或日报正文。
+
+## 本地复审修复待部署
+
+- weeklySheet 启用但未配置 weeklyInstanceTable 时，周报入口会在加载日报或调用 AI 前失败关闭。
+- 复用的 Base 周报实例必须同时具备 SpreadsheetToken 和 SheetID；任一缺失时禁止工作表写入，不回退到配置的 workbook token。
+- Base 中已存周报链接仅在 HTTPS、当前配置推导出的 workbook 路径/token，以及唯一且匹配的 sheet 查询都成立时复用；其他情况重建直接链接。
+- 已补充匹配联系人直属上级/分管领导为空时保留既有文本字段和用户字段的回归覆盖。
+- 以上为本地复审修复；本节不宣称服务器已部署或已载入这些变更。

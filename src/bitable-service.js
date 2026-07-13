@@ -29,7 +29,7 @@ export class BitableService {
       url: `/open-apis/wiki/v2/spaces/get_node?token=${table.wikiNodeToken}`,
     });
     const node = res?.data?.node;
-    if (!node?.obj_token) throw new Error(`未找到 wiki 节点或节点无 obj_token：${table.wikiNodeToken}`);
+    if (!node?.obj_token) throw new Error('未找到 wiki 节点或节点无 obj_token');
 
     table.appToken = node.obj_token;
     this.tableAppTokenCache.set(table.wikiNodeToken, table.appToken);
@@ -71,20 +71,12 @@ export class BitableService {
     setDailyField('tomorrowPlanItems', report.tomorrowPlanItems || []);
     setDailyField('riskItems', report.riskItems || []);
     setDailyField('aiSummary', buildDailyAiSummary(report));
-    if (snapshot.supervisor || existingFields[table.fields.supervisor] !== undefined) {
-      setDailyField('supervisor', snapshot.supervisor, {
-        ...context,
-        supervisorOpenId: snapshot.supervisorOpenId,
-        clearUser: !organization.matched && existingFields[table.fields.supervisor] !== undefined,
-      });
-    }
-    if (snapshot.divisionalLeader || existingFields[table.fields.divisionalLeader] !== undefined) {
-      setDailyField('divisionalLeader', snapshot.divisionalLeader, {
-        ...context,
-        divisionalLeaderOpenId: snapshot.divisionalLeaderOpenId,
-        clearUser: !organization.matched && existingFields[table.fields.divisionalLeader] !== undefined,
-      });
-    }
+    setOrganizationPersonField({
+      table, key: 'supervisor', snapshot, organization, existingFields, setField: setDailyField,
+    });
+    setOrganizationPersonField({
+      table, key: 'divisionalLeader', snapshot, organization, existingFields, setField: setDailyField,
+    });
     setDailyField('source', context.source || 'chat');
     setDailyField('parseStatus', report.highConfidence ? 'parsed' : 'low_confidence');
     setDailyField('matchingStatus', snapshot.matchingStatus);
@@ -131,7 +123,7 @@ export class BitableService {
       verifiedOutsideView = Boolean(record);
       if (record) {
         console.log('[bitable] createDailyReportRecord verified by listing table', {
-          recordId: getRecordId(record),
+          recordIdPresent: true,
           viewIdUsedForVerify: false,
         });
       }
@@ -771,17 +763,9 @@ async function withBitableErrorContext(operation, table, fn) {
     const res = await fn();
     const code = getBitableBusinessCode(res);
     if (code != null && Number(code) !== 0) {
-      const msg = getBitableBusinessMsg(res);
-      const context = {
-        operation,
-        appToken: maskToken(table?.appToken),
-        tableId: maskToken(table?.tableId),
-        viewId: maskToken(table?.viewId),
-        code,
-        msg,
-      };
+      const context = buildBitableFailureContext(operation, table, code);
       console.error('[bitable] request failed', context);
-      const err = new Error(`Bitable request failed [${operation} code=${code} msg=${msg || ''}]`);
+      const err = new Error(buildBitableFailureMessage(context));
       err.code = code;
       err.response = { data: extractBitablePayload(res) };
       err._bitableContextLogged = true;
@@ -789,19 +773,30 @@ async function withBitableErrorContext(operation, table, fn) {
     }
     return res;
   } catch (err) {
-    const data = err?.response?.data;
-    const context = {
-      operation,
-      appToken: maskToken(table?.appToken),
-      tableId: maskToken(table?.tableId),
-      viewId: maskToken(table?.viewId),
-      code: data?.code,
-      msg: data?.msg,
-    };
+    const context = buildBitableFailureContext(operation, table, err?.response?.data?.code ?? err?.code);
     if (!err._bitableContextLogged) console.error('[bitable] request failed', context);
-    err.message = `${err.message || 'Bitable request failed'} [${operation} appToken=${context.appToken} tableId=${context.tableId} viewId=${context.viewId} code=${context.code || ''} msg=${context.msg || ''}]`;
+    err.message = buildBitableFailureMessage(context);
     throw err;
   }
+}
+
+function buildBitableFailureContext(operation, table, code) {
+  return {
+    operation,
+    appToken: maskToken(table?.appToken),
+    tableId: maskToken(table?.tableId),
+    viewId: maskToken(table?.viewId),
+    code: sanitizeOperationalCode(code),
+  };
+}
+
+function buildBitableFailureMessage(context) {
+  return `Bitable request failed [operation=${context.operation} appToken=${context.appToken} tableId=${context.tableId} viewId=${context.viewId} code=${context.code}]`;
+}
+
+function sanitizeOperationalCode(value) {
+  const text = String(value ?? '');
+  return /^[A-Za-z0-9_.:-]{1,64}$/.test(text) ? sanitizeOperationalText(text) : '';
 }
 
 function maskToken(value) {
@@ -1026,18 +1021,14 @@ function buildDailyFactFields(table, input, existing, options = {}) {
   setMappedField(recordFields, table, 'factStatus', factStatus);
   setCanonicalField(recordFields, 'rawText', input.rawText || '');
   setCanonicalField(recordFields, 'chatId', input.chatId || '');
-  if (snapshot.supervisor || existingFields[fields.supervisor] !== undefined) {
-    setMappedField(recordFields, table, 'supervisor', snapshot.supervisor, {
-      supervisorOpenId: snapshot.supervisorOpenId,
-      clearUser: !organization.matched && existingFields[fields.supervisor] !== undefined,
-    });
-  }
-  if (snapshot.divisionalLeader || existingFields[fields.divisionalLeader] !== undefined) {
-    setMappedField(recordFields, table, 'divisionalLeader', snapshot.divisionalLeader, {
-      divisionalLeaderOpenId: snapshot.divisionalLeaderOpenId,
-      clearUser: !organization.matched && existingFields[fields.divisionalLeader] !== undefined,
-    });
-  }
+  setOrganizationPersonField({
+    table, key: 'supervisor', snapshot, organization, existingFields,
+    setField: (fieldKey, value, context) => setMappedField(recordFields, table, fieldKey, value, context),
+  });
+  setOrganizationPersonField({
+    table, key: 'divisionalLeader', snapshot, organization, existingFields,
+    setField: (fieldKey, value, context) => setMappedField(recordFields, table, fieldKey, value, context),
+  });
   setMappedField(recordFields, table, 'matchingStatus', snapshot.matchingStatus);
   setMappedField(recordFields, table, 'matchMethod', snapshot.matchMethod);
   setMappedField(recordFields, table, 'reportType', input.reportType || '');
@@ -1230,6 +1221,27 @@ function shouldWriteDailyField(table, key) {
   const allowed = table?.writeFields;
   if (!Array.isArray(allowed) || allowed.length === 0) return true;
   return allowed.includes(key);
+}
+
+function setOrganizationPersonField({
+  table,
+  key,
+  snapshot,
+  organization,
+  existingFields,
+  setField,
+}) {
+  const fieldName = table?.fields?.[key];
+  if (!fieldName) return;
+  const openIdKey = `${key}OpenId`;
+  const hasValue = Boolean(String(snapshot?.[key] || '').trim() || String(snapshot?.[openIdKey] || '').trim());
+  const hasExisting = existingFields[fieldName] !== undefined;
+  if (organization.matched && hasExisting && !hasValue) return;
+  if (!hasValue && !hasExisting) return;
+  setField(key, snapshot?.[key] || '', {
+    [openIdKey]: snapshot?.[openIdKey] || '',
+    clearUser: !organization.matched && hasExisting,
+  });
 }
 
 function formatFieldValue(table, key, value, context = {}) {
@@ -1431,12 +1443,11 @@ function summarizeBitableResponse(res) {
   return {
     httpStatus: res?.status,
     code: payload?.code,
-    msg: payload?.msg,
     topLevelKeys: objectKeys(res),
     responseDataKeys: objectKeys(res?.data),
     businessDataKeys: objectKeys(data),
     hasRecord: Boolean(record),
-    recordId: getRecordId(record),
+    recordIdPresent: Boolean(getRecordId(record)),
     recordKeys: objectKeys(record),
   };
 }

@@ -159,6 +159,30 @@ test('resolves bitable wiki node token before writing records', async () => {
   assert.equal(group.dailyTable.appToken, 'bas_from_wiki');
 });
 
+test('does not expose a wiki node token when wiki resolution returns no bitable node', async () => {
+  const wikiNodeToken = 'WikiNodeTokenSensitive123';
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      dailyTable: {
+        wikiUrl: `https://example.feishu.cn/wiki/${wikiNodeToken}?table=tbl_daily`,
+      },
+    }],
+  }).groups[0];
+  const service = new BitableService({
+    request: async () => ({ data: { node: {} } }),
+  });
+
+  await assert.rejects(
+    () => service.resolveTableConfig(group.dailyTable, 'dailyTable'),
+    error => {
+      assert.match(error.message, /未找到 wiki 节点/);
+      assert.doesNotMatch(error.message, new RegExp(wikiNodeToken));
+      return true;
+    },
+  );
+});
+
 test('creates chat daily records in fact table when configured', async () => {
   const group = normalizeConfig({
     groups: [{
@@ -570,6 +594,63 @@ test('organization repair retains an existing divisional leader when the matched
 
   const fields = getUpdatePayload().data.fields;
   assert.notDeepEqual(fields['分管领导'], []);
+  assert.equal(fields['分管领导'], undefined);
+});
+
+test('organization repair preserves text supervisor and divisional leader fields when matched contact values are blank', async () => {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      dailyFactTable: { appToken: 'bas_test', tableId: 'tbl_fact' },
+    }],
+  }).groups[0];
+  const existingRecord = {
+    record_id: 'rec_fact',
+    fields: {
+      事实唯一键: 'open_id:ou_old:2026-07-10', 日报日期: '2026-07-10', 日报提交人姓名: '历史姓名', 成员OpenID: 'ou_old',
+      直属上级: '历史上级', 分管领导: '历史领导', 匹配状态: '已匹配', 匹配方式: 'open_id',
+      今日工作总结: '旧日报内容', 内容指纹: 'old', 日报来源: 'chat', 来源时间: 1000, 事实记录状态: '有效',
+    },
+  };
+  const contact = {
+    teamMember: '新姓名', teamMemberId: 'ou_new', matchingStatus: '已匹配', matchMethod: 'open_id',
+    supervisor: '', supervisorOpenId: '', divisionalLeader: '', divisionalLeaderOpenId: '',
+  };
+  const sourceFields = new BitableService({}).buildDailyRecordFields(group, {
+    reportDate: '2026-07-10', workSummaryText: '新日报内容',
+  }, { table: group.dailyFactTable, existingRecord, contact, repairOrganization: true });
+  assert.equal(sourceFields['直属上级'], undefined);
+  assert.equal(sourceFields['分管领导'], undefined);
+
+  let updatePayload;
+  const service = new BitableService({ bitable: { appTableRecord: {
+    update: async payload => {
+      updatePayload = payload;
+      return { data: { record: { record_id: 'rec_fact', fields: payload.data.fields } } };
+    },
+  } } });
+  await service.upsertDailyFactRecord(group, {
+    factKey: 'open_id:ou_new:2026-07-10', reportDate: '2026-07-10', source: 'chat', sourceTime: 2000,
+    workSummaryText: '新日报内容', contact,
+  }, { existingRecord, repairOrganization: true });
+  assert.equal(updatePayload.data.fields['直属上级'], undefined);
+  assert.equal(updatePayload.data.fields['分管领导'], undefined);
+});
+
+test('organization repair preserves configured user supervisor and divisional leader fields when matched contact values are blank', async () => {
+  const { service, group, existingRecord, input, getUpdatePayload } = buildOrganizationUpsertFixture();
+  input.contact.supervisor = '';
+  input.contact.supervisorOpenId = '';
+  input.contact.divisionalLeader = '';
+  input.contact.divisionalLeaderOpenId = '';
+
+  await service.upsertDailyFactRecord(group, input, {
+    existingRecord,
+    repairOrganization: true,
+  });
+
+  const fields = getUpdatePayload().data.fields;
+  assert.equal(fields['直属上级'], undefined);
   assert.equal(fields['分管领导'], undefined);
 });
 
@@ -1378,7 +1459,11 @@ test('does not update chat raw history when create fails', async () => {
       messageId: 'om_new',
       senderOpenId: 'ou_liu',
     }),
-    /create failed/,
+    error => {
+      assert.match(error.message, /operation=chatDailyRaw\.create/);
+      assert.doesNotMatch(error.message, /create failed/);
+      return true;
+    },
   );
 
   assert.equal(listCalled, false);
@@ -1476,8 +1561,12 @@ test('marks only overlapping main chat raw records historical for multi-day repo
   assert.deepEqual(updates.map(update => update.path.record_id), ['rec_overlap']);
 });
 
-test('extracts created record from axios-wrapped bitable response', async () => {
+test('summarizes successful bitable responses without response text or record identifiers', async t => {
   const group = createGroup();
+  const logs = [];
+  const originalLog = console.log;
+  console.log = (...args) => logs.push(args);
+  t.after(() => { console.log = originalLog; });
   const service = new BitableService({
     bitable: {
       appTableRecord: {
@@ -1518,7 +1607,69 @@ test('extracts created record from axios-wrapped bitable response', async () => 
   assert.equal(result.created, true);
   assert.equal(result.record.record_id, 'rec_new');
   assert.equal(result.responseSummary.code, 0);
-  assert.equal(result.responseSummary.recordId, 'rec_new');
+  assert.equal(result.responseSummary.recordIdPresent, true);
+  assert.equal(result.responseSummary.msg, undefined);
+  const serialized = JSON.stringify({ logs, responseSummary: result.responseSummary });
+  assert.doesNotMatch(serialized, /rec_new/);
+  assert.doesNotMatch(serialized, /success/);
+});
+
+test('summarizes missing record_id responses without leaking the verified record identifier', async t => {
+  const group = createGroup();
+  const logs = [];
+  const warnings = [];
+  const originalLog = console.log;
+  const originalWarn = console.warn;
+  console.log = (...args) => logs.push(args);
+  console.warn = (...args) => warnings.push(args);
+  t.after(() => {
+    console.log = originalLog;
+    console.warn = originalWarn;
+  });
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async () => ({
+          data: {
+            items: [{
+              record_id: 'rec_verified_secret',
+              fields: {
+                日报日期: '2026-06-26',
+                日报提交人: '王治坤',
+                今日工作总结: '事项1',
+              },
+            }],
+          },
+        }),
+        create: async () => ({
+          status: 200,
+          data: {
+            code: 0,
+            msg: 'success raw response text',
+            data: { record: { fields: {} } },
+          },
+        }),
+      },
+    },
+  });
+
+  const result = await service.createDailyReportRecord(group, {
+    highConfidence: true,
+    reportDate: '2026-06-26',
+    reporterName: '王治坤',
+    rawText: '日报正文不应出现在日志',
+    workItems: ['事项1'],
+    riskItems: [],
+  });
+
+  assert.equal(result.record.record_id, 'rec_verified_secret');
+  assert.equal(result.verifiedOutsideView, true);
+  assert.equal(result.responseSummary.recordIdPresent, false);
+  assert.equal(result.responseSummary.msg, undefined);
+  const serialized = JSON.stringify({ logs, warnings, responseSummary: result.responseSummary });
+  for (const secret of ['rec_verified_secret', 'success raw response text', '日报正文不应出现在日志']) {
+    assert.doesNotMatch(serialized, new RegExp(secret));
+  }
 });
 
 test('formats configured date fields as millisecond timestamps', () => {
@@ -2562,6 +2713,56 @@ test('throws when bitable returns a non-zero business code', async () => {
     }),
     /code=1254037/,
   );
+});
+
+test('redacts Bitable response bodies from logs and errors while preserving response payloads', async t => {
+  const errors = [];
+  const originalError = console.error;
+  console.error = (...args) => errors.push(args);
+  t.after(() => { console.error = originalError; });
+
+  const secret = 'raw report body: 王治坤 rec_error_secret ou_error_secret oc_error_secret bascnErrorSecret table_id=tbl_error_secret wiki/WikiNodeSecret';
+  const businessPayload = { code: 1254037, msg: secret, data: { error: { message: secret } } };
+  const businessService = new BitableService({
+    bitable: { appTableRecord: {
+      list: async () => ({ data: { code: 0, data: { items: [] } } }),
+      create: async () => ({ data: businessPayload }),
+    } },
+  });
+  let businessError;
+  await assert.rejects(
+    businessService.createDailyReportRecord(createGroup(), {
+      highConfidence: true, reportDate: '2026-06-26', reporterName: '王治坤', rawText: secret, workItems: ['事项1'], riskItems: [],
+    }),
+    error => { businessError = error; return true; },
+  );
+
+  const thrownError = new Error(secret);
+  thrownError.response = { data: { code: 'contact_lookup_failed', msg: secret, error: { message: secret } } };
+  const thrownService = new BitableService({
+    bitable: { appTableRecord: {
+      list: async () => ({ data: { code: 0, data: { items: [] } } }),
+      create: async () => { throw thrownError; },
+    } },
+  });
+  await assert.rejects(
+    thrownService.createDailyReportRecord(createGroup(), {
+      highConfidence: true, reportDate: '2026-06-26', reporterName: '王治坤', rawText: secret, workItems: ['事项1'], riskItems: [],
+    }),
+    error => error === thrownError,
+  );
+
+  assert.equal(businessError.response.data, businessPayload);
+  assert.equal(thrownError.response.data.msg, secret);
+  const serialized = JSON.stringify({ errors, businessMessage: businessError.message, thrownMessage: thrownError.message });
+  for (const value of ['王治坤', 'rec_error_secret', 'ou_error_secret', 'oc_error_secret', 'bascnErrorSecret', 'tbl_error_secret', 'WikiNodeSecret', 'raw report body']) {
+    assert.doesNotMatch(serialized, new RegExp(value));
+  }
+  assert.match(businessError.message, /createDailyReportRecord.*code=1254037/);
+  assert.match(thrownError.message, /createDailyReportRecord.*code=contact_lookup_failed/);
+  assert.equal(errors.length, 2);
+  assert.equal(errors[0][1].msg, undefined);
+  assert.equal(errors[1][1].msg, undefined);
 });
 
 test('does not create duplicate daily records when message id field is configured', async () => {

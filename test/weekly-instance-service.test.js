@@ -63,6 +63,30 @@ test('returns persistent instance without copying or writing', async () => {
   assert.equal(sheetCalls, 0);
 });
 
+test('returns reusable sheet metadata from an existing Base instance', async () => {
+  const group = buildGroup();
+  const result = await ensureWeeklyInstanceForGroup({
+    group,
+    bitable: {
+      findWeeklyInstanceRecord: async () => ({
+        record_id: 'rec_week',
+        fields: {
+          SpreadsheetToken: 'sheet_token', SheetID: 'week_29', 工作表名称: '本周周报', 周报链接: 'https://example.invalid/sheets/sheet_token?sheet=week_29',
+        },
+      }),
+    },
+    sheetWriter: {},
+    now: new Date('2026-07-13T01:00:00.000Z'),
+  });
+
+  assert.equal(result.reused, true);
+  assert.deepEqual(result.sheet, {
+    spreadsheetToken: 'sheet_token', sheetId: 'week_29', title: '本周周报',
+    reused: true, created: false,
+  });
+  assert.equal(result.instance.sheetUrl, 'https://example.invalid/sheets/sheet_token?sheet=week_29');
+});
+
 test('registers a sheet reused by title after an earlier Base write failure', async () => {
   let registered;
   const result = await ensureWeeklyInstanceForGroup({

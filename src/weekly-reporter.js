@@ -2,11 +2,12 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { getWorkWeekRange } from './date-utils.js';
 import { buildWeeklyAiInputs } from './ai-input-normalizer.js';
-import { WEEKLY_FIELD_KEYS } from './config.js';
+import { WEEKLY_FIELD_KEYS, tableIsConfigured } from './config.js';
 import { normalizeFieldValue } from './bitable-service.js';
 import { renderWeeklySummaryToPng } from './render-weekly.js';
 import { buildWeeklySheetValues } from './weekly-sheet-content.js';
 import { buildWeeklySheetUrl, WeeklySheetWriter } from './weekly-sheet-writer.js';
+import { ensureWeeklyInstanceForGroup } from './weekly-instance-service.js';
 
 export async function generateWeeklyReportForGroup({
   group,
@@ -31,6 +32,10 @@ export async function generateWeeklyReportForGroup({
     }
   }
 
+  const preparedWeeklySheet = group.weeklySheet?.enabled
+    ? await prepareWeeklySheetForGroup({ group, bitable, sheetWriter, client, now, timezone })
+    : null;
+
   const factReports = await listReportsForWeeklyOutput(bitable, group, weekStart, weekEnd);
   const reports = buildWeeklyAiInputs(factReports);
   const summary = await aiProvider.summarizeWeeklyReports({
@@ -41,7 +46,7 @@ export async function generateWeeklyReportForGroup({
     generatedAt: now,
   });
 
-  if (group.weeklySheet?.enabled) {
+  if (preparedWeeklySheet) {
     return generateWeeklySheetForGroup({
       group,
       reports,
@@ -55,8 +60,7 @@ export async function generateWeeklyReportForGroup({
       replyMessageId,
       weekStart,
       weekEnd,
-      sheetWriter,
-      client,
+      ...preparedWeeklySheet,
     });
   }
 
@@ -99,24 +103,15 @@ async function generateWeeklySheetForGroup({
   replyMessageId,
   weekStart,
   weekEnd,
-  sheetWriter,
-  client,
+  writer,
+  weeklyInstance,
 }) {
-  const writer = sheetWriter || (client ? new WeeklySheetWriter(client) : null);
-  if (!writer) {
-    throw new Error('weeklySheet 已启用，但未提供 sheetWriter/client');
-  }
-
-  const sheet = await writer.ensureWeeklySheet(group.weeklySheet, { weekStart, weekEnd });
+  const sheet = weeklyInstance.sheet;
   const effectiveSheetConfig = {
     ...group.weeklySheet,
-    spreadsheetToken: sheet.spreadsheetToken || group.weeklySheet.spreadsheetToken,
+    spreadsheetToken: sheet.spreadsheetToken,
   };
-  const cellMap = await writer.discoverTemplateTargets(
-    effectiveSheetConfig,
-    sheet.sheetId,
-    { aliasMap: group.weeklySheet.entityAliases },
-  );
+  const cellMap = weeklyInstance.targets;
   const sheetContent = typeof aiProvider.summarizeWeeklySheet === 'function'
     ? await aiProvider.summarizeWeeklySheet({
       group,
@@ -137,7 +132,11 @@ async function generateWeeklySheetForGroup({
     });
 
   const writeResult = await writer.writeCells(effectiveSheetConfig, sheet.sheetId, sheetContent.values);
-  const sheetUrl = buildWeeklySheetUrl(effectiveSheetConfig, sheet.sheetId);
+  const sheetUrl = resolveWeeklySheetUrl(
+    weeklyInstance.instance?.sheetUrl,
+    effectiveSheetConfig,
+    sheet.sheetId,
+  );
 
   await bitable.upsertWeeklySummary(group, summary, {
     imageKey: '',
@@ -173,6 +172,37 @@ async function generateWeeklySheetForGroup({
   };
 }
 
+async function prepareWeeklySheetForGroup({ group, bitable, sheetWriter, client, now, timezone }) {
+  const writer = sheetWriter || (client ? new WeeklySheetWriter(client) : null);
+  if (!writer) {
+    throw new Error('weeklySheet 已启用，但未提供 sheetWriter/client');
+  }
+  if (!tableIsConfigured(group.weeklyInstanceTable)) {
+    throw new Error('weeklySheet 已启用，但 weeklyInstanceTable 未配置，禁止写入未登记工作表');
+  }
+
+  const weeklyInstance = await ensureWeeklyInstanceForGroup({
+    group,
+    bitable,
+    sheetWriter: writer,
+    now,
+    timezone,
+  });
+  if (weeklyInstance.skipped || !hasCompleteWeeklySheet(weeklyInstance.sheet)) {
+    throw new Error('weeklySheet 实例不可用，禁止写入未登记工作表');
+  }
+  const effectiveSheetConfig = {
+    ...group.weeklySheet,
+    spreadsheetToken: weeklyInstance.sheet.spreadsheetToken,
+  };
+  const targets = weeklyInstance.targets || await writer.discoverTemplateTargets(
+    effectiveSheetConfig,
+    weeklyInstance.sheet.sheetId,
+    { aliasMap: group.weeklySheet.entityAliases },
+  );
+  return { writer, weeklyInstance: { ...weeklyInstance, targets } };
+}
+
 async function listReportsForWeeklyOutput(bitable, group, weekStart, weekEnd) {
   if (group.weeklySheet?.enabled && group.weeklySheet.reportScope === 'allDailyTable') {
     if (typeof bitable.listAllDailyReportsForRange === 'function') {
@@ -190,6 +220,33 @@ function buildWeeklySheetMessage(group, summary, sheet, sheetUrl) {
     `日报：${summary.reportCount} 份，成员：${summary.memberCount} 人`,
     sheetUrl,
   ].join('\n');
+}
+
+function resolveWeeklySheetUrl(instanceSheetUrl, sheetConfig, sheetId) {
+  if (isCurrentSheetUrl(instanceSheetUrl, sheetConfig, sheetId)) return instanceSheetUrl;
+  return buildWeeklySheetUrl(sheetConfig, sheetId);
+}
+
+function hasCompleteWeeklySheet(sheet) {
+  return Boolean(String(sheet?.spreadsheetToken || '').trim() && String(sheet?.sheetId || '').trim());
+}
+
+function isCurrentSheetUrl(value, sheetConfig, sheetId) {
+  if (!value || !sheetId) return false;
+  try {
+    const persisted = new URL(value);
+    const expected = new URL(buildWeeklySheetUrl(sheetConfig, sheetId));
+    const sheetQueries = persisted.searchParams.getAll('sheet');
+    return persisted.protocol === 'https:'
+      && persisted.username === ''
+      && persisted.password === ''
+      && persisted.origin === expected.origin
+      && persisted.pathname === expected.pathname
+      && sheetQueries.length === 1
+      && sheetQueries[0] === String(sheetId);
+  } catch {
+    return false;
+  }
 }
 
 async function getExistingSentSummary(bitable, group, weekStart) {

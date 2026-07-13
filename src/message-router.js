@@ -3,6 +3,7 @@ import { formatDateTime, coerceLarkTimestamp } from './date-utils.js';
 import { parseDailyReportText } from './daily-report-parser.js';
 import { buildFactKey } from './daily-record-utils.js';
 import { generateWeeklyReportForGroup } from './weekly-reporter.js';
+import { sanitizeOperationalText } from './error-reporter.js';
 import { getMessageText, getSenderOpenId, isMentionedBot, isWeeklyCommand, stripBotMentions } from './message-utils.js';
 import { extractSheetRef, handleSheetPosterRequest } from './sheet-poster.js';
 
@@ -60,22 +61,19 @@ export async function handleMessageEvent({
 
   if (parsed?.highConfidence) {
     console.log('[daily-report] parsed', {
-      messageId: message.message_id,
-      chatId: message.chat_id,
-      reporterName: parsed.reporterName,
       reportDate: parsed.reportDate,
       confidence: parsed.confidence,
       workItemCount: parsed.workItems.length,
       planItemCount: parsed.tomorrowPlanItems.length,
       riskItemCount: parsed.riskItems.length,
+      mentioned,
     });
 
     if (!group) {
       console.warn('[daily-report] parsed but group not configured', {
-        messageId: message.message_id,
-        chatId: message.chat_id,
-        reporterName: parsed.reporterName,
         reportDate: parsed.reportDate,
+        mentioned,
+        reason: 'group_not_configured',
       });
       if (mentioned) {
         await messenger.replyText(message.message_id, '我识别到了日报，但当前群还没有配置日报收集表。请先在 config/groups.json 里配置这个群。');
@@ -155,15 +153,10 @@ export async function handleMessageEvent({
     };
 
     console.log('[daily-report] chat raw/fact write result', {
-      messageId: message.message_id,
-      chatId: message.chat_id,
-      reporterName: parsed.reporterName,
       reportDate: parsed.reportDate,
-      reportDates,
-      rawCreated: rawResult.created,
-      rawRecordId,
+      reportDateCount: reportDates.length,
+      rawCreated: Boolean(rawResult.created),
       factResultCount: factResults.length,
-      factRecordIds: factResults.map(factResult => factResult.record?.record_id || factResult.record?.recordId || ''),
       workItemCount: parsed.workItems.length,
     });
 
@@ -176,18 +169,13 @@ export async function handleMessageEvent({
 
   if (parsed && !parsed.highConfidence) {
     console.warn('[daily-report] low confidence; ignored', {
-      messageId: message.message_id,
-      chatId: message.chat_id,
       confidence: parsed.confidence,
-      reason: parsed.reason,
-      firstLine: getFirstLine(reportText),
+      reason: 'low_confidence',
     });
   } else if ((mentioned || process.env.DAILY_PARSE_DEBUG === 'true') && group) {
     console.log('[daily-report] not matched; ignored', {
-      messageId: message.message_id,
-      chatId: message.chat_id,
       mentioned,
-      firstLine: getFirstLine(reportText),
+      reason: 'not_matched',
     });
   }
 
@@ -202,19 +190,19 @@ export async function handleMessageEvent({
 async function ensureGroupTables(group) {
   await ensureDailyTable(group);
   if (!tableIsConfigured(group.weeklyTable) && !group.weeklySheet?.enabled) {
-    console.warn(`[router] weeklyTable/weeklySheet not configured for ${group.project}; weekly summary will not persist`);
+    console.warn('[router] weeklyTable/weeklySheet not configured; weekly summary will not persist');
   }
 }
 
 async function ensureDailyTable(group) {
   if (!tableIsConfigured(group.dailyTable)) {
-    throw new Error(`群 ${group.chatId} 的 dailyTable 未配置 appToken/tableId`);
+    throw new Error('dailyTable 未配置 appToken/tableId');
   }
 }
 
 function ensureChatDailyTables(group, bitable) {
   if (!tableIsConfigured(group.chatDailyRawTable) || !tableIsConfigured(group.dailyFactTable)) {
-    throw new Error(`群 ${group.chatId} 的 chatDailyRawTable/dailyFactTable 未配置，群聊日报不写 dailyTable`);
+    throw new Error('chatDailyRawTable/dailyFactTable 未配置，群聊日报不写 dailyTable');
   }
   if (typeof bitable.createChatDailyRawRecord !== 'function' || typeof bitable.upsertDailyFactRecord !== 'function') {
     throw new Error('群聊日报写入服务未实现 chatDailyRawTable/dailyFactTable 写入方法，群聊日报不写 dailyTable');
@@ -226,19 +214,13 @@ async function findTeamContactSafely(bitable, group, query) {
     return await bitable.findTeamContact(group, query);
   } catch (err) {
     console.warn('[daily-report] contact lookup failed; continue without supervisor mapping', {
-      chatId: group.chatId,
-      project: group.project,
-      code: err?.response?.data?.code || err?.code,
-      msg: err?.response?.data?.msg || err?.message,
+      code: sanitizeOperationalCode(err?.response?.data?.code ?? err?.code),
     });
     return null;
   }
 }
 
-function getFirstLine(text) {
-  return String(text || '')
-    .split(/\r?\n/)
-    .map(line => line.trim())
-    .find(Boolean)
-    ?.slice(0, 60) || '';
+function sanitizeOperationalCode(value) {
+  const text = String(value ?? '');
+  return /^[A-Za-z0-9_.:-]{1,64}$/.test(text) ? sanitizeOperationalText(text) : '';
 }
