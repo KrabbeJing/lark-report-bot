@@ -114,6 +114,26 @@ test('uses the Friday MMDD title default through the public writer path', async 
   }
 });
 
+test('does not include a malformed copy response in the copy failure', async () => {
+  const writer = new WeeklySheetWriter({
+    request: async payload => {
+      if (payload.url.includes('/sheets/query')) return { data: { sheets: [] } };
+      return { data: { msg: 'resource=shtcn_secret report content should not leak' } };
+    },
+  });
+
+  await assert.rejects(
+    writer.ensureWeeklySheet({ spreadsheetToken: 'shtcn_secret', templateSheetId: 'template' }, {
+      weekStart: '2026-07-06', weekEnd: '2026-07-10',
+    }),
+    error => {
+      assert.match(error.message, /未返回新 sheetId/);
+      assert.doesNotMatch(error.message, /shtcn_secret|report content should not leak/);
+      return true;
+    },
+  );
+});
+
 test('moves a sheet to workbook index zero with the verified sheet_ai payload', async () => {
   const calls = [];
   let sheetListReads = 0;
@@ -339,6 +359,32 @@ test('resolves wiki node before querying spreadsheet sheets', async () => {
   assert.equal(calls[1].url, '/open-apis/sheets/v3/spreadsheets/shtcn_from_wiki/sheets/query');
 });
 
+test('uses the wiki-resolved spreadsheet token when both workbook fields are configured', async () => {
+  const calls = [];
+  const writer = new WeeklySheetWriter({
+    request: async payload => {
+      calls.push(payload);
+      return {
+        data: {
+          node: {
+            obj_type: 'sheet',
+            obj_token: 'sheet_current',
+          },
+        },
+      };
+    },
+  });
+
+  const resolved = await writer.resolveSheetConfig({
+    spreadsheetToken: 'sheet_stale',
+    wikiNodeToken: 'wiki_current',
+  });
+
+  assert.equal(resolved.spreadsheetToken, 'sheet_current');
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].url, /wiki\/v2\/spaces\/get_node/);
+});
+
 test('reads copied sheet matrix and returns dynamic targets', async () => {
   const requests = [];
   const writer = new WeeklySheetWriter({
@@ -389,7 +435,7 @@ test('never falls back to writing the template when copy is disabled', async () 
   );
 });
 
-test('renders title and sheet url', () => {
+test('renders weekly sheet titles and a matching Sheets URL', () => {
   assert.equal(
     renderWeeklySheetTitle('周报 {{weekStartCompact}}-{{weekEndCompact}}', {
       weekStart: '2026-06-22',
@@ -410,6 +456,38 @@ test('renders title and sheet url', () => {
       spreadsheetUrl: 'https://example.feishu.cn/sheets/shtcn_test',
     }, 'new_sheet_1'),
     'https://example.feishu.cn/sheets/shtcn_test?sheet=new_sheet_1',
+  );
+});
+
+test('rebuilds a stale Sheets URL from the current wiki-resolved workbook token', () => {
+  assert.equal(
+    buildWeeklySheetUrl({
+      wikiNodeToken: 'wiki_current',
+      spreadsheetToken: 'shtcn_current',
+      spreadsheetUrl: 'https://tenant.feishu.cn/sheets/shtcn_stale?fromScene=spaceOverview',
+    }, 'current_sheet'),
+    'https://www.feishu.cn/sheets/shtcn_current?sheet=current_sheet',
+  );
+});
+
+test('reuses a configured Wiki URL that matches the current node token', () => {
+  assert.equal(
+    buildWeeklySheetUrl({
+      wikiNodeToken: 'wiki_current',
+      spreadsheetToken: 'shtcn_current',
+      spreadsheetUrl: 'https://tenant.feishu.cn/wiki/wiki_current?fromScene=spaceOverview&sheet=template_sheet',
+    }, 'current_sheet'),
+    'https://tenant.feishu.cn/wiki/wiki_current?fromScene=spaceOverview&sheet=current_sheet',
+  );
+});
+
+test('reuses a configured Sheets URL that matches the current workbook token', () => {
+  assert.equal(
+    buildWeeklySheetUrl({
+      spreadsheetToken: 'shtcn_current',
+      spreadsheetUrl: 'https://tenant.feishu.cn/sheets/shtcn_current?fromScene=spaceOverview&sheet=template_sheet',
+    }, 'current_sheet'),
+    'https://tenant.feishu.cn/sheets/shtcn_current?fromScene=spaceOverview&sheet=current_sheet',
   );
 });
 

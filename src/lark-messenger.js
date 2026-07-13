@@ -60,7 +60,7 @@ export class LarkMessenger {
     });
     const imageKey = res?.data?.image_key ?? res?.image_key;
     if (!imageKey) {
-      throw new Error(`image upload returned no image_key, response: ${JSON.stringify(res)}`);
+      throw new Error('image upload returned no image_key');
     }
     return imageKey;
   }

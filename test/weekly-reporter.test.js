@@ -136,6 +136,7 @@ test('does not push again when scheduled weekly sheet already exists', async () 
   }).groups[0];
   let sendCount = 0;
   let baseWrites = 0;
+  const summaryWrites = [];
   const stages = [];
 
   const result = await generateWeeklyReportForGroup({
@@ -143,7 +144,7 @@ test('does not push again when scheduled weekly sheet already exists', async () 
     bitable: {
       findWeeklySummaryRecord: async () => null,
       listDailyReportsForWeek: async () => { stages.push('reports'); return []; },
-      upsertWeeklySummary: async () => ({ skipped: true }),
+      upsertWeeklySummary: async (_group, _summary, context) => { summaryWrites.push(context); return { skipped: true }; },
       findWeeklyInstanceRecord: async () => {
         stages.push('find');
         return {
@@ -183,7 +184,53 @@ test('does not push again when scheduled weekly sheet already exists', async () 
   assert.equal(result.reason, 'weekly_sheet_exists');
   assert.equal(sendCount, 0);
   assert.equal(baseWrites, 0);
+  assert.deepEqual(summaryWrites.map(write => write.pushStatus), ['sent']);
   assert.deepEqual(stages, ['find', 'locate', 'reports', 'summary', 'sheet-ai', 'content']);
+});
+
+test('retries an initial weekly sheet delivery and records sent only after messenger success', async () => {
+  const group = normalizeConfig({ groups: [{
+    chatId: 'oc_test',
+    project: '数字金融部',
+    dailyTable: { appToken: 'bas_test', tableId: 'tbl_daily' },
+    weeklyInstanceTable: { appToken: 'bas_test', tableId: 'tbl_instances' },
+    weeklySheet: { enabled: true, spreadsheetToken: 'sheet', templateSheetId: 'tpl', skipPushIfExisting: false },
+  }] }).groups[0];
+  const summaryWrites = [];
+  let sendAttempts = 0;
+  const dependencies = {
+    group,
+    bitable: {
+      findWeeklySummaryRecord: async () => null,
+      listDailyReportsForWeek: async () => [],
+      upsertWeeklySummary: async (_group, _summary, context) => { summaryWrites.push(context); },
+      findWeeklyInstanceRecord: async () => null,
+      upsertWeeklyInstance: async () => ({ created: true }),
+    },
+    aiProvider: new TemplateAiProvider(),
+    messenger: {
+      sendText: async () => {
+        sendAttempts += 1;
+        if (sendAttempts === 1) throw new Error('delivery failed');
+      },
+    },
+    sheetWriter: {
+      ensureWeeklySheet: async () => ({ spreadsheetToken: 'sheet', sheetId: 'week', title: 'week', reused: false }),
+      moveSheet: async () => {},
+      discoverTemplateTargets: async () => discoveredMap,
+      writeCells: async () => ({ rangeCount: 1 }),
+    },
+    timezone: 'Asia/Shanghai',
+    now: new Date('2026-07-04T02:00:00.000Z'),
+    delivery: 'send',
+  };
+
+  await assert.rejects(generateWeeklyReportForGroup(dependencies), /delivery failed/);
+  assert.deepEqual(summaryWrites, []);
+
+  await generateWeeklyReportForGroup(dependencies);
+  assert.equal(sendAttempts, 2);
+  assert.deepEqual(summaryWrites.map(write => write.pushStatus), ['sent']);
 });
 
 test('deduplicates multi-day fact rows before calling AI provider', async () => {
@@ -337,7 +384,11 @@ test('fails closed rather than writing when a reused Base instance is incomplete
         writeCells: async () => { writeCalls += 1; },
       },
       timezone: 'Asia/Shanghai', now: new Date('2026-06-27T02:00:00.000Z'), delivery: 'send',
-    }), /实例不可用/, label);
+    }), error => {
+      assert.equal(error.weeklyInstanceStage, 'validate_reused_instance', label);
+      assert.match(error.message, /Base 周报实例/);
+      return true;
+    }, label);
 
     assert.equal(discoveryCalls, 0, label);
     assert.equal(writeCalls, 0, label);

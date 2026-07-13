@@ -19,9 +19,22 @@ export async function ensureWeeklyInstanceForGroup({
 
   const { start: weekStart, end: weekEnd } = getWorkWeekRange(now, timezone);
   const { isoYear, isoWeek, key: instanceKey } = getIsoWeekInfo(weekStart);
-  const existing = await bitable.findWeeklyInstanceRecord(group, instanceKey);
+  const existing = await runWeeklyStage('find_existing_instance', () => (
+    bitable.findWeeklyInstanceRecord(group, instanceKey)
+  ));
   if (existing) {
     const instance = readWeeklyInstanceRecord(existing, group.weeklyInstanceTable);
+    const resolvedConfig = await runWeeklyStage('resolve_workbook', () => (
+      resolveWeeklySheetConfig(sheetWriter, group.weeklySheet)
+    ));
+    await runWeeklyStage('validate_reused_instance', () => {
+      assertReusableWeeklyInstance(instance, resolvedConfig);
+    });
+    const targets = await runWeeklyStage('validate_reused_sheet', () => sheetWriter.discoverTemplateTargets(
+      resolvedConfig,
+      instance.sheetId,
+      { aliasMap: group.weeklySheet.entityAliases },
+    ));
     return {
       skipped: false,
       reused: true,
@@ -29,12 +42,13 @@ export async function ensureWeeklyInstanceForGroup({
       record: existing,
       instance,
       sheet: {
-        spreadsheetToken: instance.spreadsheetToken,
+        spreadsheetToken: resolvedConfig.spreadsheetToken,
         sheetId: instance.sheetId,
         title: instance.sheetTitle,
         reused: true,
         created: false,
       },
+      targets,
     };
   }
 
@@ -80,6 +94,22 @@ export async function ensureWeeklyInstanceForGroup({
     instance,
     persisted,
   };
+}
+
+async function resolveWeeklySheetConfig(sheetWriter, sheetConfig) {
+  if (typeof sheetWriter.resolveSheetConfig === 'function') {
+    return sheetWriter.resolveSheetConfig(sheetConfig);
+  }
+  return sheetConfig;
+}
+
+function assertReusableWeeklyInstance(instance, sheetConfig) {
+  const persistedToken = String(instance.spreadsheetToken || '').trim();
+  const configuredToken = String(sheetConfig?.spreadsheetToken || '').trim();
+  const sheetId = String(instance.sheetId || '').trim();
+  if (!persistedToken || !configuredToken || !sheetId || persistedToken !== configuredToken) {
+    throw new Error('Base 周报实例与当前工作簿配置不一致或缺少工作表标识');
+  }
 }
 
 function readWeeklyInstanceRecord(record, table) {

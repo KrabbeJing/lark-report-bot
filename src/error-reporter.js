@@ -1,12 +1,8 @@
 import { createHash } from 'node:crypto';
+import { formatOperationalError } from './operational-log.js';
 
 export function formatLarkErrorForLog(err) {
-  const data = err?.response?.data;
-  if (data) return JSON.stringify(data, null, 2);
-  return JSON.stringify({
-    code: err?.code || '',
-    message: err?.message || String(err || ''),
-  }, null, 2);
+  return formatOperationalError(err);
 }
 
 export function sanitizeOperationalText(value) {
@@ -127,7 +123,7 @@ function logDeliveryFailures(results) {
   if (failed.length) {
     console.warn(
       '[error-report] failed to notify admins',
-      failed.map(result => sanitizeOperationalText(result.reason?.message || result.reason)),
+      failed.map(result => formatOperationalError(result.reason)),
     );
   }
 }

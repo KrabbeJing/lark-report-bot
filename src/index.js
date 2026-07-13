@@ -7,6 +7,7 @@ import { BitableService } from './bitable-service.js';
 import { syncDailyFactsForAllGroups } from './daily-fact-sync.js';
 import { pushDailyReportsToSupervisors } from './daily-supervisor-push.js';
 import { reportHandlerError, reportOperationalFailure } from './error-reporter.js';
+import { formatOperationalError } from './operational-log.js';
 import { loadGroupConfig } from './config.js';
 import { buildLarkClientOptions } from './lark-client.js';
 import { LarkMessenger } from './lark-messenger.js';
@@ -62,16 +63,14 @@ const eventDispatcher = new lark.EventDispatcher({}).register({
     const messageId = message.message_id;
 
     if (processedMessageIds.has(messageId)) {
-      console.log('[dedupe] already processing/processed', messageId);
+      console.log('[dedupe] already processing/processed');
       return;
     }
     rememberMessageId(messageId);
 
     console.log('[event] message received', {
-      chat_id: message.chat_id,
       chat_type: message.chat_type,
       message_type: message.message_type,
-      message_id: message.message_id,
     });
 
     handleMessageEvent({
@@ -84,7 +83,7 @@ const eventDispatcher = new lark.EventDispatcher({}).register({
       sheetWriter,
       outDir: OUT_DIR,
     }).catch(async (err) => {
-      console.error('[handler] failed', err?.response?.data || err);
+      console.error(`[handler] failed ${formatOperationalError(err, { stage: 'handler' })}`);
       await reportHandlerError({ err, message, messenger, config });
     });
   },

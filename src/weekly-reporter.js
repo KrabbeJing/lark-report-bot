@@ -138,13 +138,6 @@ async function generateWeeklySheetForGroup({
     sheet.sheetId,
   );
 
-  await bitable.upsertWeeklySummary(group, summary, {
-    imageKey: '',
-    pushStatus: delivery === 'reply' ? 'manual_sent' : 'sent',
-    pushedAt: now,
-    timezone,
-  });
-
   const skippedPush = delivery === 'send'
     && sheet.reused
     && group.weeklySheet.skipPushIfExisting !== false;
@@ -160,6 +153,13 @@ async function generateWeeklySheetForGroup({
       `weekly-sheet-${group.chatId}-${weekStart}`,
     );
   }
+
+  await bitable.upsertWeeklySummary(group, summary, {
+    imageKey: '',
+    pushStatus: delivery === 'reply' ? 'manual_sent' : 'sent',
+    pushedAt: now,
+    timezone,
+  });
 
   return {
     skipped: skippedPush,

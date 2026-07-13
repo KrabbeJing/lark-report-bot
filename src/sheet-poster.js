@@ -27,14 +27,14 @@ export async function handleSheetPosterRequest({ client, messenger, message, tex
     return;
   }
 
-  console.log('[sheet-poster] ref:', ref);
+  console.log('[sheet-poster] sheet reference parsed', { type: ref.type, hasSheetId: Boolean(ref.sheetId) });
   let spreadsheetToken;
   let sheetId = ref.sheetId || null;
   let sheetTitle = '';
 
   if (ref.type === 'wiki') {
     const node = await resolveWikiNode(client, ref.nodeToken);
-    console.log('[sheet-poster] wiki resolved:', node);
+    console.log('[sheet-poster] wiki resolved', { objType: node.objType, hasTitle: Boolean(node.title) });
     if (node.objType !== 'sheet') {
       await messenger.replyText(message.message_id, `这个 wiki 节点是「${node.objType}」类型，目前只支持电子表格（sheet）`);
       return;
@@ -53,18 +53,12 @@ export async function handleSheetPosterRequest({ client, messenger, message, tex
     }
     sheetId = sheets[0].sheet_id;
     if (!sheetTitle) sheetTitle = sheets[0].title;
-    console.log(`[sheet-poster] use first sheet: ${sheets[0].title} (${sheetId})`);
+    console.log('[sheet-poster] using first sheet');
   }
 
   const values = await readRange(client, spreadsheetToken, `${sheetId}!A1:Z200`);
   const report = parseSheetToReport(values);
-  console.log('[sheet-poster] parsed:', {
-    title: report.title,
-    period: report.period,
-    metrics: report.metrics.length,
-    projects: report.projects.length,
-    managementCategories: report.managementCategories.length,
-  });
+  console.log('[sheet-poster] parsed', buildSheetPosterParsedLogMetadata(report));
 
   await messenger.replyText(
     message.message_id,
@@ -75,10 +69,24 @@ export async function handleSheetPosterRequest({ client, messenger, message, tex
   const outPath = path.join(outDir, `report-${message.message_id}.jpg`);
   const t0 = Date.now();
   await renderReportToPng(report, outPath);
-  console.log(`[sheet-poster] rendered in ${Date.now() - t0}ms -> ${outPath}`);
+  console.log('[sheet-poster] rendered', buildSheetPosterRenderedLogMetadata(Date.now() - t0));
 
   const imageKey = await messenger.uploadImage(outPath);
   await messenger.replyImage(message.message_id, imageKey);
+}
+
+export function buildSheetPosterParsedLogMetadata(report) {
+  return {
+    metricCount: Array.isArray(report?.metrics) ? report.metrics.length : 0,
+    projectCount: Array.isArray(report?.projects) ? report.projects.length : 0,
+    managementCategoryCount: Array.isArray(report?.managementCategories)
+      ? report.managementCategories.length
+      : 0,
+  };
+}
+
+export function buildSheetPosterRenderedLogMetadata(durationMs) {
+  return { durationMs: Number.isFinite(durationMs) && durationMs >= 0 ? durationMs : 0 };
 }
 
 async function resolveWikiNode(client, nodeToken) {

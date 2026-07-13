@@ -53,8 +53,8 @@ export class OpenAICompatibleProvider {
     });
 
     if (!res.ok) {
-      const body = await res.text();
-      console.warn(`[ai] chat completion failed: ${res.status} ${body}`);
+      await res.text();
+      console.warn(`[ai] chat completion failed: status=${res.status}`);
       return fallback;
     }
 
@@ -92,8 +92,8 @@ export class OpenAICompatibleProvider {
     });
 
     if (!res.ok) {
-      const body = await res.text();
-      console.warn(`[ai] weekly sheet completion failed: ${res.status} ${body}`);
+      await res.text();
+      console.warn(`[ai] weekly sheet completion failed: status=${res.status}`);
       return fallback;
     }
 

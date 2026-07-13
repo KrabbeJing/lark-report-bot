@@ -75,3 +75,12 @@
 - Base 中已存周报链接仅在 HTTPS、当前配置推导出的 workbook 路径/token，以及唯一且匹配的 sheet 查询都成立时复用；其他情况重建直接链接。
 - 已补充匹配联系人直属上级/分管领导为空时保留既有文本字段和用户字段的回归覆盖。
 - 以上为本地复审修复；本节不宣称服务器已部署或已载入这些变更。
+
+## 本地发布阻断项复审（待部署）
+
+- 复用 Base 周报实例会校验非空 SpreadsheetToken 与 SheetID、当前工作簿 token（含 wiki 解析）以及工作表语义目标；校验失败带稳定 stage，批量 ensure 记录失败并以非零退出。
+- 同时配置 `wikiNodeToken` 与 `spreadsheetToken` 时，始终以 Wiki 当前解析出的工作簿 token 为准；过期显式 token 仅在未配置 Wiki 节点时可用。Base 复用校验和目标发现均使用该解析结果，错误信息不回显 Wiki token。
+- 首次或非跳过的周报 Sheet 推送先发送，再写入既有的 `sent` 或 `manual_sent` 状态；复用 Sheet 的跳过推送仍可写入 `sent`。
+- handler、scheduler 与 weekly ensure CLI 的日志/输出仅包含允许的错误 code、stage 元数据；本地异常通知继续使用完整错误对象进行既有的脱敏处理。
+- 本地聚焦回归（`weekly-sheet-writer`、`weekly-instance-service`）：`32/32` 通过；完整 `npm test`：`221/221` 通过；`git diff --check` 通过。
+- 本节仅记录本地代码与测试结果，不包含部署、发布或线上运行状态声明。

@@ -10,7 +10,7 @@ import {
 } from '../src/error-reporter.js';
 import { normalizeConfig } from '../src/config.js';
 
-test('formats nested Feishu field violations for PM2 logs', () => {
+test('formats allowlisted metadata only for PM2 logs', () => {
   const output = formatLarkErrorForLog({
     response: {
       data: {
@@ -23,9 +23,8 @@ test('formats nested Feishu field violations for PM2 logs', () => {
       },
     },
   });
-  assert.match(output, /uuid/);
-  assert.match(output, /max length is 50/);
-  assert.match(output, /log_test/);
+  assert.match(output, /code=99992402/);
+  assert.doesNotMatch(output, /uuid|max length is 50|log_test|field validation failed/);
 });
 
 test('does not reply in chat when error reporting has no recipients', async () => {

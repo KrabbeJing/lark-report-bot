@@ -1,4 +1,5 @@
 import { formatYmd } from './date-utils.js';
+import { formatOperationalError } from './operational-log.js';
 
 export function startWeeklyScheduler({ config, onRun, logger = console, intervalMs = 60_000 }) {
   const schedule = config.weeklyPush;
@@ -20,7 +21,7 @@ export function startWeeklyScheduler({ config, onRun, logger = console, interval
     try {
       await onRun(now);
     } catch (err) {
-      logger.error('[scheduler] weekly push failed', err);
+      logger.error(formatSchedulerFailure('weekly push', err));
     }
   };
 
@@ -53,7 +54,7 @@ export function startWeeklyInstanceScheduler({ config, onRun, logger = console, 
     try {
       await onRun(now);
     } catch (err) {
-      logger.error('[scheduler] weekly instance creation failed', err);
+      logger.error(formatSchedulerFailure('weekly instance creation', err));
     }
   };
 
@@ -86,7 +87,7 @@ export function startDailySupervisorScheduler({ config, onRun, logger = console,
     try {
       await onRun(now);
     } catch (err) {
-      logger.error('[scheduler] daily supervisor push failed', err);
+      logger.error(formatSchedulerFailure('daily supervisor push', err));
     }
   };
 
@@ -119,7 +120,7 @@ export function startDailyFactSyncScheduler({ config, onRun, logger = console, i
     try {
       await onRun(now);
     } catch (err) {
-      logger.error('[scheduler] daily fact sync failed', err);
+      logger.error(formatSchedulerFailure('daily fact sync', err));
     }
   };
 
@@ -130,6 +131,10 @@ export function startDailyFactSyncScheduler({ config, onRun, logger = console, i
       clearInterval(timer);
     },
   };
+}
+
+export function formatSchedulerFailure(task, error) {
+  return `[scheduler] ${task} failed ${formatOperationalError(error)}`;
 }
 
 export function shouldRunWeeklyPush(now, schedule) {

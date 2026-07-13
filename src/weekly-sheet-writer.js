@@ -25,7 +25,6 @@ export class WeeklySheetWriter {
   }
 
   async resolveSheetConfig(sheetConfig) {
-    if (sheetConfig.spreadsheetToken) return sheetConfig;
     if (!sheetConfig.wikiNodeToken) return sheetConfig;
 
     const res = await this.client.request({
@@ -33,9 +32,9 @@ export class WeeklySheetWriter {
       url: `/open-apis/wiki/v2/spaces/get_node?token=${sheetConfig.wikiNodeToken}`,
     });
     const node = res?.data?.node;
-    if (!node) throw new Error(`未找到 wiki 节点：${sheetConfig.wikiNodeToken}`);
+    if (!node) throw new Error('未找到配置的 wiki 节点');
     if (node.obj_type !== 'sheet') {
-      throw new Error(`wiki 节点 ${sheetConfig.wikiNodeToken} 是 ${node.obj_type} 类型，不是电子表格`);
+      throw new Error('配置的 wiki 节点不是电子表格');
     }
     return {
       ...sheetConfig,
@@ -126,7 +125,7 @@ export class WeeklySheetWriter {
     if (existing) {
       return { ...existing, reused: false, created: true };
     }
-    throw new Error(`复制周报模板 sheet 成功但未返回新 sheetId: ${JSON.stringify(res?.data || res)}`);
+    throw new Error('复制周报模板 sheet 后未返回新 sheetId');
   }
 
   async moveSheet(sheetConfig, sheetId, targetIndex = 0) {
@@ -226,17 +225,34 @@ export function renderWeeklySheetTitle(pattern, { weekStart, weekEnd }) {
 }
 
 export function buildWeeklySheetUrl(sheetConfig, sheetId) {
-  const token = sheetConfig?.spreadsheetToken || '';
-  const base = sheetConfig?.spreadsheetUrl || `https://www.feishu.cn/sheets/${token}`;
-  if (!sheetId) return base;
+  const token = String(sheetConfig?.spreadsheetToken || '').trim();
+  const base = trustedWeeklySheetUrl(sheetConfig) || new URL(
+    `https://www.feishu.cn/sheets/${encodeURIComponent(token)}`,
+  );
+  if (!sheetId) return base.toString();
+  base.searchParams.set('sheet', String(sheetId));
+  return base.toString();
+}
+
+function trustedWeeklySheetUrl(sheetConfig) {
   try {
-    const url = new URL(base);
-    url.searchParams.set('sheet', sheetId);
-    return url.toString();
+    const url = new URL(String(sheetConfig?.spreadsheetUrl || ''));
+    if (url.protocol !== 'https:' || url.username || url.password) return null;
+
+    const wikiNodeToken = String(sheetConfig?.wikiNodeToken || '').trim();
+    const spreadsheetToken = String(sheetConfig?.spreadsheetToken || '').trim();
+    if (pathMatchesResource(url.pathname, 'wiki', wikiNodeToken)) return url;
+    if (pathMatchesResource(url.pathname, 'sheets', spreadsheetToken)) return url;
   } catch {
-    const separator = base.includes('?') ? '&' : '?';
-    return `${base}${separator}sheet=${encodeURIComponent(sheetId)}`;
+    return null;
   }
+  return null;
+}
+
+function pathMatchesResource(pathname, resource, token) {
+  if (!token) return false;
+  const segments = pathname.split('/').filter(Boolean);
+  return segments.length === 2 && segments[0] === resource && segments[1] === token;
 }
 
 function assertWeeklySheetConfig(sheetConfig) {

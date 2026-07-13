@@ -45,22 +45,68 @@ test('copies, moves, validates, writes only report period, then registers instan
   assert.equal(calls[4][1].status, '已创建');
 });
 
-test('returns persistent instance without copying or writing', async () => {
-  let sheetCalls = 0;
+test('persists a current-token URL instead of a stale configured workbook URL', async () => {
+  const group = buildGroup();
+  group.weeklySheet = {
+    ...group.weeklySheet,
+    wikiNodeToken: 'wiki_current',
+    spreadsheetToken: 'sheet_stale',
+    spreadsheetUrl: 'https://tenant.feishu.cn/sheets/sheet_stale?fromScene=spaceOverview',
+  };
+  let persistedInstance;
+
+  const result = await ensureWeeklyInstanceForGroup({
+    group,
+    bitable: {
+      findWeeklyInstanceRecord: async () => null,
+      upsertWeeklyInstance: async (_group, instance) => {
+        persistedInstance = instance;
+        return { created: true };
+      },
+    },
+    sheetWriter: {
+      ensureWeeklySheet: async () => ({
+        spreadsheetToken: 'sheet_current', sheetId: 'week_29', title: '本周周报', created: true,
+      }),
+      moveSheet: async () => {},
+      discoverTemplateTargets: async () => ({ reportPeriod: 'B2', metrics: {}, agileProjects: {}, management: {} }),
+      writeCells: async () => {},
+    },
+    now: new Date('2026-07-13T01:00:00.000Z'),
+  });
+
+  const expectedUrl = 'https://www.feishu.cn/sheets/sheet_current?sheet=week_29';
+  assert.equal(result.instance.sheetUrl, expectedUrl);
+  assert.equal(persistedInstance.sheetUrl, expectedUrl);
+  assert.doesNotMatch(persistedInstance.sheetUrl, /sheet_stale/);
+});
+
+test('validates and returns a persistent instance without copying, moving, writing, or updating Base', async () => {
+  const calls = [];
   const result = await ensureWeeklyInstanceForGroup({
     group: buildGroup(),
     bitable: {
-      findWeeklyInstanceRecord: async () => ({ record_id: 'rec_week', fields: {} }),
+      findWeeklyInstanceRecord: async () => ({
+        record_id: 'rec_week',
+        fields: { SpreadsheetToken: 'sheet_token', SheetID: 'week_29', 工作表名称: '本周周报' },
+      }),
     },
     sheetWriter: {
-      ensureWeeklySheet: async () => { sheetCalls += 1; },
+      ensureWeeklySheet: async () => { calls.push('copy'); },
+      moveSheet: async () => { calls.push('move'); },
+      writeCells: async () => { calls.push('write'); },
+      discoverTemplateTargets: async () => {
+        calls.push('locate');
+        return { reportPeriod: 'B2', metrics: {}, agileProjects: {}, management: {} };
+      },
     },
     now: new Date('2026-07-13T01:00:00.000Z'),
   });
 
   assert.equal(result.reused, true);
   assert.equal(result.record.record_id, 'rec_week');
-  assert.equal(sheetCalls, 0);
+  assert.deepEqual(result.targets, { reportPeriod: 'B2', metrics: {}, agileProjects: {}, management: {} });
+  assert.deepEqual(calls, ['locate']);
 });
 
 test('returns reusable sheet metadata from an existing Base instance', async () => {
@@ -75,7 +121,9 @@ test('returns reusable sheet metadata from an existing Base instance', async () 
         },
       }),
     },
-    sheetWriter: {},
+    sheetWriter: {
+      discoverTemplateTargets: async () => ({ reportPeriod: 'B2', metrics: {}, agileProjects: {}, management: {} }),
+    },
     now: new Date('2026-07-13T01:00:00.000Z'),
   });
 
@@ -85,6 +133,118 @@ test('returns reusable sheet metadata from an existing Base instance', async () 
     reused: true, created: false,
   });
   assert.equal(result.instance.sheetUrl, 'https://example.invalid/sheets/sheet_token?sheet=week_29');
+});
+
+test('rejects Base reuse rows with blank spreadsheet token or sheet id before sheet operations', async () => {
+  for (const [label, spreadsheetToken, sheetId] of [
+    ['blank token', '', 'week_29'],
+    ['blank sheet id', 'sheet_token', ''],
+  ]) {
+    let writerCalls = 0;
+    await assert.rejects(
+      ensureWeeklyInstanceForGroup({
+        group: buildGroup(),
+        bitable: {
+          findWeeklyInstanceRecord: async () => ({
+            record_id: 'rec_incomplete',
+            fields: { SpreadsheetToken: spreadsheetToken, SheetID: sheetId },
+          }),
+        },
+        sheetWriter: {
+          discoverTemplateTargets: async () => { writerCalls += 1; },
+        },
+        now: new Date('2026-07-13T01:00:00.000Z'),
+      }),
+      error => error.weeklyInstanceStage === 'validate_reused_instance',
+      label,
+    );
+    assert.equal(writerCalls, 0, label);
+  }
+});
+
+test('rejects Base reuse matching a stale explicit workbook token before target discovery', async () => {
+  const group = buildGroup();
+  group.weeklySheet = { ...group.weeklySheet, spreadsheetToken: 'sheet_stale', wikiNodeToken: 'wiki_current' };
+  let discoveryCalls = 0;
+
+  await assert.rejects(
+    ensureWeeklyInstanceForGroup({
+      group,
+      bitable: {
+        findWeeklyInstanceRecord: async () => ({
+          record_id: 'rec_wrong_workbook',
+          fields: { SpreadsheetToken: 'sheet_stale', SheetID: 'week_29' },
+        }),
+      },
+      sheetWriter: {
+        resolveSheetConfig: async config => {
+          assert.equal(config.wikiNodeToken, 'wiki_current');
+          return { ...config, spreadsheetToken: 'sheet_current' };
+        },
+        discoverTemplateTargets: async () => { discoveryCalls += 1; },
+      },
+      now: new Date('2026-07-13T01:00:00.000Z'),
+    }),
+    error => error.weeklyInstanceStage === 'validate_reused_instance',
+  );
+  assert.equal(discoveryCalls, 0);
+});
+
+test('validates targets when Base reuse matches the wiki-resolved workbook token', async () => {
+  const group = buildGroup();
+  group.weeklySheet = { ...group.weeklySheet, spreadsheetToken: 'sheet_stale', wikiNodeToken: 'wiki_current' };
+  let discoveredConfig;
+
+  const result = await ensureWeeklyInstanceForGroup({
+    group,
+    bitable: {
+      findWeeklyInstanceRecord: async () => ({
+        record_id: 'rec_current_workbook',
+        fields: { SpreadsheetToken: 'sheet_current', SheetID: 'week_29', 工作表名称: '本周周报' },
+      }),
+    },
+    sheetWriter: {
+      resolveSheetConfig: async config => ({ ...config, spreadsheetToken: 'sheet_current' }),
+      discoverTemplateTargets: async config => {
+        discoveredConfig = config;
+        return { reportPeriod: 'B2', metrics: {}, agileProjects: {}, management: {} };
+      },
+    },
+    now: new Date('2026-07-13T01:00:00.000Z'),
+  });
+
+  assert.equal(result.reused, true);
+  assert.equal(result.sheet.spreadsheetToken, 'sheet_current');
+  assert.equal(discoveredConfig.spreadsheetToken, 'sheet_current');
+  assert.deepEqual(result.targets, { reportPeriod: 'B2', metrics: {}, agileProjects: {}, management: {} });
+});
+
+test('rejects a missing or corrupt persisted sheet while retaining the validation stage', async () => {
+  for (const [label, error] of [
+    ['missing physical sheet', new Error('sheet not found')],
+    ['corrupt semantic targets', new Error('missing report period target')],
+  ]) {
+    let writes = 0;
+    await assert.rejects(
+      ensureWeeklyInstanceForGroup({
+        group: buildGroup(),
+        bitable: {
+          findWeeklyInstanceRecord: async () => ({
+            record_id: 'rec_week',
+            fields: { SpreadsheetToken: 'sheet_token', SheetID: 'week_29' },
+          }),
+        },
+        sheetWriter: {
+          discoverTemplateTargets: async () => { throw error; },
+          writeCells: async () => { writes += 1; },
+        },
+        now: new Date('2026-07-13T01:00:00.000Z'),
+      }),
+      thrown => thrown === error && thrown.weeklyInstanceStage === 'validate_reused_sheet',
+      label,
+    );
+    assert.equal(writes, 0, label);
+  }
 });
 
 test('registers a sheet reused by title after an earlier Base write failure', async () => {
@@ -165,6 +325,19 @@ test('returns the original copy error after three failed attempts', async () => 
   }), error => error === originalError && error.weeklyInstanceStage === 'copy_sheet');
 
   assert.equal(attempts, 3);
+});
+
+test('marks a Base instance lookup failure with a stable stage', async () => {
+  const originalError = new Error('Base lookup failed');
+  await assert.rejects(
+    ensureWeeklyInstanceForGroup({
+      group: buildGroup(),
+      bitable: { findWeeklyInstanceRecord: async () => { throw originalError; } },
+      sheetWriter: {},
+      now: new Date('2026-07-13T01:00:00.000Z'),
+    }),
+    error => error === originalError && error.weeklyInstanceStage === 'find_existing_instance',
+  );
 });
 
 test('stages movement failures, avoids Base writes, and moves a recovered sheet before retrying Base', async () => {
@@ -269,6 +442,41 @@ test('processes configured groups sequentially and reports skipped groups', asyn
     undefined,
   ]);
   assert.deepEqual(order, ['find:已配置组']);
+});
+
+test('returns staged reuse validation failures from the all-groups workflow', async () => {
+  const groups = [
+    buildGroup({ project: 'blank' }),
+    buildGroup({ project: 'mismatch' }),
+    buildGroup({ project: 'missing' }),
+    buildGroup({ project: 'corrupt' }),
+  ];
+  const rows = {
+    blank: { SpreadsheetToken: '', SheetID: 'week_blank' },
+    mismatch: { SpreadsheetToken: 'sheet_other', SheetID: 'week_mismatch' },
+    missing: { SpreadsheetToken: 'sheet_token', SheetID: 'week_missing' },
+    corrupt: { SpreadsheetToken: 'sheet_token', SheetID: 'week_corrupt' },
+  };
+  const results = await ensureWeeklyInstancesForAllGroups({
+    config: { timezone: 'Asia/Shanghai', groups },
+    bitable: {
+      findWeeklyInstanceRecord: async group => ({ record_id: `rec_${group.project}`, fields: rows[group.project] }),
+    },
+    sheetWriter: {
+      discoverTemplateTargets: async (_config, sheetId) => {
+        if (sheetId === 'week_missing') throw new Error('physical sheet missing');
+        if (sheetId === 'week_corrupt') throw new Error('semantic targets corrupt');
+      },
+    },
+    now: new Date('2026-07-13T01:00:00.000Z'),
+  });
+
+  assert.deepEqual(results.map(result => result.error?.weeklyInstanceStage), [
+    'validate_reused_instance',
+    'validate_reused_instance',
+    'validate_reused_sheet',
+    'validate_reused_sheet',
+  ]);
 });
 
 function buildGroup({
