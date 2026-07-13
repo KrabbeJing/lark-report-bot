@@ -7,6 +7,7 @@
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "weekly:ensure": "node scripts/ensure-weekly-instance.js",
+    "daily-fact:backfill": "node scripts/backfill-daily-facts.js",
     "test": "node --test"
   },
   "dependencies": {

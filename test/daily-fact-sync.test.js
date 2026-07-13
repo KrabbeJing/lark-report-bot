@@ -46,3 +46,28 @@ test('syncs facts for each configured group', async () => {
   assert.equal(results[1].group, '板块2');
   assert.equal(results[1].created, 1);
 });
+
+test('forwards an explicit inclusive range and repair policy', async () => {
+  const calls = [];
+  await syncDailyFactsForAllGroups({
+    config: {
+      timezone: 'Asia/Shanghai',
+      dailyFactSync: { lookbackDays: 7 },
+      groups: [{ project: '板块1' }],
+    },
+    startDate: '2026-07-01',
+    endDate: '2026-07-12',
+    repairOrganization: true,
+    logger: { log() {}, error() {} },
+    bitable: {
+      syncDailyFactRecordsForGroup: async (group, options) => {
+        calls.push({ group, options });
+        return { created: 1, updated: 0 };
+      },
+    },
+  });
+
+  assert.equal(calls[0].options.startDate, '2026-07-01');
+  assert.equal(calls[0].options.endDate, '2026-07-12');
+  assert.equal(calls[0].options.repairOrganization, true);
+});

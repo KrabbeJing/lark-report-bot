@@ -3,6 +3,9 @@ export async function syncDailyFactsForAllGroups({
   bitable,
   now = new Date(),
   logger = console,
+  startDate,
+  endDate,
+  repairOrganization,
 }) {
   const results = [];
   for (const group of config.groups) {
@@ -11,6 +14,9 @@ export async function syncDailyFactsForAllGroups({
         now,
         timezone: config.dailyFactSync?.timezone || config.timezone,
         lookbackDays: config.dailyFactSync?.lookbackDays,
+        startDate,
+        endDate,
+        repairOrganization,
       });
       results.push({ group: group.project || group.chatId, ...result });
       logger.log('[daily-fact-sync] group result', {
