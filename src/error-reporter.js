@@ -13,7 +13,10 @@ export function sanitizeOperationalText(value) {
   return String(value || '')
     .replace(/\b(?:ou|oc|om|tbl|vew|rec)_[A-Za-z0-9_-]+\b/g, '[masked-id]')
     .replace(/\b(?:tbl|vew|rec)[A-Za-z0-9_-]{6,}\b/g, '[masked-id]')
-    .replace(/\b(appToken|app_token|tableId|table_id|sheetId|sheet_id|spreadsheetToken)\s*[=:]\s*[^\s,\]]+/gi, '$1=[masked]')
+    .replace(/(\/\b(?:base|sheets|wiki)\/)[^/?#\s]+/gi, '$1[masked]')
+    .replace(/([?&]sheet=)[^&#\s]+/gi, '$1[masked]')
+    .replace(/\b(appSecret|app_secret|appId|app_id|appToken|app_token|tableId|table_id|sheetId|sheet_id|spreadsheetToken|spreadsheet_token)\s*[=:]\s*[^\s,\]}]+/gi, '$1=[masked]')
+    .replace(/\b(?:bascn|shtcn)[A-Za-z0-9_-]+\b/gi, '[masked]')
     .replace(/Bearer\s+[^\s]+/gi, 'Bearer [masked]');
 }
 

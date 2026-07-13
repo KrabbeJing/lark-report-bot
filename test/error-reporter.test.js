@@ -207,3 +207,51 @@ test('masks Feishu IDs and credentials without retaining partial tokens', () => 
   assert.match(text, /appToken=\[masked\]/);
   assert.match(text, /Bearer \[masked\]/);
 });
+
+test('masks credential-bearing key variants without retaining partial values', () => {
+  const text = sanitizeOperationalText([
+    'appSecret=secret-one',
+    'app_secret:secret-two',
+    'APP_SECRET=secret-three',
+    'appId=cli_a1b2c3',
+    'app_id:cli_d4e5f6',
+    'spreadsheetToken=shtcn_sheet_one',
+    'spreadsheet_token=shtcn_sheet_two',
+    'app_token=bascn_base_one',
+    'table_id=tbl_table_one',
+    'sheet_id=sheet_one',
+  ].join(' '));
+
+  assert.doesNotMatch(text, /secret-one|secret-two|secret-three|cli_a1b2c3|cli_d4e5f6|shtcn_sheet_one|shtcn_sheet_two|bascn_base_one|tbl_table_one|sheet_one/);
+  assert.match(text, /appSecret=\[masked\]/);
+  assert.match(text, /app_secret=\[masked\]/);
+  assert.match(text, /APP_SECRET=\[masked\]/);
+  assert.match(text, /appId=\[masked\]/);
+  assert.match(text, /app_id=\[masked\]/);
+  assert.match(text, /spreadsheetToken=\[masked\]/);
+  assert.match(text, /spreadsheet_token=\[masked\]/);
+  assert.match(text, /app_token=\[masked\]/);
+  assert.match(text, /table_id=\[masked\]/);
+  assert.match(text, /sheet_id=\[masked\]/);
+});
+
+test('masks resource tokens in Base, spreadsheet, and wiki URLs while preserving URL context', () => {
+  const text = sanitizeOperationalText([
+    'base=https://example.feishu.cn/base/bascn_base_123?table=tbl_table_123&view=vew_view_123',
+    'sheet=https://example.feishu.cn/sheets/shtcn_sheet_123?sheet=sheet_123',
+    'wiki=https://example.feishu.cn/wiki/WikiNodeToken123?sheet=sheet_123',
+  ].join(' '));
+
+  assert.equal(text, [
+    'base=https://example.feishu.cn/base/[masked]?table=[masked-id]&view=[masked-id]',
+    'sheet=https://example.feishu.cn/sheets/[masked]?sheet=[masked]',
+    'wiki=https://example.feishu.cn/wiki/[masked]?sheet=[masked]',
+  ].join(' '));
+});
+
+test('masks known bare Base and spreadsheet token prefixes without masking ordinary prose', () => {
+  const text = sanitizeOperationalText('bascn_base_456 shtcn_sheet_456 basically spreadsheet appId is a field');
+
+  assert.doesNotMatch(text, /bascn_base_456|shtcn_sheet_456/);
+  assert.match(text, /\[masked\] \[masked\] basically spreadsheet appId is a field/);
+});
