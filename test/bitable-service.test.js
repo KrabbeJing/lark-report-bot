@@ -470,6 +470,66 @@ test('does not use group agileGroup when contact matching fails', () => {
   assert.equal(fields['事实记录状态'], '待人工确认');
 });
 
+test('continues unmatched contact fallbacks without logging report identities or error bodies', async t => {
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => warnings.push(args);
+  t.after(() => { console.warn = originalWarn; });
+
+  const report = {
+    reporterName: '提交人-raw-report-body',
+    senderOpenId: 'ou_sender_secret',
+    rawText: 'raw report body: confidential daily report',
+  };
+  const error = new Error('raw report body: rec_error_secret ou_error_secret oc_error_secret bascnErrorSecret table_id=tbl_error_secret wiki/WikiNodeSecret');
+  error.response = {
+    data: {
+      code: 'contact_lookup_failed',
+      msg: 'raw report body: rec_error_secret ou_error_secret oc_error_secret bascnErrorSecret table_id=tbl_error_secret wiki/WikiNodeSecret',
+    },
+  };
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_group_secret',
+      dailyFactTable: { appToken: 'bascnTableSecret', tableId: 'tbl_fact_secret' },
+    }],
+  }).groups[0];
+  let buildContext;
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        create: async payload => ({ data: { record: { record_id: 'rec_created', fields: payload.data.fields } } }),
+      },
+    },
+  });
+  service.findTeamContact = async () => { throw error; };
+  service.findDailyFactRecordBySourceRecordId = async () => null;
+  service.buildDailyRecordFields = (_group, _report, context) => {
+    buildContext = context;
+    return { '事实唯一键': 'safe-key' };
+  };
+
+  const contact = await service.findTeamContactForReport(group, report, 'rec_source_secret');
+  const result = await service.upsertDailyFactRecordFromSource(group, {
+    record_id: 'rec_source_secret',
+  }, report);
+
+  assert.equal(contact, null);
+  assert.equal(result.created, true);
+  assert.equal(buildContext.contact, null);
+  assert.deepEqual(warnings, [
+    ['[daily-fact-sync] contact lookup failed; continue unmatched', { code: 'contact_lookup_failed' }],
+    ['[daily-fact-sync] contact lookup failed; continue unmatched', { code: 'contact_lookup_failed' }],
+  ]);
+  const serialized = JSON.stringify(warnings);
+  for (const secret of [
+    'rec_source_secret', 'ou_sender_secret', 'oc_group_secret', 'bascnTableSecret',
+    'tbl_fact_secret', 'WikiNodeSecret', 'raw report body', '提交人-raw-report-body',
+  ]) {
+    assert.doesNotMatch(serialized, new RegExp(secret));
+  }
+});
+
 test('ordinary upsert preserves an existing matched organization snapshot', async () => {
   const { service, group, existingRecord, input, getUpdatePayload } = buildOrganizationUpsertFixture();
   await service.upsertDailyFactRecord(group, input, { existingRecord });
@@ -496,6 +556,21 @@ test('organization repair replaces a matched snapshot from contact', async () =>
   assert.equal(fields['敏捷小组'], '收单项目组');
   assert.deepEqual(fields['直属上级'], [{ id: 'ou_new_mgr', name: '新上级' }]);
   assert.deepEqual(fields['分管领导'], [{ id: 'ou_new_leader', name: '新领导' }]);
+});
+
+test('organization repair retains an existing divisional leader when the matched contact has no leader', async () => {
+  const { service, group, existingRecord, input, getUpdatePayload } = buildOrganizationUpsertFixture();
+  input.contact.divisionalLeader = '';
+  input.contact.divisionalLeaderOpenId = '';
+
+  await service.upsertDailyFactRecord(group, input, {
+    existingRecord,
+    repairOrganization: true,
+  });
+
+  const fields = getUpdatePayload().data.fields;
+  assert.notDeepEqual(fields['分管领导'], []);
+  assert.equal(fields['分管领导'], undefined);
 });
 
 test('clears existing organization user fields when a fact is unmatched', async () => {

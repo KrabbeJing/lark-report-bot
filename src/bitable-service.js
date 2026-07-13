@@ -2,6 +2,7 @@ import { WEEKLY_FIELD_KEYS, tableIsConfigured } from './config.js';
 import { DEFAULT_TIMEZONE, addDaysToYmd, formatDateTime, formatYmd, parseYmd } from './date-utils.js';
 import { buildContentFingerprint, buildFactKey, buildSourceRefs } from './daily-record-utils.js';
 import { resolveIncrementalDailyFact } from './daily-fact-resolution.js';
+import { sanitizeOperationalText } from './error-reporter.js';
 import { resolveOrganizationSnapshot } from './organization-snapshot.js';
 
 export class BitableService {
@@ -450,12 +451,7 @@ export class BitableService {
         senderOpenId: report.senderOpenId,
       });
     } catch (err) {
-      console.warn('[daily-fact-sync] contact lookup failed; continue unmatched', {
-        sourceRecordId,
-        reporterName: report.reporterName,
-        code: err?.response?.data?.code || err?.code,
-        msg: err?.response?.data?.msg || err?.message,
-      });
+      logContactLookupFallback(err);
       return null;
     }
   }
@@ -472,12 +468,7 @@ export class BitableService {
         senderOpenId: report.senderOpenId,
       });
     } catch (err) {
-      console.warn('[daily-fact-sync] contact lookup failed; continue unmatched', {
-        sourceRecordId,
-        reporterName: report.reporterName,
-        code: err?.response?.data?.code || err?.code,
-        msg: err?.response?.data?.msg || err?.message,
-      });
+      logContactLookupFallback(err);
     }
     const fields = this.buildDailyRecordFields(group, report, {
       table,
@@ -1361,6 +1352,14 @@ function findBestContact(contacts, { reporterName = '', senderOpenId = '' } = {}
   }
 
   return null;
+}
+
+function logContactLookupFallback(err) {
+  const candidate = err?.response?.data?.code ?? err?.code ?? '';
+  const code = /^[A-Za-z0-9_.:-]{1,64}$/.test(String(candidate))
+    ? sanitizeOperationalText(candidate)
+    : '';
+  console.warn('[daily-fact-sync] contact lookup failed; continue unmatched', { code });
 }
 
 function normalizePersonValue(value) {

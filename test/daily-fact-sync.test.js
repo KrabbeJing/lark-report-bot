@@ -96,6 +96,63 @@ test('reports one aggregated failure for record errors in a group', async () => 
   assert.equal(alerts[0].errors.length, 2);
 });
 
+test('logs only a sanitized summary when a successful group returns record errors', async () => {
+  const logs = [];
+  const alerts = [];
+  const recordError = new Error('raw report body: completed confidential work for oc_secret rec_secret sheet_token_should_not_leak');
+  recordError.response = { data: { msg: 'bascnSecret table_id=tbl_secret wiki/WikiNodeSecret raw report body' } };
+
+  await syncDailyFactsForAllGroups({
+    config: {
+      timezone: 'Asia/Shanghai',
+      dailyFactSync: { lookbackDays: 7 },
+      groups: [{ chatId: 'oc_secret', project: 'sheet_token_should_not_leak' }],
+    },
+    bitable: {
+      syncDailyFactRecordsForGroup: async () => ({ created: 1, updated: 2, errors: [recordError] }),
+    },
+    notifyFailure: async alert => alerts.push(alert),
+    logger: { log: (...args) => logs.push(args), error() {} },
+  });
+
+  const serialized = JSON.stringify(logs);
+  assert.equal(logs.length, 1);
+  assert.equal(logs[0][1].stage, 'write_daily_fact');
+  assert.equal(logs[0][1].failureCount, 1);
+  for (const secret of ['oc_secret', 'rec_secret', 'sheet_token_should_not_leak', 'bascnSecret', 'tbl_secret', 'WikiNodeSecret', 'raw report body']) {
+    assert.doesNotMatch(serialized, new RegExp(secret));
+  }
+  assert.equal(alerts[0].errors[0], recordError);
+});
+
+test('logs only a sanitized summary when a group throws and preserves the original notification error', async () => {
+  const errors = [];
+  const alerts = [];
+  const terminalError = new Error('raw report body: completed confidential work for oc_secret rec_secret sheet_token_should_not_leak');
+  terminalError.response = { data: { msg: 'bascnSecret table_id=tbl_secret wiki/WikiNodeSecret raw report body' } };
+
+  const results = await syncDailyFactsForAllGroups({
+    config: {
+      timezone: 'Asia/Shanghai',
+      dailyFactSync: { lookbackDays: 7 },
+      groups: [{ chatId: 'oc_secret', project: 'sheet_token_should_not_leak' }],
+    },
+    bitable: { syncDailyFactRecordsForGroup: async () => { throw terminalError; } },
+    notifyFailure: async alert => alerts.push(alert),
+    logger: { log() {}, error: (...args) => errors.push(args) },
+  });
+
+  const serialized = JSON.stringify(errors);
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0][1].stage, 'sync_group');
+  assert.equal(errors[0][1].failureCount, 1);
+  for (const secret of ['oc_secret', 'rec_secret', 'sheet_token_should_not_leak', 'bascnSecret', 'tbl_secret', 'WikiNodeSecret', 'raw report body']) {
+    assert.doesNotMatch(serialized, new RegExp(secret));
+  }
+  assert.equal(results[0].error, terminalError);
+  assert.equal(alerts[0].errors[0], terminalError);
+});
+
 test('continues after a returned-error notification rejection without duplicating the daily fact result', async () => {
   const alertAttempts = [];
   const operationOrder = [];

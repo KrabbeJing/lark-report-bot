@@ -169,6 +169,22 @@ export class WeeklySheetWriter {
         tool_name: 'modify_workbook_structure',
       },
     });
+
+    for (const code of [response?.code, response?.data?.code]) {
+      if (code != null && String(code) !== '0') {
+        throw new Error(`周报工作表移动失败：业务响应 code=${String(code).slice(0, 32)}`);
+      }
+    }
+
+    const verifiedSheet = (await this.listSheets(resolvedConfig.spreadsheetToken))
+      .find(sheet => sheet.sheetId === sheetId);
+    const verifiedIndex = Number.isInteger(verifiedSheet?.index)
+      ? verifiedSheet.index
+      : -1;
+    if (verifiedIndex !== targetIndex) {
+      throw new Error(`周报工作表移动后位置未确认：目标位置 ${targetIndex}`);
+    }
+
     return { moved: true, targetIndex, sourceIndex: currentIndex, response };
   }
 

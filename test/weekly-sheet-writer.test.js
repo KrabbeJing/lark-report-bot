@@ -116,6 +116,7 @@ test('uses the Friday MMDD title default through the public writer path', async 
 
 test('moves a sheet to workbook index zero with the verified sheet_ai payload', async () => {
   const calls = [];
+  let sheetListReads = 0;
   const writer = new WeeklySheetWriter({
     request: async payload => {
       calls.push(payload);
@@ -123,12 +124,21 @@ test('moves a sheet to workbook index zero with the verified sheet_ai payload', 
         return { data: { node: { obj_type: 'sheet', obj_token: 'sheet_token' } } };
       }
       if (payload.url.includes('/sheets/query')) {
+        sheetListReads += 1;
         return {
           data: {
             sheets: [
-              { sheet_id: 'template', title: '模板', index: 0 },
-              { sheet_id: 'other', title: '其他', index: 1 },
-              { sheet_id: 'week_28', title: '数字金融部周报0710', index: 2 },
+              ...(sheetListReads === 1
+                ? [
+                  { sheet_id: 'template', title: '模板', index: 0 },
+                  { sheet_id: 'other', title: '其他', index: 1 },
+                  { sheet_id: 'week_28', title: '数字金融部周报0710', index: 2 },
+                ]
+                : [
+                  { sheet_id: 'week_28', title: '数字金融部周报0710', index: 0 },
+                  { sheet_id: 'template', title: '模板', index: 1 },
+                  { sheet_id: 'other', title: '其他', index: 2 },
+                ]),
             ],
           },
         };
@@ -145,7 +155,8 @@ test('moves a sheet to workbook index zero with the verified sheet_ai payload', 
     sourceIndex: 2,
     response: { data: {} },
   });
-  assert.deepEqual(calls.at(-1), {
+  assert.equal(sheetListReads, 2);
+  assert.deepEqual(calls.find(call => call.method === 'POST'), {
     method: 'POST',
     url: '/open-apis/sheet_ai/v2/spreadsheets/sheet_token/tools/invoke_write',
     data: {
@@ -159,6 +170,69 @@ test('moves a sheet to workbook index zero with the verified sheet_ai payload', 
       tool_name: 'modify_workbook_structure',
     },
   });
+});
+
+test('rejects a top-level nonzero sheet move business code without exposing tokens', async () => {
+  const writer = new WeeklySheetWriter({
+    request: async payload => {
+      if (payload.url.includes('/sheets/query')) {
+        return { data: { sheets: [{ sheet_id: 'week_secret', title: '周报', index: 2 }] } };
+      }
+      return { code: 99991663, data: { msg: 'sheet_token_should_not_leak' } };
+    },
+  });
+
+  await assert.rejects(
+    writer.moveSheet({ spreadsheetToken: 'sheet_token_should_not_leak' }, 'week_secret', 0),
+    error => {
+      assert.match(error.message, /周报工作表移动失败/);
+      assert.doesNotMatch(error.message, /sheet_token_should_not_leak|week_secret/);
+      return true;
+    },
+  );
+});
+
+test('rejects a nested nonzero sheet move business code without exposing tokens', async () => {
+  const writer = new WeeklySheetWriter({
+    request: async payload => {
+      if (payload.url.includes('/sheets/query')) {
+        return { data: { sheets: [{ sheet_id: 'week_secret', title: '周报', index: 2 }] } };
+      }
+      return { data: { code: 99991663, msg: 'sheet_token_should_not_leak' } };
+    },
+  });
+
+  await assert.rejects(
+    writer.moveSheet({ spreadsheetToken: 'sheet_token_should_not_leak' }, 'week_secret', 0),
+    error => {
+      assert.match(error.message, /周报工作表移动失败/);
+      assert.doesNotMatch(error.message, /sheet_token_should_not_leak|week_secret/);
+      return true;
+    },
+  );
+});
+
+test('rejects a successful move response when the follow-up sheet list keeps the old index', async () => {
+  let sheetListReads = 0;
+  const writer = new WeeklySheetWriter({
+    request: async payload => {
+      if (payload.url.includes('/sheets/query')) {
+        sheetListReads += 1;
+        return { data: { sheets: [{ sheet_id: 'week_secret', title: '周报', index: 2 }] } };
+      }
+      return { data: {} };
+    },
+  });
+
+  await assert.rejects(
+    writer.moveSheet({ spreadsheetToken: 'sheet_token_should_not_leak' }, 'week_secret', 0),
+    error => {
+      assert.match(error.message, /移动后位置未确认/);
+      assert.doesNotMatch(error.message, /sheet_token_should_not_leak|week_secret/);
+      return true;
+    },
+  );
+  assert.equal(sheetListReads, 2);
 });
 
 test('does not invoke a write when the sheet is already at the target index', async () => {

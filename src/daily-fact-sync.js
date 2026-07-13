@@ -1,3 +1,5 @@
+import { sanitizeOperationalText } from './error-reporter.js';
+
 export async function syncDailyFactsForAllGroups({
   config,
   bitable,
@@ -23,8 +25,14 @@ export async function syncDailyFactsForAllGroups({
       });
       results.push({ group: scope, ...result });
       logger.log('[daily-fact-sync] group result', {
-        group: scope,
-        ...result,
+        task: sanitizeOperationalText('日报事实同步'),
+        scope: sanitizeDailyFactScope(scope),
+        stage: result.errors?.length ? 'write_daily_fact' : 'sync_group',
+        created: safeCount(result.created),
+        updated: safeCount(result.updated),
+        unchanged: safeCount(result.unchanged),
+        failureCount: safeCount(result.errors?.length),
+        message: sanitizeOperationalText(result.errors?.length ? '日报事实写入存在记录错误' : '日报事实同步完成'),
       });
       if (result.errors?.length) {
         alert = {
@@ -42,7 +50,13 @@ export async function syncDailyFactsForAllGroups({
         error: err,
       };
       results.push(failure);
-      logger.error('[daily-fact-sync] group failed', failure);
+      logger.error('[daily-fact-sync] group failed', {
+        task: sanitizeOperationalText('日报事实同步'),
+        scope: sanitizeDailyFactScope(scope),
+        stage: 'sync_group',
+        failureCount: 1,
+        message: sanitizeOperationalText('日报事实同步失败'),
+      });
       alert = {
         task: '日报事实同步',
         scope,
@@ -62,4 +76,14 @@ export async function syncDailyFactsForAllGroups({
     }
   }
   return results;
+}
+
+function safeCount(value) {
+  return Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+function sanitizeDailyFactScope(value) {
+  return sanitizeOperationalText(value)
+    .replace(/\b(?:base|sheet|wiki)[_-][A-Za-z0-9_-]+\b/gi, '[masked-id]')
+    .replace(/\bwiki(?:node)?[A-Za-z0-9_-]{6,}\b/gi, '[masked-id]');
 }
