@@ -68,6 +68,7 @@ test('builds configured weekly sheet cell values from daily reports', () => {
         reportDate: '2026-06-26',
         reporterName: '王秀男',
         project: '收单项目组',
+        agileGroup: '收单项目组',
         workItems: [
           '与银联沟通银联代收业务场景限额调整问题',
           '协助反洗钱查询POS交易对手方开户行信息缺失问题，讨论优化方案',
@@ -79,6 +80,7 @@ test('builds configured weekly sheet cell values from daily reports', () => {
         reportDate: '2026-06-24',
         reporterName: '李阜彦',
         project: '线上营业厅项目组',
+        agileGroup: '线上营业厅项目组',
         workItems: [
           '撰写对公线上营业厅项目组汇报材料',
           '完成对公线上营业厅项目组周报',
@@ -95,6 +97,28 @@ test('builds configured weekly sheet cell values from daily reports', () => {
   assert.match(result.values.C30, /李阜彦/);
   assert.match(result.values.C31, /新核心测试/);
   assert.match(result.values.C57, /反洗钱/);
+});
+
+test('groups agile weekly content only by fact agileGroup', () => {
+  const result = buildWeeklySheetValues({
+    group: { project: '分管领导群', agileGroup: '融羲项目组' },
+    reports: [{
+      reporterName: '甲',
+      agileGroup: '收单项目组',
+      workItems: ['讨论融羲项目但本人属于收单项目组'],
+      tomorrowPlanItems: [],
+      riskItems: [],
+    }],
+    cellMap: {
+      agileProjects: {
+        融羲项目组: { current: 'C1', next: 'C2', aliases: [] },
+        收单项目组: { current: 'C3', next: 'C4', aliases: [] },
+      },
+      management: {},
+    },
+  });
+  assert.equal(result.values.C1, '');
+  assert.match(result.values.C3, /讨论融羲项目/);
 });
 
 test('exposes the full configured cell list', () => {

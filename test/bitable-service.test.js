@@ -9,7 +9,6 @@ function createGroup() {
     groups: [{
       chatId: 'oc_test',
       project: '支付平台',
-      agileGroup: 'A组',
       dailyTable: {
         appToken: 'bas_test',
         tableId: 'tbl_daily',
@@ -51,6 +50,11 @@ test('builds daily record fields using configured field names', () => {
     senderOpenId: 'ou_1',
     source: 'chat',
     messageTimeText: '2026/06/26 10:00:00',
+    contact: {
+      teamMember: '王治坤',
+      teamMemberId: 'ou_1',
+      matchingStatus: '已匹配',
+    },
   });
 
   assert.equal(fields['所属板块'], '支付平台');
@@ -209,6 +213,11 @@ test('creates chat daily records in fact table when configured', async () => {
   }, {
     messageId: 'om_1',
     senderOpenId: 'ou_liu',
+    contact: {
+      teamMember: '刘喜双',
+      teamMemberId: 'ou_liu',
+      matchingStatus: '已匹配',
+    },
   });
 
   assert.equal(result.created, true);
@@ -301,6 +310,11 @@ test('reconciles form and chat sources with form priority and conflict status', 
     sourceRecordId: 'rec_form',
     messageId: 'om_chat',
     existingChatFingerprint: 'chat-fingerprint',
+    contact: {
+      teamMember: '刘喜双',
+      teamMemberId: 'ou_liu',
+      matchingStatus: '已匹配',
+    },
   });
 
   assert.equal(result.updated, true);
@@ -420,7 +434,131 @@ test('preserves an ignored fact when a newer source is synchronized', async () =
   assert.equal(updatePayload.data.fields['事实记录状态'], '忽略');
   assert.equal(updatePayload.data.fields['有效来源'], 'form');
   assert.equal(updatePayload.data.fields['今日工作总结'], '1、新内容');
+
+  await service.upsertDailyFactRecord(group, {
+    factKey: 'open_id:ou_liu:2026-07-01',
+    reportDate: '2026-07-01',
+    reporterName: '刘喜双',
+    memberOpenId: 'ou_liu',
+    workSummaryText: '1、修复后的新内容',
+    source: 'form',
+    sourceTime: 3000,
+    sourceRecordId: 'rec_form',
+  }, { existingRecord, repairOrganization: true });
+
+  assert.equal(updatePayload.data.fields['事实记录状态'], '忽略');
 });
+
+test('does not use group agileGroup when contact matching fails', () => {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      project: '分管领导群',
+      agileGroup: '错误群级敏捷组',
+      dailyFactTable: { appToken: 'bas', tableId: 'tbl_fact' },
+    }],
+  }).groups[0];
+  const service = new BitableService({});
+  const fields = service.buildDailyRecordFields(group, {
+    reportDate: '2026-07-10',
+    reporterName: '群聊标题姓名',
+    workItems: [],
+  }, { contact: null, source: 'chat' });
+  assert.equal(fields['日报提交人姓名'], '');
+  assert.equal(fields['敏捷小组'], '');
+  assert.equal(fields['直属上级'], undefined);
+  assert.equal(fields['事实记录状态'], '待人工确认');
+});
+
+test('ordinary upsert preserves an existing matched organization snapshot', async () => {
+  const { service, group, existingRecord, input, getUpdatePayload } = buildOrganizationUpsertFixture();
+  await service.upsertDailyFactRecord(group, input, { existingRecord });
+  const fields = getUpdatePayload().data.fields;
+  assert.equal(fields['日报提交人姓名'], '历史姓名');
+  assert.equal(fields['敏捷小组'], '历史敏捷组');
+  assert.deepEqual(fields['直属上级'], [{ id: 'ou_old_mgr', name: '历史上级' }]);
+  assert.deepEqual(fields['分管领导'], [{ id: 'ou_old_leader', name: '历史领导' }]);
+  assert.equal(fields['今日工作总结'], '更新后的日报内容');
+});
+
+test('organization repair replaces a matched snapshot from contact', async () => {
+  const { service, group, existingRecord, input, getUpdatePayload } = buildOrganizationUpsertFixture();
+  await service.upsertDailyFactRecord(group, input, {
+    existingRecord,
+    repairOrganization: true,
+  });
+  const fields = getUpdatePayload().data.fields;
+  assert.equal(fields['日报提交人姓名'], '刘喜双');
+  assert.equal(fields['敏捷小组'], '收单项目组');
+  assert.deepEqual(fields['直属上级'], [{ id: 'ou_new_mgr', name: '新上级' }]);
+  assert.deepEqual(fields['分管领导'], [{ id: 'ou_new_leader', name: '新领导' }]);
+});
+
+function buildOrganizationUpsertFixture() {
+  let updatePayload;
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      dailyFactTable: {
+        appToken: 'bas_test',
+        tableId: 'tbl_fact',
+        fieldTypes: {
+          reporterName: 'user', supervisor: 'user', divisionalLeader: 'user',
+          reportDate: 'date', sourceTime: 'datetime', syncedAt: 'datetime',
+        },
+      },
+    }],
+  }).groups[0];
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        update: async payload => {
+          updatePayload = payload;
+          return { data: { record: { record_id: 'rec_fact', fields: payload.data.fields } } };
+        },
+      },
+    },
+  });
+  const existingRecord = {
+    record_id: 'rec_fact',
+    fields: {
+      事实唯一键: 'open_id:ou_member:2026-07-10',
+      日报日期: Date.UTC(2026, 6, 10),
+      日报提交人姓名: '历史姓名',
+      实际日报提交人: [{ id: 'ou_member', name: '历史姓名' }],
+      成员OpenID: 'ou_member',
+      敏捷小组: '历史敏捷组',
+      直属上级: [{ id: 'ou_old_mgr', name: '历史上级' }],
+      分管领导: [{ id: 'ou_old_leader', name: '历史领导' }],
+      匹配状态: '已匹配',
+      匹配方式: 'open_id',
+      今日工作总结: '旧日报内容',
+      内容指纹: 'old-fingerprint',
+      日报来源: 'chat',
+      来源时间: Date.UTC(2026, 6, 10, 1),
+      事实记录状态: '有效',
+    },
+  };
+  const input = {
+    factKey: 'open_id:ou_member:2026-07-10',
+    reportDate: '2026-07-10',
+    source: 'chat',
+    sourceTime: Date.UTC(2026, 6, 10, 2),
+    workSummaryText: '更新后的日报内容',
+    contact: {
+      teamMember: '刘喜双',
+      teamMemberId: 'ou_member',
+      agileGroup: '收单项目组',
+      supervisor: '新上级',
+      supervisorOpenId: 'ou_new_mgr',
+      divisionalLeader: '新领导',
+      divisionalLeaderOpenId: 'ou_new_leader',
+      matchingStatus: '已匹配',
+      matchMethod: 'open_id',
+    },
+  };
+  return { service, group, existingRecord, input, getUpdatePayload: () => updatePayload };
+}
 
 test('marks same-content form and chat facts as duplicate merged without conflict', async () => {
   const group = normalizeConfig({
@@ -511,6 +649,11 @@ test('marks same-content form and chat facts as duplicate merged without conflic
     riskItems: '3、相同风险',
     source: 'form',
     sourceRecordId: 'rec_form',
+    contact: {
+      teamMember: '刘喜双',
+      teamMemberId: 'ou_liu',
+      matchingStatus: '已匹配',
+    },
   });
 
   assert.equal(result.updated, true);
@@ -783,6 +926,11 @@ test('writes reporter user field from member open id for daily fact upsert', asy
     workSummaryText: '1、群聊内容',
     source: 'chat',
     messageId: 'om_chat',
+    contact: {
+      teamMember: '刘喜双',
+      teamMemberId: 'ou_liu',
+      matchingStatus: '已匹配',
+    },
   });
 
   assert.equal(result.created, true);
@@ -1277,8 +1425,11 @@ test('writes only configured daily fields and preserves numbered summary text', 
   }, {
     senderOpenId: 'ou_liu',
     contact: {
+      teamMember: '刘喜双',
+      teamMemberId: 'ou_liu',
       supervisor: '王经理',
       supervisorOpenId: 'ou_mgr',
+      matchingStatus: '已匹配',
     },
   });
 

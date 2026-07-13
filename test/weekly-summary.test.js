@@ -4,7 +4,7 @@ import { buildWeeklySummary } from '../src/weekly-summary.js';
 
 test('builds project weekly summary from daily reports', () => {
   const summary = buildWeeklySummary({
-    group: { project: '支付平台', agileGroup: 'A组', chatId: 'oc_test' },
+    group: { project: '支付平台', chatId: 'oc_test' },
     weekStart: '2026-06-22',
     weekEnd: '2026-06-26',
     reports: [
@@ -29,5 +29,6 @@ test('builds project weekly summary from daily reports', () => {
   assert.equal(summary.memberCount, 2);
   assert.equal(summary.itemCount, 3);
   assert.equal(summary.riskItems.length, 1);
+  assert.equal(Object.hasOwn(summary, 'agileGroup'), false);
   assert.match(summary.summaryText, /支付平台本周共收集 2 份日报/);
 });

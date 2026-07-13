@@ -180,11 +180,12 @@ export function normalizeConfig(raw) {
 
   const groups = (raw.groups || [])
     .filter(group => group.enabled !== false)
-    .map(group => ({
-      ...group,
+    .map(group => {
+      const { agileGroup: _agileGroup, ...normalizedGroup } = group;
+      return {
+      ...normalizedGroup,
       pushChatId: group.pushChatId || group.chatId,
       project: group.project || group.name || group.chatId,
-      agileGroup: group.agileGroup || '',
       dailyTable: normalizeTableConfig(group.dailyTable, DAILY_FIELD_KEYS),
       chatDailyRawTable: normalizeTableConfig(group.chatDailyRawTable || group.chat_daily_raw_table, CHAT_DAILY_RAW_FIELD_KEYS),
       dailyFactTable: normalizeTableConfig(group.dailyFactTable || group.daily_fact_table, DAILY_FACT_FIELD_KEYS),
@@ -195,7 +196,8 @@ export function normalizeConfig(raw) {
         WEEKLY_INSTANCE_FIELD_KEYS,
       ),
       weeklySheet: normalizeWeeklySheetConfig(group.weeklySheet || raw.weeklySheet),
-    }));
+      };
+    });
 
   return {
     timezone,

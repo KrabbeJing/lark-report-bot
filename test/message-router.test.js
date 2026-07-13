@@ -8,7 +8,6 @@ test('routes high-confidence daily report into bitable service', async () => {
     groups: [{
       chatId: 'oc_test',
       project: '支付平台',
-      agileGroup: 'A组',
       chatDailyRawTable: { appToken: 'bas_test', tableId: 'tbl_raw' },
       dailyFactTable: { appToken: 'bas_test', tableId: 'tbl_fact' },
       weeklyTable: { appToken: 'bas_test', tableId: 'tbl_weekly' },

@@ -48,6 +48,7 @@ test('generates weekly sheet instead of image when weeklySheet is enabled', asyn
         reportDate: '2026-06-26',
         reporterName: '王秀男',
         project: '收单项目组',
+        agileGroup: '收单项目组',
         workItems: ['与银联沟通银联代收业务场景限额调整问题'],
         tomorrowPlanItems: ['继续推进银联限额调整方案确认'],
         riskItems: [],

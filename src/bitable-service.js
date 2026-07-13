@@ -2,6 +2,7 @@ import { WEEKLY_FIELD_KEYS, tableIsConfigured } from './config.js';
 import { DEFAULT_TIMEZONE, addDaysToYmd, formatDateTime, formatYmd, parseYmd } from './date-utils.js';
 import { buildContentFingerprint, buildFactKey, buildSourceRefs } from './daily-record-utils.js';
 import { resolveIncrementalDailyFact } from './daily-fact-resolution.js';
+import { resolveOrganizationSnapshot } from './organization-snapshot.js';
 
 export class BitableService {
   constructor(client) {
@@ -36,9 +37,14 @@ export class BitableService {
 
   buildDailyRecordFields(group, report, context = {}) {
     const table = context.table || getDailyWriteTable(group);
-    const contact = context.contact || {};
-    const reporterDisplayName = contact.teamMember || report.reporterName || '';
-    const reporterOpenId = contact.teamMemberId || context.senderOpenId || '';
+    const contact = context.contact || null;
+    const existingFields = context.existingRecord?.fields || {};
+    const organization = resolveOrganizationSnapshot({
+      contact,
+      existingSnapshot: normalizeExistingOrganizationSnapshot(existingFields, table.fields),
+      repairOrganization: context.repairOrganization === true,
+    });
+    const snapshot = organization.snapshot;
     const recordFields = {};
     const setDailyField = (key, value, fieldContext = context) => {
       if (!shouldWriteDailyField(table, key)) return;
@@ -48,31 +54,42 @@ export class BitableService {
     setDailyField('sourceRecordId', context.sourceRecordId || '');
     setDailyField('messageId', context.messageId || '');
     setDailyField('chatId', context.chatId || group.chatId || '');
-    setDailyField('project', contact.teamName || group.project || '');
-    setDailyField('agileGroup', contact.agileGroup || group.agileGroup || '');
+    setDailyField('project', contact?.teamName || group.project || '');
+    setDailyField('agileGroup', snapshot.agileGroup);
     setDailyField('reportDate', report.reportDate || '');
-    setDailyField('reporterName', reporterDisplayName, {
+    setDailyField('reporterName', snapshot.reporterNameText, {
       ...context,
-      senderOpenId: reporterOpenId,
+      senderOpenId: snapshot.memberOpenId,
     });
-    setDailyField('reporterNameText', reporterDisplayName);
-    setDailyField('senderOpenId', reporterOpenId);
+    setDailyField('reporterNameText', snapshot.reporterNameText);
+    setDailyField('memberOpenId', snapshot.memberOpenId);
+    setDailyField('senderOpenId', context.senderOpenId || snapshot.memberOpenId);
     setDailyField('rawText', report.rawText || '');
     setDailyField('workItems', report.workSummaryText || report.workItems || []);
     setDailyField('tomorrowPlanItems', report.tomorrowPlanItems || []);
     setDailyField('riskItems', report.riskItems || []);
     setDailyField('aiSummary', buildDailyAiSummary(report));
-    setDailyField('supervisor', contact.supervisor || '', {
-      ...context,
-      supervisorOpenId: contact.supervisorOpenId || '',
-    });
-    setDailyField('divisionalLeader', contact.divisionalLeader || '', {
-      ...context,
-      divisionalLeaderOpenId: contact.divisionalLeaderOpenId || '',
-    });
+    if (snapshot.supervisor || existingFields[table.fields.supervisor] !== undefined) {
+      setDailyField('supervisor', snapshot.supervisor, {
+        ...context,
+        supervisorOpenId: snapshot.supervisorOpenId,
+      });
+    }
+    if (snapshot.divisionalLeader || existingFields[table.fields.divisionalLeader] !== undefined) {
+      setDailyField('divisionalLeader', snapshot.divisionalLeader, {
+        ...context,
+        divisionalLeaderOpenId: snapshot.divisionalLeaderOpenId,
+      });
+    }
     setDailyField('source', context.source || 'chat');
     setDailyField('parseStatus', report.highConfidence ? 'parsed' : 'low_confidence');
-    setDailyField('matchingStatus', context.matchingStatus || contact.matchingStatus || '');
+    setDailyField('matchingStatus', snapshot.matchingStatus);
+    setDailyField('matchMethod', snapshot.matchMethod);
+    const existingFactStatus = normalizeFieldValue(existingFields[table.fields.factStatus]);
+    const factStatus = existingFactStatus === '忽略'
+      ? '忽略'
+      : organization.matched ? context.factStatus || '有效' : '待人工确认';
+    setDailyField('factStatus', factStatus);
     setDailyField('messageTime', context.messageTimeText || '');
     setDailyField('syncedAt', context.syncedAtText || '');
 
@@ -276,13 +293,14 @@ export class BitableService {
           riskItems: report.riskItems,
           rawText: report.rawText,
           project: contact?.teamName || report.project || group.project || '',
-          agileGroup: contact?.agileGroup || report.agileGroup || group.agileGroup || '',
+          agileGroup: contact?.agileGroup || report.agileGroup || '',
           supervisor: contact?.supervisor || report.supervisor || '',
           supervisorOpenId: contact?.supervisorOpenId || report.supervisorOpenId || '',
           divisionalLeader: contact?.divisionalLeader || '',
           divisionalLeaderOpenId: contact?.divisionalLeaderOpenId || '',
           matchingStatus: contact?.matchingStatus || '未匹配',
           matchMethod: contact?.matchMethod || '',
+          contact,
           messageId: report.messageId,
           chatId: report.chatId,
           messageTime: report.messageTime,
@@ -291,6 +309,7 @@ export class BitableService {
         };
         const result = await this.upsertDailyFactRecord(group, input, {
           existingRecord: targetByFactKey.get(input.factKey),
+          repairOrganization: options.repairOrganization === true,
         });
         updateFactRecordIndex(targetByFactKey, input.factKey, result.record, result.fields);
         sourceCounts.formFacts += 1;
@@ -366,6 +385,7 @@ export class BitableService {
           };
           const result = await this.upsertDailyFactRecord(group, input, {
             existingRecord: targetByFactKey.get(input.factKey),
+            repairOrganization: options.repairOrganization === true,
           });
           updateFactRecordIndex(targetByFactKey, input.factKey, result.record, result.fields);
           sourceCounts.chatFacts += 1;
@@ -443,6 +463,8 @@ export class BitableService {
       source: 'form',
       senderOpenId: report.senderOpenId,
       contact,
+      existingRecord: existing,
+      repairOrganization: options.repairOrganization === true,
       matchingStatus: contact?.matchingStatus || '未匹配',
       syncedAtText: formatDateTime(options.now || new Date(), options.timezone || DEFAULT_TIMEZONE),
     });
@@ -483,7 +505,7 @@ export class BitableService {
     const table = await this.resolveTableConfig(group.dailyFactTable, 'dailyFactTable');
     assertTable(table, 'dailyFactTable');
     const existing = options.existingRecord || await this.findDailyFactRecordByFactKey(group, input.factKey);
-    const fields = buildDailyFactFields(table, input, existing);
+    const fields = buildDailyFactFields(table, input, existing, options);
     if (existing) {
       if (fieldsEqualForUpdate(fields, existing.fields || {}, table.fields.syncedAt)) {
         return { unchanged: true, record: existing, fields };
@@ -567,7 +589,7 @@ export class BitableService {
         if (!isEffectiveFactRecord(record, fields)) return false;
         if (recordChatId) return recordChatId === group.chatId;
         if (recordProject) {
-          return [group.project, group.name, group.agileGroup].filter(Boolean).includes(recordProject);
+          return [group.project, group.name].filter(Boolean).includes(recordProject);
         }
         return true;
       })
@@ -786,7 +808,7 @@ function normalizeDailyRecord(record, fields, group) {
     messageId: normalizeFieldValue(fields.messageId ? f[fields.messageId] : ''),
     chatId: normalizeFieldValue(fields.chatId ? f[fields.chatId] : ''),
     project: normalizeFieldValue(fields.project ? f[fields.project] : '') || group.project,
-    agileGroup: normalizeFieldValue(fields.agileGroup ? f[fields.agileGroup] : '') || group.agileGroup,
+    agileGroup: normalizeFieldValue(fields.agileGroup ? f[fields.agileGroup] : ''),
     reportDate: normalizeDateFieldValue(f[fields.reportDate]),
     reporterName: reporter.name || normalizeFieldValue(f[fields.reporterName]),
     senderOpenId: normalizeFieldValue(fields.senderOpenId ? f[fields.senderOpenId] : '') || reporter.id,
@@ -811,6 +833,23 @@ function normalizeDailyRecord(record, fields, group) {
   };
 }
 
+function normalizeExistingOrganizationSnapshot(existingFields, fields) {
+  const reporter = normalizePersonValue(existingFields[fields.reporterName]);
+  const supervisor = normalizePersonValue(existingFields[fields.supervisor]);
+  const leader = normalizePersonValue(existingFields[fields.divisionalLeader]);
+  return {
+    reporterNameText: normalizeFieldValue(existingFields[fields.reporterNameText]),
+    memberOpenId: normalizeFieldValue(existingFields[fields.memberOpenId]) || reporter.id,
+    agileGroup: normalizeFieldValue(existingFields[fields.agileGroup]),
+    supervisor: supervisor.name,
+    supervisorOpenId: supervisor.id,
+    divisionalLeader: leader.name,
+    divisionalLeaderOpenId: leader.id,
+    matchingStatus: normalizeFieldValue(existingFields[fields.matchingStatus]),
+    matchMethod: normalizeFieldValue(existingFields[fields.matchMethod]),
+  };
+}
+
 function isEffectiveFactRecord(record, fields) {
   if (!fields.factStatus) return true;
   return normalizeFieldValue(record.fields?.[fields.factStatus]) === '有效';
@@ -831,7 +870,7 @@ function normalizeChatRawRecord(record, fields, group) {
     rawText: normalizeFieldValue(fields.rawText ? f[fields.rawText] : ''),
     workSummaryText: normalizeFieldValue(fields.workSummaryText ? f[fields.workSummaryText] : ''),
     project: normalizeFieldValue(fields.project ? f[fields.project] : '') || group.project || '',
-    agileGroup: normalizeFieldValue(fields.agileGroup ? f[fields.agileGroup] : '') || group.agileGroup || '',
+    agileGroup: normalizeFieldValue(fields.agileGroup ? f[fields.agileGroup] : ''),
     reportType: normalizeFieldValue(fields.reportType ? f[fields.reportType] : ''),
     messageTime: normalizeFieldValue(fields.messageTime ? f[fields.messageTime] : ''),
     rawRecordStatus: normalizeFieldValue(fields.rawRecordStatus ? f[fields.rawRecordStatus] : ''),
@@ -861,7 +900,7 @@ function buildChatRawFields(table, report, context = {}) {
   return recordFields;
 }
 
-function buildDailyFactFields(table, input, existing) {
+function buildDailyFactFields(table, input, existing, options = {}) {
   const existingFields = existing?.fields || {};
   const fields = table.fields;
   const incomingWorkItems = input.workSummaryText || input.workItems || '';
@@ -903,6 +942,12 @@ function buildDailyFactFields(table, input, existing) {
   const mergedSource = resolution.hasBothSources ? 'form+chat' : input.source;
   const useIncomingContent = resolution.winner === incomingCandidate;
   const useIncomingCanonical = useIncomingContent;
+  const organization = resolveOrganizationSnapshot({
+    contact: input.contact || null,
+    existingSnapshot: normalizeExistingOrganizationSnapshot(existingFields, fields),
+    repairOrganization: options.repairOrganization === true,
+  });
+  const snapshot = organization.snapshot;
   const existingRefs = normalizeFieldValue(fields.sourceRefs ? existingFields[fields.sourceRefs] : '');
   const incomingRefs = buildSourceRefs({
     source: input.source,
@@ -926,12 +971,12 @@ function buildDailyFactFields(table, input, existing) {
   setMappedField(recordFields, table, 'factKey', input.factKey);
   setMappedField(recordFields, table, 'reportDate', input.reportDate);
   setCanonicalField(recordFields, 'project', input.project || '');
-  setCanonicalField(recordFields, 'agileGroup', input.agileGroup || '');
-  setCanonicalField(recordFields, 'reporterName', input.reporterName || '', {
-    senderOpenId: input.memberOpenId || '',
+  setMappedField(recordFields, table, 'agileGroup', snapshot.agileGroup);
+  setMappedField(recordFields, table, 'reporterName', snapshot.reporterNameText, {
+    senderOpenId: snapshot.memberOpenId,
   });
-  setCanonicalField(recordFields, 'reporterNameText', input.reporterName || '');
-  setCanonicalField(recordFields, 'memberOpenId', input.memberOpenId || '');
+  setMappedField(recordFields, table, 'reporterNameText', snapshot.reporterNameText);
+  setMappedField(recordFields, table, 'memberOpenId', snapshot.memberOpenId);
   setCanonicalField(recordFields, 'senderOpenId', input.senderOpenId || input.memberOpenId || '');
   setMappedField(recordFields, table, 'workItems', useIncomingContent ? incomingWorkItems : existingWorkItems);
   setMappedField(recordFields, table, 'tomorrowPlanItems', useIncomingContent ? incomingTomorrowPlanItems : existingTomorrowPlanItems);
@@ -950,17 +995,25 @@ function buildDailyFactFields(table, input, existing) {
   setMappedField(recordFields, table, 'autoResolutionNote', resolution.autoResolutionNote);
   setMappedField(recordFields, table, 'mergeStatus', resolution.mergeStatus);
   setMappedField(recordFields, table, 'conflictStatus', resolution.conflictStatus);
-  setMappedField(recordFields, table, 'factStatus', resolution.factStatus);
+  const existingFactStatus = normalizeFieldValue(existingFields[fields.factStatus]);
+  const factStatus = existingFactStatus === '忽略'
+    ? '忽略'
+    : organization.matched ? resolution.factStatus : '待人工确认';
+  setMappedField(recordFields, table, 'factStatus', factStatus);
   setCanonicalField(recordFields, 'rawText', input.rawText || '');
   setCanonicalField(recordFields, 'chatId', input.chatId || '');
-  setCanonicalField(recordFields, 'supervisor', input.supervisor || '', {
-    supervisorOpenId: input.supervisorOpenId || '',
-  });
-  setCanonicalField(recordFields, 'divisionalLeader', input.divisionalLeader || '', {
-    divisionalLeaderOpenId: input.divisionalLeaderOpenId || '',
-  });
-  setCanonicalField(recordFields, 'matchingStatus', input.matchingStatus || '');
-  setCanonicalField(recordFields, 'matchMethod', input.matchMethod || '');
+  if (snapshot.supervisor || existingFields[fields.supervisor] !== undefined) {
+    setMappedField(recordFields, table, 'supervisor', snapshot.supervisor, {
+      supervisorOpenId: snapshot.supervisorOpenId,
+    });
+  }
+  if (snapshot.divisionalLeader || existingFields[fields.divisionalLeader] !== undefined) {
+    setMappedField(recordFields, table, 'divisionalLeader', snapshot.divisionalLeader, {
+      divisionalLeaderOpenId: snapshot.divisionalLeaderOpenId,
+    });
+  }
+  setMappedField(recordFields, table, 'matchingStatus', snapshot.matchingStatus);
+  setMappedField(recordFields, table, 'matchMethod', snapshot.matchMethod);
   setMappedField(recordFields, table, 'reportType', input.reportType || '');
   setMappedField(recordFields, table, 'dateRange', input.dateRange || '');
   setCanonicalField(recordFields, 'messageTime', input.messageTime || '');

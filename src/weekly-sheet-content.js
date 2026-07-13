@@ -23,7 +23,7 @@ export function buildWeeklySheetValues({
   setCell(values, cellMap.reportPeriod, formatWeekPeriod(weekStart, weekEnd));
 
   for (const [bucketName, spec] of Object.entries(cellMap.agileProjects || {})) {
-    const bucketReports = filterReportsForBucket(reports, spec, bucketName, group);
+    const bucketReports = filterReportsForAgileBucket(reports, spec, bucketName);
     const currentItems = collectReportItems(bucketReports, ['workItems']);
     const nextItems = collectReportItems(bucketReports, ['tomorrowPlanItems']);
     const fallbackNextItems = nextItems.length
@@ -75,6 +75,13 @@ export function getWeeklySheetExpectedCells(cellMap = EMPTY_WEEKLY_SHEET_CELL_MA
 
 function filterReportsForBucket(reports, spec, bucketName, group) {
   return reports.filter(report => reportMatchesBucket(report, spec, bucketName, group));
+}
+
+function filterReportsForAgileBucket(reports, spec, bucketName) {
+  const aliases = buildAliases(spec, bucketName);
+  return reports.filter(report => (
+    aliases.some(alias => includesNormalized(report.agileGroup || '', alias))
+  ));
 }
 
 function collectMatchingItems(reports, spec, bucketName, keys, group) {
@@ -144,7 +151,7 @@ function reportMatchesBucket(report, spec, bucketName, group, options = {}) {
 }
 
 function bucketMatchesGroup(group, aliases) {
-  const groupText = [group.project, group.agileGroup, group.name].filter(Boolean).join('\n');
+  const groupText = [group.project, group.name].filter(Boolean).join('\n');
   return Boolean(groupText) && aliases.some(alias => includesNormalized(groupText, alias));
 }
 

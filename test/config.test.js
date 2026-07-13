@@ -102,6 +102,14 @@ test('normalizes chat raw and daily fact table configs', () => {
   assert.equal(group.dailyFactTable.fields.divisionalLeader, '分管领导');
 });
 
+test('does not normalize group agileGroup as organization configuration', () => {
+  const group = normalizeConfig({
+    groups: [{ chatId: 'oc_test', agileGroup: '不应保留' }],
+  }).groups[0];
+
+  assert.equal(Object.hasOwn(group, 'agileGroup'), false);
+});
+
 test('local group configs map supervisor users and contact agile groups', () => {
   for (const filePath of ['config/groups.json', 'config/groups.personal.json']) {
     const config = normalizeConfig(JSON.parse(readFileSync(filePath, 'utf8')));

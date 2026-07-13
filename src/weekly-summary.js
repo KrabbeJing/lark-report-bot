@@ -57,7 +57,6 @@ export function buildWeeklySummary({ group, reports, weekStart, weekEnd, generat
 
   return {
     project: group.project,
-    agileGroup: group.agileGroup,
     chatId: group.chatId,
     weekStart,
     weekEnd,

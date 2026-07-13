@@ -133,7 +133,7 @@ export async function handleMessageEvent({
         rawText: parsed.rawText,
         chatId: message.chat_id,
         project: contact?.teamName || group.project || '',
-        agileGroup: contact?.agileGroup || group.agileGroup || '',
+        agileGroup: contact?.agileGroup || '',
         supervisor: contact?.supervisor || '',
         supervisorOpenId: contact?.supervisorOpenId || '',
         divisionalLeader: contact?.divisionalLeader || '',
