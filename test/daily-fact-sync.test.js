@@ -71,3 +71,27 @@ test('forwards an explicit inclusive range and repair policy', async () => {
   assert.equal(calls[0].options.endDate, '2026-07-12');
   assert.equal(calls[0].options.repairOrganization, true);
 });
+
+test('reports one aggregated failure for record errors in a group', async () => {
+  const alerts = [];
+  await syncDailyFactsForAllGroups({
+    config: {
+      timezone: 'Asia/Shanghai',
+      dailyFactSync: { lookbackDays: 7 },
+      groups: [{ project: '公司项目组' }],
+    },
+    bitable: {
+      syncDailyFactRecordsForGroup: async () => ({
+        created: 0,
+        updated: 0,
+        errors: [{ message: 'first' }, { message: 'second' }],
+      }),
+    },
+    notifyFailure: async alert => alerts.push(alert),
+    logger: { log() {}, error() {} },
+  });
+
+  assert.equal(alerts.length, 1);
+  assert.equal(alerts[0].task, '日报事实同步');
+  assert.equal(alerts[0].errors.length, 2);
+});

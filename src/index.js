@@ -6,7 +6,7 @@ import { createAiProvider } from './ai-providers.js';
 import { BitableService } from './bitable-service.js';
 import { syncDailyFactsForAllGroups } from './daily-fact-sync.js';
 import { pushDailyReportsToSupervisors } from './daily-supervisor-push.js';
-import { formatLarkErrorForLog, reportHandlerError, reportScheduledError } from './error-reporter.js';
+import { reportHandlerError, reportOperationalFailure } from './error-reporter.js';
 import { loadGroupConfig } from './config.js';
 import { buildLarkClientOptions } from './lark-client.js';
 import { LarkMessenger } from './lark-messenger.js';
@@ -17,7 +17,8 @@ import {
   startWeeklyInstanceScheduler,
   startWeeklyScheduler,
 } from './scheduler.js';
-import { ensureWeeklyInstancesForAllGroups } from './weekly-instance-service.js';
+import { runGroupedWorkflow } from './scheduled-workflows.js';
+import { ensureWeeklyInstanceForGroup } from './weekly-instance-service.js';
 import { generateWeeklyReportForGroup } from './weekly-reporter.js';
 import { WeeklySheetWriter } from './weekly-sheet-writer.js';
 
@@ -46,6 +47,14 @@ const bitable = new BitableService(client);
 const aiProvider = createAiProvider();
 const sheetWriter = new WeeklySheetWriter(client);
 const processedMessageIds = new Set();
+const notifyFailure = async ({ task, scope, stage, errors }) => reportOperationalFailure({
+  task,
+  scope,
+  stage,
+  errors,
+  messenger,
+  config,
+});
 
 const eventDispatcher = new lark.EventDispatcher({}).register({
   'im.message.receive_v1': (data) => {
@@ -83,94 +92,67 @@ const eventDispatcher = new lark.EventDispatcher({}).register({
 
 startWeeklyInstanceScheduler({
   config,
-  onRun: async (now) => {
-    const results = await ensureWeeklyInstancesForAllGroups({
-      config,
+  onRun: now => runGroupedWorkflow({
+    task: '周报实例创建',
+    stage: 'ensure_weekly_instance',
+    groups: config.groups,
+    operation: group => ensureWeeklyInstanceForGroup({
+      group,
       bitable,
       sheetWriter,
       now,
-    });
-    for (const result of results) {
-      if (result.error) {
-        console.error(
-          `[weekly-instance] failed for ${result.group}`,
-          formatLarkErrorForLog(result.error),
-        );
-        await reportScheduledError({
-          err: result.error,
-          task: '周报实例创建',
-          scope: result.group,
-          messenger,
-          config,
-        });
-      } else {
-        console.log('[weekly-instance] result', {
-          group: result.group,
-          skipped: result.skipped,
-          reason: result.reason,
-          reused: result.reused,
-          instanceKey: result.instanceKey,
-        });
-      }
-    }
-  },
+      timezone: config.weeklyInstanceCreation?.timezone || config.timezone,
+    }),
+    notifyFailure,
+  }),
 });
 
 startWeeklyScheduler({
   config,
-  onRun: async (now) => {
-    for (const group of config.groups) {
-      try {
-        await generateWeeklyReportForGroup({
-          group,
-          bitable,
-          aiProvider,
-          messenger,
-          outDir: OUT_DIR,
-          timezone: config.timezone,
-          now,
-          delivery: 'send',
-          sheetWriter,
-        });
-      } catch (err) {
-        console.error(`[weekly] failed for ${group.project || group.chatId}`, formatLarkErrorForLog(err));
-      }
-    }
-  },
+  onRun: now => runGroupedWorkflow({
+    task: 'AI周报生成',
+    stage: 'generate_weekly',
+    groups: config.groups,
+    operation: group => generateWeeklyReportForGroup({
+      group,
+      bitable,
+      aiProvider,
+      messenger,
+      outDir: OUT_DIR,
+      timezone: config.timezone,
+      now,
+      delivery: 'send',
+      sheetWriter,
+    }),
+    notifyFailure,
+  }),
 });
 
 startDailySupervisorScheduler({
   config,
-  onRun: async (now) => {
-    for (const group of config.groups) {
-      try {
-        await pushDailyReportsToSupervisors({
-          group,
-          bitable,
-          messenger,
-          timezone: config.timezone,
-          now,
-        });
-      } catch (err) {
-        console.error(`[daily-supervisor] failed for ${group.project || group.chatId}`, formatLarkErrorForLog(err));
-      }
-    }
-  },
+  onRun: now => runGroupedWorkflow({
+    task: '直属上级日报推送',
+    stage: 'deliver_supervisor_digest',
+    groups: config.groups,
+    operation: group => pushDailyReportsToSupervisors({
+      group,
+      bitable,
+      messenger,
+      timezone: config.timezone,
+      now,
+    }),
+    notifyFailure,
+  }),
 });
 
 startDailyFactSyncScheduler({
   config,
-  onRun: async (now) => {
-    try {
-      await syncDailyFactsForAllGroups({
-        config,
-        bitable,
-        now,
-      });
-    } catch (err) {
-      console.error('[daily-fact] failed', formatLarkErrorForLog(err));
-    }
-  },
+  onRun: now => syncDailyFactsForAllGroups({
+    config,
+    bitable,
+    now,
+    notifyFailure,
+  }),
 });
 
 wsClient.start({ eventDispatcher });
