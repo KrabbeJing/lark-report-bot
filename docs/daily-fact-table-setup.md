@@ -107,6 +107,12 @@
 GROUPS_CONFIG_PATH=config/groups.personal.json npm start
 ```
 
+组织归属的唯一来源约定：
+
+- 群组配置没有敏捷小组值。不要在 group 配置中增加或依赖 `agileGroup`；群组只表达群聊和业务板块等运行范围。
+- 通讯录表维护成员的真实姓名、直属上级、敏捷小组和分管领导。事实表中的这些组织快照由匹配到的通讯录记录提供。
+- 正常日报事实同步对已匹配记录冻结组织快照：后续通讯录变更不会在普通同步中改写历史事实。需要纠正历史事实时，必须由操作员显式执行带 `--repair-organization` 的一次性回填。
+
 迁移到正式组织时，只替换 `.env` 的飞书应用凭证，并将 `GROUPS_CONFIG_PATH` 指向正式组织配置。表名、字段名、业务含义应保持一致；`chatId`、`appToken`、`tableId`、`viewId`、人员 `open_id` 不要求也无法保持一致。
 
 表配置支持两种写法：
@@ -169,6 +175,8 @@ GROUPS_CONFIG_PATH=config/groups.personal.json npm start
 - `adminOpenIds`：私聊通知指定管理员。
 - `adminChatIds`：通知指定运维群。
 
+`errorReporting.adminChatIds` 只覆盖进程已经启动并进入应用逻辑后的异常，例如定时任务或处理流程中的失败；它不能覆盖 Node.js 启动失败、凭证/环境变量缺失、主机宕机、进程管理器未拉起等进程外故障。启动和主机级故障必须另配外部进程、主机或平台监控。
+
 也可以通过环境变量配置，多个 ID 用英文逗号分隔：
 
 ```bash
@@ -176,11 +184,29 @@ ERROR_REPORT_OPEN_IDS=ou_xxx,ou_yyy
 ERROR_REPORT_CHAT_IDS=oc_xxx
 ```
 
+## 事实回填与组织修复
+
+回填是操作员手动运行的命令，日期范围为**包含起止日期**的闭区间。`--start 2026-07-01 --end 2026-07-12` 会处理 7 月 1 日至 7 月 12 日（含首尾）能够定位到的日报事实：
+
+```bash
+GROUPS_CONFIG_PATH=config/groups.personal.json npm run daily-fact:backfill -- \
+  --start 2026-07-01 --end 2026-07-12
+```
+
+普通回填不修复已存在事实的组织快照；它遵守“正常同步冻结匹配快照”的规则。只有在完成只读审计、确认范围并取得单独批准后，才可显式执行纠正写入：
+
+```bash
+GROUPS_CONFIG_PATH=config/groups.personal.json npm run daily-fact:backfill -- \
+  --start 2026-07-01 --end 2026-07-12 --repair-organization
+```
+
+`--repair-organization` 是一次性的显式纠正开关，会把匹配到的通讯录组织值写回历史事实；不能放入任何循环、定时任务、服务启动命令或其他 recurring scheduler。修复前先运行不带该开关的只读审计流程，修复后再运行不带该开关的回填以检查幂等性。任何新调度在受控验证完成并取得单独批准前都必须保持禁用。
+
 ## 启用步骤
 
 1. 建好两张新表和字段。
 2. 在 URL 或多维表格 API 中确认新表 `tableId`，或直接复制带 `table` 参数的 wiki 链接。
 3. 更新当前环境配置文件的 `chatDailyRawTable` 和 `dailyFactTable`。
 4. 保持 `dailyFactSync.enabled=false`，先用群聊日报手动测试实时链路。
-5. 测试通过后设置 `dailyFactSync.enabled=true`。
-6. 重启机器人服务。
+5. 受控验证完成并取得单独批准前，保持所有新增调度（包括 `dailyFactSync.enabled`）为 `false`。
+6. 只有在受控验证完成且另行批准后，才设置对应调度为 `true` 并重启机器人服务。
