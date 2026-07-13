@@ -970,6 +970,16 @@ function buildDailyFactFields(table, input, existing, options = {}) {
     repairOrganization: options.repairOrganization === true,
   });
   const snapshot = organization.snapshot;
+  const existingFactKey = normalizeFieldValue(existingFields[fields.factKey]);
+  const persistedFactKey = organization.source === 'existing' && existingFactKey
+    ? existingFactKey
+    : organization.matched
+      ? buildFactKey({
+        openId: snapshot.memberOpenId,
+        name: snapshot.reporterNameText,
+        reportDate: input.reportDate,
+      })
+      : input.factKey;
   const existingRefs = normalizeFieldValue(fields.sourceRefs ? existingFields[fields.sourceRefs] : '');
   const incomingRefs = buildSourceRefs({
     source: input.source,
@@ -990,7 +1000,7 @@ function buildDailyFactFields(table, input, existing, options = {}) {
   };
 
   const recordFields = {};
-  setMappedField(recordFields, table, 'factKey', input.factKey);
+  setMappedField(recordFields, table, 'factKey', persistedFactKey);
   setMappedField(recordFields, table, 'reportDate', input.reportDate);
   setCanonicalField(recordFields, 'project', input.project || '');
   setMappedField(recordFields, table, 'agileGroup', snapshot.agileGroup);
@@ -1059,7 +1069,6 @@ function updateFactRecordIndexes({
   existingRecord,
   result,
 }) {
-  if (!input.factKey) return;
   const resultRecord = result.record || {};
   const indexedRecord = {
     ...existingRecord,
@@ -1068,10 +1077,16 @@ function updateFactRecordIndexes({
     fields: result.fields || resultRecord.fields || existingRecord?.fields || {},
   };
   const previousFactKey = normalizeFieldValue(existingRecord?.fields?.[fields.factKey]);
-  if (previousFactKey && previousFactKey !== input.factKey) {
+  const persistedFactKey = normalizeFieldValue(
+    result.fields?.[fields.factKey]
+      || resultRecord.fields?.[fields.factKey]
+      || previousFactKey
+      || input.factKey,
+  );
+  if (previousFactKey && previousFactKey !== persistedFactKey) {
     targetByFactKey.delete(previousFactKey);
   }
-  targetByFactKey.set(input.factKey, indexedRecord);
+  if (persistedFactKey) targetByFactKey.set(persistedFactKey, indexedRecord);
 
   const sourceIdentity = buildFactSourceIdentity(input);
   if (sourceIdentity) targetBySourceIdentity.set(sourceIdentity, indexedRecord);

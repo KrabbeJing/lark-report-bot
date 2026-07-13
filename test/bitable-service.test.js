@@ -474,7 +474,9 @@ test('ordinary upsert preserves an existing matched organization snapshot', asyn
   const { service, group, existingRecord, input, getUpdatePayload } = buildOrganizationUpsertFixture();
   await service.upsertDailyFactRecord(group, input, { existingRecord });
   const fields = getUpdatePayload().data.fields;
+  assert.equal(fields['事实唯一键'], 'open_id:ou_old:2026-07-10');
   assert.equal(fields['日报提交人姓名'], '历史姓名');
+  assert.equal(fields['成员OpenID'], 'ou_old');
   assert.equal(fields['敏捷小组'], '历史敏捷组');
   assert.deepEqual(fields['直属上级'], [{ id: 'ou_old_mgr', name: '历史上级' }]);
   assert.deepEqual(fields['分管领导'], [{ id: 'ou_old_leader', name: '历史领导' }]);
@@ -488,7 +490,9 @@ test('organization repair replaces a matched snapshot from contact', async () =>
     repairOrganization: true,
   });
   const fields = getUpdatePayload().data.fields;
+  assert.equal(fields['事实唯一键'], 'open_id:ou_new:2026-07-10');
   assert.equal(fields['日报提交人姓名'], '刘喜双');
+  assert.equal(fields['成员OpenID'], 'ou_new');
   assert.equal(fields['敏捷小组'], '收单项目组');
   assert.deepEqual(fields['直属上级'], [{ id: 'ou_new_mgr', name: '新上级' }]);
   assert.deepEqual(fields['分管领导'], [{ id: 'ou_new_leader', name: '新领导' }]);
@@ -559,11 +563,11 @@ function buildOrganizationUpsertFixture() {
   const existingRecord = {
     record_id: 'rec_fact',
     fields: {
-      事实唯一键: 'open_id:ou_member:2026-07-10',
+      事实唯一键: 'open_id:ou_old:2026-07-10',
       日报日期: Date.UTC(2026, 6, 10),
       日报提交人姓名: '历史姓名',
-      实际日报提交人: [{ id: 'ou_member', name: '历史姓名' }],
-      成员OpenID: 'ou_member',
+      实际日报提交人: [{ id: 'ou_old', name: '历史姓名' }],
+      成员OpenID: 'ou_old',
       敏捷小组: '历史敏捷组',
       直属上级: [{ id: 'ou_old_mgr', name: '历史上级' }],
       分管领导: [{ id: 'ou_old_leader', name: '历史领导' }],
@@ -577,14 +581,14 @@ function buildOrganizationUpsertFixture() {
     },
   };
   const input = {
-    factKey: 'open_id:ou_member:2026-07-10',
+    factKey: 'open_id:ou_new:2026-07-10',
     reportDate: '2026-07-10',
     source: 'chat',
     sourceTime: Date.UTC(2026, 6, 10, 2),
     workSummaryText: '更新后的日报内容',
     contact: {
       teamMember: '刘喜双',
-      teamMemberId: 'ou_member',
+      teamMemberId: 'ou_new',
       agileGroup: '收单项目组',
       supervisor: '新上级',
       supervisorOpenId: 'ou_new_mgr',
@@ -595,6 +599,142 @@ function buildOrganizationUpsertFixture() {
     },
   };
   return { service, group, existingRecord, input, getUpdatePayload: () => updatePayload };
+}
+
+test('keeps rolling fact indexes on the frozen key during ordinary sync', async () => {
+  const { service, group, creates, updates } = buildSnapshotKeySyncFixture({
+    secondContactOpenId: 'ou_old',
+  });
+
+  const result = await service.syncDailyFactRecordsForGroup(group, {
+    now: new Date('2026-07-10T10:00:00.000Z'),
+    timezone: 'Asia/Shanghai',
+    lookbackDays: 1,
+  });
+
+  assert.equal(result.created, 0);
+  assert.equal(result.updated, 2);
+  assert.equal(creates.length, 0);
+  assert.equal(updates.length, 2);
+  assert.equal(updates[0].data.fields['事实唯一键'], 'open_id:ou_old:2026-07-10');
+  assert.equal(updates[1].path.record_id, 'rec_fact');
+});
+
+test('migrates the fact key and rolling indexes with a repaired snapshot', async () => {
+  const { service, group, creates, updates } = buildSnapshotKeySyncFixture({
+    secondContactOpenId: 'ou_new',
+  });
+
+  const result = await service.syncDailyFactRecordsForGroup(group, {
+    now: new Date('2026-07-10T10:00:00.000Z'),
+    timezone: 'Asia/Shanghai',
+    lookbackDays: 1,
+    repairOrganization: true,
+  });
+
+  assert.equal(result.created, 0);
+  assert.equal(result.updated, 2);
+  assert.equal(creates.length, 0);
+  assert.equal(updates.length, 2);
+  assert.equal(updates[0].data.fields['事实唯一键'], 'open_id:ou_new:2026-07-10');
+  assert.equal(updates[1].path.record_id, 'rec_fact');
+});
+
+function buildSnapshotKeySyncFixture({ secondContactOpenId }) {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      dailyTable: {
+        appToken: 'bas_test',
+        tableId: 'tbl_source',
+        fields: {
+          reportDate: '日报日期',
+          reporterName: '日报提交人',
+          workItems: '今日工作总结',
+        },
+      },
+      chatDailyRawTable: { appToken: 'bas_test', tableId: 'tbl_chat_raw' },
+      dailyFactTable: {
+        appToken: 'bas_test',
+        tableId: 'tbl_fact',
+        fieldTypes: { reportDate: 'date', reporterName: 'user' },
+      },
+    }],
+  }).groups[0];
+  const creates = [];
+  const updates = [];
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async ({ path }) => {
+          if (path.table_id === 'tbl_source') {
+            return {
+              data: {
+                items: [
+                  {
+                    record_id: 'rec_first',
+                    last_modified_time: Date.UTC(2026, 6, 10, 1),
+                    fields: {
+                      日报日期: Date.UTC(2026, 6, 10),
+                      日报提交人: '刘喜双',
+                      今日工作总结: '第一次同步',
+                    },
+                  },
+                  {
+                    record_id: 'rec_second',
+                    last_modified_time: Date.UTC(2026, 6, 10, 2),
+                    fields: {
+                      日报日期: Date.UTC(2026, 6, 10),
+                      日报提交人: '刘喜双',
+                      今日工作总结: '第二次同步',
+                    },
+                  },
+                ],
+              },
+            };
+          }
+          if (path.table_id === 'tbl_chat_raw') return { data: { items: [] } };
+          if (path.table_id === 'tbl_fact') {
+            return {
+              data: {
+                items: [{
+                  record_id: 'rec_fact',
+                  fields: {
+                    事实唯一键: 'open_id:ou_old:2026-07-10',
+                    日报日期: Date.UTC(2026, 6, 10),
+                    日报提交人姓名: '历史姓名',
+                    实际日报提交人: [{ id: 'ou_old', name: '历史姓名' }],
+                    成员OpenID: 'ou_old',
+                    日报来源: 'form',
+                    来源记录ID: 'rec_first',
+                    匹配状态: '已匹配',
+                    匹配方式: 'open_id',
+                    事实记录状态: '有效',
+                  },
+                }],
+              },
+            };
+          }
+          return { data: { items: [] } };
+        },
+        create: async payload => {
+          creates.push(payload);
+          return { data: { record: { record_id: 'rec_created', fields: payload.data.fields } } };
+        },
+        update: async payload => {
+          updates.push(payload);
+          return { data: { record: { record_id: 'rec_fact', fields: payload.data.fields } } };
+        },
+      },
+    },
+  });
+  service.findTeamContactForReport = async (_group, _report, sourceRecordId) => ({
+    teamMember: sourceRecordId === 'rec_first' ? '刘喜双' : '历史姓名',
+    teamMemberId: sourceRecordId === 'rec_first' ? 'ou_new' : secondContactOpenId,
+    matchingStatus: '已匹配',
+    matchMethod: 'open_id',
+  });
+  return { service, group, creates, updates };
 }
 
 test('marks same-content form and chat facts as duplicate merged without conflict', async () => {
