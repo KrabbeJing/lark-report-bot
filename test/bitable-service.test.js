@@ -494,6 +494,43 @@ test('organization repair replaces a matched snapshot from contact', async () =>
   assert.deepEqual(fields['分管领导'], [{ id: 'ou_new_leader', name: '新领导' }]);
 });
 
+test('clears existing organization user fields when a fact is unmatched', async () => {
+  const { service, group, existingRecord, input, getUpdatePayload } = buildOrganizationUpsertFixture();
+  existingRecord.fields['匹配状态'] = '未匹配';
+  existingRecord.fields['匹配方式'] = '';
+  input.contact = null;
+
+  await service.upsertDailyFactRecord(group, input, { existingRecord });
+
+  const fields = getUpdatePayload().data.fields;
+  assert.equal(fields['日报提交人姓名'], '');
+  assert.equal(fields['敏捷小组'], '');
+  assert.deepEqual(fields['实际日报提交人'], []);
+  assert.deepEqual(fields['直属上级'], []);
+  assert.deepEqual(fields['分管领导'], []);
+  assert.equal(fields['事实记录状态'], '待人工确认');
+});
+
+test('clears existing organization user fields for unmatched source updates', () => {
+  const { service, group, existingRecord } = buildOrganizationUpsertFixture();
+  existingRecord.fields['匹配状态'] = '未匹配';
+  existingRecord.fields['匹配方式'] = '';
+
+  const fields = service.buildDailyRecordFields(group, {
+    reportDate: '2026-07-10',
+    workSummaryText: '更新后的日报内容',
+  }, {
+    table: group.dailyFactTable,
+    existingRecord,
+    contact: null,
+    source: 'form',
+  });
+
+  assert.deepEqual(fields['实际日报提交人'], []);
+  assert.deepEqual(fields['直属上级'], []);
+  assert.deepEqual(fields['分管领导'], []);
+});
+
 function buildOrganizationUpsertFixture() {
   let updatePayload;
   const group = normalizeConfig({
@@ -1577,6 +1614,117 @@ test('syncs source form daily records into fact table with contact enrichment', 
 2、整理千分卡考核指标，完成填报`);
   assert.deepEqual(createPayload.data.fields['直属上级'], [{ id: 'ou_mgr', name: '王经理' }]);
   assert.equal(createPayload.data.fields['匹配状态'], '已匹配');
+});
+
+test('enriches a name-keyed form fact in place after contact matching', async () => {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      dailyTable: {
+        appToken: 'bas_test',
+        tableId: 'tbl_source',
+        fields: {
+          reportDate: '日报日期',
+          reporterName: '日报提交人',
+          workItems: '今日工作总结',
+        },
+      },
+      chatDailyRawTable: { appToken: 'bas_test', tableId: 'tbl_chat_raw' },
+      dailyFactTable: {
+        appToken: 'bas_test',
+        tableId: 'tbl_fact',
+        fieldTypes: {
+          reportDate: 'date',
+          reporterName: 'user',
+          supervisor: 'user',
+          divisionalLeader: 'user',
+        },
+      },
+      contactTable: { appToken: 'bas_test', tableId: 'tbl_contacts' },
+    }],
+  }).groups[0];
+  const updates = [];
+  const creates = [];
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async ({ path }) => {
+          if (path.table_id === 'tbl_source') {
+            return {
+              data: {
+                items: [{
+                  record_id: 'rec_form_zhang',
+                  fields: {
+                    日报日期: Date.UTC(2026, 6, 10),
+                    日报提交人: '张三',
+                    今日工作总结: '完成对账',
+                  },
+                }],
+              },
+            };
+          }
+          if (path.table_id === 'tbl_chat_raw') return { data: { items: [] } };
+          if (path.table_id === 'tbl_fact') {
+            return {
+              data: {
+                items: [{
+                  record_id: 'rec_legacy_fact',
+                  fields: {
+                    事实唯一键: 'name:张三:2026-07-10',
+                    日报日期: Date.UTC(2026, 6, 10),
+                    来源记录ID: 'rec_form_zhang',
+                    日报来源: 'form',
+                    匹配状态: '未匹配',
+                    事实记录状态: '待人工确认',
+                  },
+                }],
+              },
+            };
+          }
+          if (path.table_id === 'tbl_contacts') {
+            return {
+              data: {
+                items: [{
+                  record_id: 'rec_contact_zhang',
+                  fields: {
+                    团队成员: [{ id: 'ou_zhang', name: '张三' }],
+                    成员真实姓名: '张三',
+                    敏捷小组: '收单项目组',
+                    直属上级: [{ id: 'ou_mgr', name: '王经理' }],
+                    分管领导: [{ id: 'ou_leader', name: '李总' }],
+                  },
+                }],
+              },
+            };
+          }
+          return { data: { items: [] } };
+        },
+        create: async payload => {
+          creates.push(payload);
+          return { data: { record: { record_id: 'rec_new_fact', fields: payload.data.fields } } };
+        },
+        update: async payload => {
+          updates.push(payload);
+          return { data: { record: { record_id: 'rec_legacy_fact', fields: payload.data.fields } } };
+        },
+      },
+    },
+  });
+
+  const result = await service.syncDailyFactRecordsForGroup(group, {
+    now: new Date('2026-07-10T10:00:00.000Z'),
+    timezone: 'Asia/Shanghai',
+    lookbackDays: 1,
+  });
+
+  assert.equal(result.created, 0);
+  assert.equal(result.updated, 1);
+  assert.equal(creates.length, 0);
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].path.record_id, 'rec_legacy_fact');
+  assert.equal(updates[0].data.fields['事实唯一键'], 'open_id:ou_zhang:2026-07-10');
+  assert.equal(updates[0].data.fields['日报提交人姓名'], '张三');
+  assert.deepEqual(updates[0].data.fields['实际日报提交人'], [{ id: 'ou_zhang', name: '张三' }]);
 });
 
 test('skips daily fact sync when any source or fact table is not configured', async () => {

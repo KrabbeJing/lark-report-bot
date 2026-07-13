@@ -60,6 +60,7 @@ export class BitableService {
     setDailyField('reporterName', snapshot.reporterNameText, {
       ...context,
       senderOpenId: snapshot.memberOpenId,
+      clearUser: !organization.matched && existingFields[table.fields.reporterName] !== undefined,
     });
     setDailyField('reporterNameText', snapshot.reporterNameText);
     setDailyField('memberOpenId', snapshot.memberOpenId);
@@ -73,12 +74,14 @@ export class BitableService {
       setDailyField('supervisor', snapshot.supervisor, {
         ...context,
         supervisorOpenId: snapshot.supervisorOpenId,
+        clearUser: !organization.matched && existingFields[table.fields.supervisor] !== undefined,
       });
     }
     if (snapshot.divisionalLeader || existingFields[table.fields.divisionalLeader] !== undefined) {
       setDailyField('divisionalLeader', snapshot.divisionalLeader, {
         ...context,
         divisionalLeaderOpenId: snapshot.divisionalLeaderOpenId,
+        clearUser: !organization.matched && existingFields[table.fields.divisionalLeader] !== undefined,
       });
     }
     setDailyField('source', context.source || 'chat');
@@ -251,6 +254,7 @@ export class BitableService {
     const chatRawRecords = await this.listRecords(group.chatDailyRawTable, 'dailyFactSync.chatRaw.list', { includeView: false });
     const targetRecords = await this.listRecords(group.dailyFactTable, 'dailyFactSync.fact.list', { includeView: false });
     const targetByFactKey = indexRecordsByField(targetRecords, group.dailyFactTable.fields.factKey);
+    const targetBySourceIdentity = indexFactRecordsBySourceIdentity(targetRecords, group.dailyFactTable.fields);
 
     let created = 0;
     let updated = 0;
@@ -307,11 +311,20 @@ export class BitableService {
           sourceTime: normalizeSourceTimestamp(formRecord.last_modified_time || formRecord.created_time),
           syncedAt: formatDateTime(now, timezone),
         };
+        const existingRecord = targetByFactKey.get(input.factKey)
+          || targetBySourceIdentity.get(buildFactSourceIdentity(input));
         const result = await this.upsertDailyFactRecord(group, input, {
-          existingRecord: targetByFactKey.get(input.factKey),
+          existingRecord,
           repairOrganization: options.repairOrganization === true,
         });
-        updateFactRecordIndex(targetByFactKey, input.factKey, result.record, result.fields);
+        updateFactRecordIndexes({
+          targetByFactKey,
+          targetBySourceIdentity,
+          fields: group.dailyFactTable.fields,
+          input,
+          existingRecord,
+          result,
+        });
         sourceCounts.formFacts += 1;
         if (result.created) created += 1;
         else if (result.updated) updated += 1;
@@ -383,11 +396,20 @@ export class BitableService {
             contact,
             syncedAt: formatDateTime(now, timezone),
           };
+          const existingRecord = targetByFactKey.get(input.factKey)
+            || targetBySourceIdentity.get(buildFactSourceIdentity(input));
           const result = await this.upsertDailyFactRecord(group, input, {
-            existingRecord: targetByFactKey.get(input.factKey),
+            existingRecord,
             repairOrganization: options.repairOrganization === true,
           });
-          updateFactRecordIndex(targetByFactKey, input.factKey, result.record, result.fields);
+          updateFactRecordIndexes({
+            targetByFactKey,
+            targetBySourceIdentity,
+            fields: group.dailyFactTable.fields,
+            input,
+            existingRecord,
+            result,
+          });
           sourceCounts.chatFacts += 1;
           if (result.created) created += 1;
           else if (result.updated) updated += 1;
@@ -974,6 +996,7 @@ function buildDailyFactFields(table, input, existing, options = {}) {
   setMappedField(recordFields, table, 'agileGroup', snapshot.agileGroup);
   setMappedField(recordFields, table, 'reporterName', snapshot.reporterNameText, {
     senderOpenId: snapshot.memberOpenId,
+    clearUser: !organization.matched && existingFields[fields.reporterName] !== undefined,
   });
   setMappedField(recordFields, table, 'reporterNameText', snapshot.reporterNameText);
   setMappedField(recordFields, table, 'memberOpenId', snapshot.memberOpenId);
@@ -1005,11 +1028,13 @@ function buildDailyFactFields(table, input, existing, options = {}) {
   if (snapshot.supervisor || existingFields[fields.supervisor] !== undefined) {
     setMappedField(recordFields, table, 'supervisor', snapshot.supervisor, {
       supervisorOpenId: snapshot.supervisorOpenId,
+      clearUser: !organization.matched && existingFields[fields.supervisor] !== undefined,
     });
   }
   if (snapshot.divisionalLeader || existingFields[fields.divisionalLeader] !== undefined) {
     setMappedField(recordFields, table, 'divisionalLeader', snapshot.divisionalLeader, {
       divisionalLeaderOpenId: snapshot.divisionalLeaderOpenId,
+      clearUser: !organization.matched && existingFields[fields.divisionalLeader] !== undefined,
     });
   }
   setMappedField(recordFields, table, 'matchingStatus', snapshot.matchingStatus);
@@ -1026,13 +1051,30 @@ function isConflictResult(table, result) {
   return fieldName ? result?.fields?.[fieldName] === '已自动处理' : false;
 }
 
-function updateFactRecordIndex(index, factKey, record, fields) {
-  if (!factKey) return;
-  const indexedRecord = record || index.get(factKey) || {};
-  index.set(factKey, {
-    ...indexedRecord,
-    fields: fields || indexedRecord.fields || {},
-  });
+function updateFactRecordIndexes({
+  targetByFactKey,
+  targetBySourceIdentity,
+  fields,
+  input,
+  existingRecord,
+  result,
+}) {
+  if (!input.factKey) return;
+  const resultRecord = result.record || {};
+  const indexedRecord = {
+    ...existingRecord,
+    ...resultRecord,
+    record_id: resultRecord.record_id || existingRecord?.record_id,
+    fields: result.fields || resultRecord.fields || existingRecord?.fields || {},
+  };
+  const previousFactKey = normalizeFieldValue(existingRecord?.fields?.[fields.factKey]);
+  if (previousFactKey && previousFactKey !== input.factKey) {
+    targetByFactKey.delete(previousFactKey);
+  }
+  targetByFactKey.set(input.factKey, indexedRecord);
+
+  const sourceIdentity = buildFactSourceIdentity(input);
+  if (sourceIdentity) targetBySourceIdentity.set(sourceIdentity, indexedRecord);
 }
 
 function fieldsEqualForUpdate(incomingFields, existingFields, syncedAtFieldName) {
@@ -1189,6 +1231,7 @@ function formatFieldValue(table, key, value, context = {}) {
     const id = getUserFieldOpenId(key, context);
     const name = Array.isArray(value) ? value.join('\n') : String(value || '');
     if (id) return [{ id, name }];
+    if (context.clearUser === true) return [];
     return undefined;
   }
 
@@ -1391,4 +1434,24 @@ function indexRecordsByField(records, fieldName) {
     if (value) index.set(String(value), record);
   }
   return index;
+}
+
+function indexFactRecordsBySourceIdentity(records, fields) {
+  const index = new Map();
+  for (const record of records || []) {
+    const source = normalizeFieldValue(record.fields?.[fields.source]);
+    const sourceRecordId = normalizeFieldValue(record.fields?.[fields.sourceRecordId]);
+    const reportDate = normalizeDateFieldValue(record.fields?.[fields.reportDate]);
+    const sourceType = sourceHas(source, 'form') ? 'form' : sourceHas(source, 'chat') ? 'chat' : '';
+    const identity = buildFactSourceIdentity({ source: sourceType, sourceRecordId, reportDate });
+    if (identity) index.set(identity, record);
+  }
+  return index;
+}
+
+function buildFactSourceIdentity({ source, sourceRecordId, reportDate } = {}) {
+  const sourceType = String(source || '').trim();
+  const recordId = String(sourceRecordId || '').trim();
+  const date = String(reportDate || '').trim();
+  return sourceType && recordId && date ? `${sourceType}:${recordId}:${date}` : '';
 }
