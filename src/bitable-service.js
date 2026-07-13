@@ -1088,8 +1088,13 @@ function updateFactRecordIndexes({
   }
   if (persistedFactKey) targetByFactKey.set(persistedFactKey, indexedRecord);
 
-  const sourceIdentity = buildFactSourceIdentity(input);
-  if (sourceIdentity) targetBySourceIdentity.set(sourceIdentity, indexedRecord);
+  const sourceIdentities = new Set([
+    ...buildFactSourceIdentitiesFromFields(indexedRecord.fields, fields),
+    buildFactSourceIdentity(input),
+  ]);
+  for (const sourceIdentity of sourceIdentities) {
+    if (sourceIdentity) targetBySourceIdentity.set(sourceIdentity, indexedRecord);
+  }
 }
 
 function fieldsEqualForUpdate(incomingFields, existingFields, syncedAtFieldName) {
@@ -1454,14 +1459,45 @@ function indexRecordsByField(records, fieldName) {
 function indexFactRecordsBySourceIdentity(records, fields) {
   const index = new Map();
   for (const record of records || []) {
-    const source = normalizeFieldValue(record.fields?.[fields.source]);
-    const sourceRecordId = normalizeFieldValue(record.fields?.[fields.sourceRecordId]);
-    const reportDate = normalizeDateFieldValue(record.fields?.[fields.reportDate]);
-    const sourceType = sourceHas(source, 'form') ? 'form' : sourceHas(source, 'chat') ? 'chat' : '';
-    const identity = buildFactSourceIdentity({ source: sourceType, sourceRecordId, reportDate });
-    if (identity) index.set(identity, record);
+    for (const identity of buildFactSourceIdentitiesFromFields(record.fields, fields)) {
+      index.set(identity, record);
+    }
   }
   return index;
+}
+
+function buildFactSourceIdentitiesFromFields(recordFields, fields) {
+  const source = normalizeFieldValue(recordFields?.[fields.source]);
+  const sourceRecordId = normalizeFieldValue(recordFields?.[fields.sourceRecordId]);
+  const reportDate = normalizeDateFieldValue(recordFields?.[fields.reportDate]);
+  const identities = new Set();
+  const addIdentity = (sourceType, recordId) => {
+    const identity = buildFactSourceIdentity({ source: sourceType, sourceRecordId: recordId, reportDate });
+    if (identity) identities.add(identity);
+  };
+
+  if (sourceHas(source, 'form')) addIdentity('form', sourceRecordId);
+  else if (sourceHas(source, 'chat')) addIdentity('chat', sourceRecordId);
+
+  for (const ref of parseSourceRefs(recordFields?.[fields.sourceRefs])) {
+    if (ref.type === 'form') addIdentity('form', ref.recordId);
+    if (ref.type === 'chat_raw') addIdentity('chat', ref.recordId);
+  }
+  return identities;
+}
+
+function parseSourceRefs(value) {
+  const refs = [];
+  for (const line of String(value || '').split(/\r?\n/)) {
+    const separator = line.indexOf(':');
+    if (separator <= 0) continue;
+    const type = line.slice(0, separator).trim();
+    const recordId = line.slice(separator + 1).trim();
+    if ((type === 'form' || type === 'chat_raw') && recordId) {
+      refs.push({ type, recordId });
+    }
+  }
+  return refs;
 }
 
 function buildFactSourceIdentity({ source, sourceRecordId, reportDate } = {}) {

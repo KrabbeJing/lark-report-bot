@@ -2288,6 +2288,170 @@ test('reuses newly created form fact when syncing matching chat raw in the same 
   assert.equal(updates[0].data.fields['来源时间'], 1783699200123);
 });
 
+test('reuses an existing merged form and chat fact for a changed contact identity', async () => {
+  const { service, group, creates, updates } = buildMergedSourceIdentitySyncFixture();
+
+  const result = await service.syncDailyFactRecordsForGroup(group, {
+    now: new Date('2026-07-10T10:00:00.000Z'),
+    timezone: 'Asia/Shanghai',
+    lookbackDays: 1,
+  });
+
+  assert.equal(result.created, 0);
+  assert.equal(result.updated, 2);
+  assert.equal(creates.length, 0);
+  assert.deepEqual(updates.map(payload => payload.path.record_id), ['rec_fact', 'rec_fact']);
+  assert.equal(updates[0].data.fields['事实唯一键'], 'open_id:ou_old:2026-07-10');
+  assert.equal(updates[1].data.fields['事实唯一键'], 'open_id:ou_old:2026-07-10');
+});
+
+test('recovers an existing merged fact from a chat raw source reference alone', async () => {
+  const { service, group, creates, updates } = buildMergedSourceIdentitySyncFixture({ includeForm: false });
+
+  const result = await service.syncDailyFactRecordsForGroup(group, {
+    now: new Date('2026-07-10T10:00:00.000Z'),
+    timezone: 'Asia/Shanghai',
+    lookbackDays: 1,
+  });
+
+  assert.equal(result.created, 0);
+  assert.equal(result.updated, 1);
+  assert.equal(creates.length, 0);
+  assert.deepEqual(updates.map(payload => payload.path.record_id), ['rec_fact']);
+  assert.equal(updates[0].data.fields['事实唯一键'], 'open_id:ou_old:2026-07-10');
+});
+
+function buildMergedSourceIdentitySyncFixture({ includeForm = true } = {}) {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      dailyTable: {
+        appToken: 'bas_test',
+        tableId: 'tbl_source',
+        fields: {
+          reportDate: '日报日期',
+          reporterName: '日报提交人',
+          workItems: '今日工作总结',
+        },
+      },
+      chatDailyRawTable: {
+        appToken: 'bas_test',
+        tableId: 'tbl_chat_raw',
+        fields: {
+          messageId: '消息ID',
+          senderOpenId: '发送人OpenID',
+          reporterName: '标题姓名',
+          reportDates: '拆分日期列表',
+          workSummaryText: '解析后工作总结',
+          rawRecordStatus: '原始记录状态',
+        },
+      },
+      dailyFactTable: {
+        appToken: 'bas_test',
+        tableId: 'tbl_fact',
+        fields: {
+          factKey: '事实唯一键',
+          reportDate: '日报日期',
+          reporterName: '实际日报提交人',
+          reporterNameText: '日报提交人姓名',
+          memberOpenId: '成员OpenID',
+          workItems: '今日工作总结',
+          source: '日报来源',
+          sourceRecordId: '来源记录ID',
+          messageId: '来源消息ID',
+          sourceRefs: '来源组合',
+          matchingStatus: '匹配状态',
+          matchMethod: '匹配方式',
+          factStatus: '事实记录状态',
+        },
+        fieldTypes: { reportDate: 'date', reporterName: 'user' },
+      },
+    }],
+  }).groups[0];
+  const creates = [];
+  const updates = [];
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async ({ path }) => {
+          if (path.table_id === 'tbl_source') {
+            return {
+              data: {
+                items: includeForm ? [{
+                  record_id: 'rec_form',
+                  last_modified_time: Date.UTC(2026, 6, 10, 1),
+                  fields: {
+                    日报日期: Date.UTC(2026, 6, 10),
+                    日报提交人: '刘喜双',
+                    今日工作总结: '表单更新',
+                  },
+                }] : [],
+              },
+            };
+          }
+          if (path.table_id === 'tbl_chat_raw') {
+            return {
+              data: {
+                items: [{
+                  record_id: 'rec_raw',
+                  fields: {
+                    消息ID: 'om_chat',
+                    发送人OpenID: 'ou_new',
+                    标题姓名: '刘喜双',
+                    拆分日期列表: '2026-07-10',
+                    解析后工作总结: '群聊更新',
+                    消息时间: '2026/07/10 10:00:00',
+                    原始记录状态: '主版本',
+                  },
+                }],
+              },
+            };
+          }
+          if (path.table_id === 'tbl_fact') {
+            return {
+              data: {
+                items: [{
+                  record_id: 'rec_fact',
+                  fields: {
+                    事实唯一键: 'open_id:ou_old:2026-07-10',
+                    日报日期: Date.UTC(2026, 6, 10),
+                    实际日报提交人: [{ id: 'ou_old', name: '历史姓名' }],
+                    日报提交人姓名: '历史姓名',
+                    成员OpenID: 'ou_old',
+                    日报来源: 'form+chat',
+                    来源记录ID: 'rec_form',
+                    来源消息ID: 'om_chat',
+                    来源组合: 'form:rec_form\nchat_raw:rec_raw\nchat:om_chat',
+                    匹配状态: '已匹配',
+                    匹配方式: 'open_id',
+                    事实记录状态: '有效',
+                  },
+                }],
+              },
+            };
+          }
+          return { data: { items: [] } };
+        },
+        create: async payload => {
+          creates.push(payload);
+          return { data: { record: { record_id: 'rec_created', fields: payload.data.fields } } };
+        },
+        update: async payload => {
+          updates.push(payload);
+          return { data: { record: { record_id: payload.path.record_id, fields: payload.data.fields } } };
+        },
+      },
+    },
+  });
+  service.findTeamContactForReport = async () => ({
+    teamMember: '刘喜双',
+    teamMemberId: 'ou_new',
+    matchingStatus: '已匹配',
+    matchMethod: 'open_id',
+  });
+  return { service, group, creates, updates };
+}
+
 test('throws when bitable returns a non-zero business code', async () => {
   const group = createGroup();
   const service = new BitableService({
