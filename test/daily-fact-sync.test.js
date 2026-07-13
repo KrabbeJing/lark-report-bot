@@ -95,3 +95,71 @@ test('reports one aggregated failure for record errors in a group', async () => 
   assert.equal(alerts[0].task, '日报事实同步');
   assert.equal(alerts[0].errors.length, 2);
 });
+
+test('continues after a returned-error notification rejection without duplicating the daily fact result', async () => {
+  const alertAttempts = [];
+  const operationOrder = [];
+  const warnings = [];
+  const results = await syncDailyFactsForAllGroups({
+    config: {
+      timezone: 'Asia/Shanghai',
+      dailyFactSync: { lookbackDays: 7 },
+      groups: [{ project: '一组' }, { project: '二组' }],
+    },
+    bitable: {
+      syncDailyFactRecordsForGroup: async group => {
+        operationOrder.push(group.project);
+        return group.project === '一组'
+          ? { errors: [{ message: 'row write failed' }] }
+          : { created: 1, updated: 0 };
+      },
+    },
+    notifyFailure: async alert => {
+      alertAttempts.push(alert);
+      throw new Error('reporter secret body');
+    },
+    logger: { log() {}, error() {}, warn: message => warnings.push(message) },
+  });
+
+  assert.deepEqual(operationOrder, ['一组', '二组']);
+  assert.equal(alertAttempts.length, 1);
+  assert.equal(results.length, 2);
+  assert.equal(results[0].failed, undefined);
+  assert.equal(results[1].created, 1);
+  assert.deepEqual(warnings, ['[daily-fact-sync] failure notification failed']);
+});
+
+test('continues after a terminal-error notification rejection and preserves the daily fact message', async () => {
+  const alertAttempts = [];
+  const operationOrder = [];
+  const warnings = [];
+  const terminalError = new Error('source unavailable');
+  const results = await syncDailyFactsForAllGroups({
+    config: {
+      timezone: 'Asia/Shanghai',
+      dailyFactSync: { lookbackDays: 7 },
+      groups: [{ project: '一组' }, { project: '二组' }],
+    },
+    bitable: {
+      syncDailyFactRecordsForGroup: async group => {
+        operationOrder.push(group.project);
+        if (group.project === '一组') throw terminalError;
+        return { created: 1, updated: 0 };
+      },
+    },
+    notifyFailure: async alert => {
+      alertAttempts.push(alert);
+      throw new Error('reporter secret body');
+    },
+    logger: { log() {}, error() {}, warn: message => warnings.push(message) },
+  });
+
+  assert.deepEqual(operationOrder, ['一组', '二组']);
+  assert.equal(alertAttempts.length, 1);
+  assert.equal(results.length, 2);
+  assert.equal(results[0].failed, true);
+  assert.equal(results[0].message, 'source unavailable');
+  assert.equal(results[0].error, terminalError);
+  assert.equal(results[1].created, 1);
+  assert.deepEqual(warnings, ['[daily-fact-sync] failure notification failed']);
+});

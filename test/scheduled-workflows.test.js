@@ -62,3 +62,61 @@ test('preserves a weekly instance stage attached to the terminal error', async (
   assert.equal(alerts.length, 1);
   assert.equal(alerts[0].stage, 'copy_template');
 });
+
+test('continues after a returned-error notification rejection without duplicating the result', async () => {
+  const alertAttempts = [];
+  const operationOrder = [];
+  const warnings = [];
+  const results = await runGroupedWorkflow({
+    task: '日报事实同步',
+    stage: 'write_daily_fact',
+    groups: [{ project: '一组' }, { project: '二组' }],
+    operation: async group => {
+      operationOrder.push(group.project);
+      return group.project === '一组'
+        ? { errors: [{ message: 'row write failed' }] }
+        : { synced: true };
+    },
+    notifyFailure: async alert => {
+      alertAttempts.push(alert);
+      throw new Error('reporter secret body');
+    },
+    logger: { warn: message => warnings.push(message) },
+  });
+
+  assert.deepEqual(operationOrder, ['一组', '二组']);
+  assert.equal(alertAttempts.length, 1);
+  assert.equal(results.length, 2);
+  assert.equal(results[0].failed, undefined);
+  assert.equal(results[1].synced, true);
+  assert.deepEqual(warnings, ['[scheduled-workflows] failure notification failed']);
+});
+
+test('continues after a terminal-error notification rejection without a second alert', async () => {
+  const alertAttempts = [];
+  const operationOrder = [];
+  const warnings = [];
+  const results = await runGroupedWorkflow({
+    task: 'AI周报生成',
+    stage: 'generate_weekly',
+    groups: [{ project: '一组' }, { project: '二组' }],
+    operation: async group => {
+      operationOrder.push(group.project);
+      if (group.project === '一组') throw new Error('provider unavailable');
+      return { generated: true };
+    },
+    notifyFailure: async alert => {
+      alertAttempts.push(alert);
+      throw new Error('reporter secret body');
+    },
+    logger: { warn: message => warnings.push(message) },
+  });
+
+  assert.deepEqual(operationOrder, ['一组', '二组']);
+  assert.equal(alertAttempts.length, 1);
+  assert.equal(results.length, 2);
+  assert.equal(results[0].failed, true);
+  assert.equal(results[0].error.message, 'provider unavailable');
+  assert.equal(results[1].generated, true);
+  assert.deepEqual(warnings, ['[scheduled-workflows] failure notification failed']);
+});

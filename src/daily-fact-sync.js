@@ -11,6 +11,7 @@ export async function syncDailyFactsForAllGroups({
   const results = [];
   for (const group of config.groups) {
     const scope = group.project || group.chatId;
+    let alert;
     try {
       const result = await bitable.syncDailyFactRecordsForGroup(group, {
         now,
@@ -26,27 +27,38 @@ export async function syncDailyFactsForAllGroups({
         ...result,
       });
       if (result.errors?.length) {
-        await notifyFailure({
+        alert = {
           task: '日报事实同步',
           scope,
           stage: 'write_daily_fact',
           errors: result.errors,
-        });
+        };
       }
     } catch (err) {
       const failure = {
         group: scope,
         failed: true,
+        message: err?.response?.data?.msg || err?.message || String(err),
         error: err,
       };
       results.push(failure);
       logger.error('[daily-fact-sync] group failed', failure);
-      await notifyFailure({
+      alert = {
         task: '日报事实同步',
         scope,
         stage: 'sync_group',
         errors: [err],
-      });
+      };
+    }
+
+    if (alert) {
+      try {
+        await notifyFailure(alert);
+      } catch {
+        try {
+          logger.warn('[daily-fact-sync] failure notification failed');
+        } catch {}
+      }
     }
   }
   return results;
