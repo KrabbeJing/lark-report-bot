@@ -84,6 +84,93 @@ test('reuses existing weekly sheet by title', async () => {
   assert.equal(calls.length, 1);
 });
 
+test('moves a sheet to workbook index zero with the verified sheet_ai payload', async () => {
+  const calls = [];
+  const writer = new WeeklySheetWriter({
+    request: async payload => {
+      calls.push(payload);
+      if (payload.url.includes('/wiki/v2/spaces/get_node')) {
+        return { data: { node: { obj_type: 'sheet', obj_token: 'sheet_token' } } };
+      }
+      if (payload.url.includes('/sheets/query')) {
+        return {
+          data: {
+            sheets: [
+              { sheet_id: 'template', title: '模板', index: 0 },
+              { sheet_id: 'other', title: '其他', index: 1 },
+              { sheet_id: 'week_28', title: '数字金融部周报0710', index: 2 },
+            ],
+          },
+        };
+      }
+      return { data: {} };
+    },
+  });
+
+  const result = await writer.moveSheet({ wikiNodeToken: 'wiki_node' }, 'week_28', 0);
+
+  assert.deepEqual(result, {
+    moved: true,
+    targetIndex: 0,
+    sourceIndex: 2,
+    response: { data: {} },
+  });
+  assert.deepEqual(calls.at(-1), {
+    method: 'POST',
+    url: '/open-apis/sheet_ai/v2/spreadsheets/sheet_token/tools/invoke_write',
+    data: {
+      input: JSON.stringify({
+        excel_id: 'sheet_token',
+        operation: 'move',
+        sheet_id: 'week_28',
+        source_index: 2,
+        target_index: 0,
+      }),
+      tool_name: 'modify_workbook_structure',
+    },
+  });
+});
+
+test('does not invoke a write when the sheet is already at the target index', async () => {
+  const calls = [];
+  const writer = new WeeklySheetWriter({
+    request: async payload => {
+      calls.push(payload);
+      return { data: { sheets: [{ sheet_id: 'week_28', title: '数字金融部周报0710', index: 0 }] } };
+    },
+  });
+
+  const result = await writer.moveSheet({ spreadsheetToken: 'sheet_token' }, 'week_28', 0);
+
+  assert.deepEqual(result, {
+    moved: false,
+    skipped: true,
+    reason: 'already_at_target_index',
+    targetIndex: 0,
+    sourceIndex: 0,
+  });
+  assert.equal(calls.length, 1);
+});
+
+test('validates sheet move arguments and requires the current sheet to exist', async () => {
+  const writer = new WeeklySheetWriter({
+    request: async () => ({ data: { sheets: [] } }),
+  });
+
+  await assert.rejects(
+    writer.moveSheet({ spreadsheetToken: 'sheet_token' }, '', 0),
+    /sheetId 为空/,
+  );
+  await assert.rejects(
+    writer.moveSheet({ spreadsheetToken: 'sheet_token' }, 'week_28', -1),
+    /目标位置无效/,
+  );
+  await assert.rejects(
+    writer.moveSheet({ spreadsheetToken: 'sheet_token' }, 'week_28', 0),
+    /周报工作表不存在/,
+  );
+});
+
 test('resolves wiki node before querying spreadsheet sheets', async () => {
   const calls = [];
   const writer = new WeeklySheetWriter({
@@ -176,6 +263,13 @@ test('renders title and sheet url', () => {
       weekEnd: '2026-06-26',
     }),
     '周报 2026.06.22-2026.06.26',
+  );
+  assert.equal(
+    renderWeeklySheetTitle('数字金融部周报{{weekEndMMDD}}', {
+      weekStart: '2026-07-06',
+      weekEnd: '2026-07-10',
+    }),
+    '数字金融部周报0710',
   );
   assert.equal(
     buildWeeklySheetUrl({

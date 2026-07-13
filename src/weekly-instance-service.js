@@ -29,22 +29,23 @@ export async function ensureWeeklyInstanceForGroup({
     };
   }
 
-  const sheet = await retryOperation(
+  const sheet = await runWeeklyStage('copy_sheet', () => retryOperation(
     () => sheetWriter.ensureWeeklySheet(group.weeklySheet, { weekStart, weekEnd }),
     { attempts: 3, delayMs: retryDelayMs },
-  );
+  ));
   const effectiveConfig = {
     ...group.weeklySheet,
     spreadsheetToken: sheet.spreadsheetToken || group.weeklySheet.spreadsheetToken,
   };
-  const targets = await sheetWriter.discoverTemplateTargets(
+  await runWeeklyStage('move_sheet', () => sheetWriter.moveSheet(effectiveConfig, sheet.sheetId, 0));
+  const targets = await runWeeklyStage('locate_template', () => sheetWriter.discoverTemplateTargets(
     effectiveConfig,
     sheet.sheetId,
     { aliasMap: group.weeklySheet.entityAliases },
-  );
-  await sheetWriter.writeCells(effectiveConfig, sheet.sheetId, {
+  ));
+  await runWeeklyStage('write_period', () => sheetWriter.writeCells(effectiveConfig, sheet.sheetId, {
     [targets.reportPeriod]: `${weekStart} 至 ${weekEnd}`,
-  });
+  }));
 
   const instance = {
     instanceKey,
@@ -58,7 +59,9 @@ export async function ensureWeeklyInstanceForGroup({
     sheetUrl: buildWeeklySheetUrl(effectiveConfig, sheet.sheetId),
     status: '已创建',
   };
-  const persisted = await bitable.upsertWeeklyInstance(group, instance, { now, timezone });
+  const persisted = await runWeeklyStage('write_instance_base', () => (
+    bitable.upsertWeeklyInstance(group, instance, { now, timezone })
+  ));
   return {
     skipped: false,
     reused: sheet.reused,
@@ -68,6 +71,15 @@ export async function ensureWeeklyInstanceForGroup({
     instance,
     persisted,
   };
+}
+
+async function runWeeklyStage(stage, operation) {
+  try {
+    return await operation();
+  } catch (error) {
+    error.weeklyInstanceStage = stage;
+    throw error;
+  }
 }
 
 export async function ensureWeeklyInstancesForAllGroups({

@@ -54,6 +54,20 @@ test('normalizes weekly instance schedule, table, and semantic aliases without c
   assert.equal(config.groups[0].weeklyInstanceTable.fieldTypes.sheetUrl, 'url');
   assert.equal(config.groups[0].weeklySheet.cellMap, undefined);
   assert.deepEqual(config.groups[0].weeklySheet.entityAliases.agileProjects['融羲项目组'], ['融羲']);
+  assert.equal(config.groups[0].weeklySheet.titlePattern, '数字金融部周报{{weekEndMMDD}}');
+});
+
+test('all weekly title configurations use the Friday MMDD title pattern', () => {
+  for (const filePath of [
+    'config/groups.json',
+    'config/groups.personal.json',
+    'config/groups.formal.example.json',
+  ]) {
+    const config = normalizeConfig(JSON.parse(readFileSync(filePath, 'utf8')));
+    for (const group of config.groups) {
+      assert.equal(group.weeklySheet?.titlePattern, '数字金融部周报{{weekEndMMDD}}', filePath);
+    }
+  }
 });
 
 test('normalizes chat raw and daily fact table configs', () => {

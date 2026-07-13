@@ -88,7 +88,7 @@
         "wikiNodeToken": "AyekwGsr6iGxClkrMM1cb5YCn1d",
         "spreadsheetUrl": "https://acncyn3n5k6i.feishu.cn/wiki/AyekwGsr6iGxClkrMM1cb5YCn1d?fromScene=spaceOverview&sheet=0Yytpw",
         "templateSheetId": "R0qnOz",
-        "titlePattern": "数字金融部周报 {{weekStart}}-{{weekEnd}}",
+        "titlePattern": "数字金融部周报{{weekEndMMDD}}",
         "copyTemplate": true,
         "reportScope": "allDailyTable",
         "reuseExisting": true,

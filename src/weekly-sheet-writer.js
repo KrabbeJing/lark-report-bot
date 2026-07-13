@@ -129,6 +129,46 @@ export class WeeklySheetWriter {
     throw new Error(`复制周报模板 sheet 成功但未返回新 sheetId: ${JSON.stringify(res?.data || res)}`);
   }
 
+  async moveSheet(sheetConfig, sheetId, targetIndex = 0) {
+    const resolvedConfig = await this.resolveSheetConfig(sheetConfig);
+    if (!sheetId) throw new Error('sheetId 为空，无法移动周报工作表');
+    if (!Number.isInteger(targetIndex) || targetIndex < 0) {
+      throw new Error(`工作表目标位置无效：${targetIndex}`);
+    }
+
+    const sheets = await this.listSheets(resolvedConfig.spreadsheetToken);
+    const sourceIndex = sheets.findIndex(sheet => sheet.sheetId === sheetId);
+    if (sourceIndex < 0) throw new Error(`周报工作表不存在：${sheetId}`);
+    const currentIndex = Number.isInteger(sheets[sourceIndex].index)
+      ? sheets[sourceIndex].index
+      : sourceIndex;
+    if (currentIndex === targetIndex) {
+      return {
+        moved: false,
+        skipped: true,
+        reason: 'already_at_target_index',
+        targetIndex,
+        sourceIndex: currentIndex,
+      };
+    }
+
+    const response = await this.client.request({
+      method: 'POST',
+      url: `/open-apis/sheet_ai/v2/spreadsheets/${resolvedConfig.spreadsheetToken}/tools/invoke_write`,
+      data: {
+        input: JSON.stringify({
+          excel_id: resolvedConfig.spreadsheetToken,
+          operation: 'move',
+          sheet_id: sheetId,
+          source_index: currentIndex,
+          target_index: targetIndex,
+        }),
+        tool_name: 'modify_workbook_structure',
+      },
+    });
+    return { moved: true, targetIndex, sourceIndex: currentIndex, response };
+  }
+
   async writeCells(sheetConfig, sheetId, values) {
     assertWeeklySheetConfig(sheetConfig);
     const resolvedConfig = await this.resolveSheetConfig(sheetConfig);
@@ -162,6 +202,7 @@ export function renderWeeklySheetTitle(pattern, { weekStart, weekEnd }) {
     .replaceAll('{{weekEnd}}', weekEnd || '')
     .replaceAll('{{weekStartCompact}}', compactDate(weekStart))
     .replaceAll('{{weekEndCompact}}', compactDate(weekEnd))
+    .replaceAll('{{weekEndMMDD}}', monthDay(weekEnd))
     .trim();
 }
 
@@ -201,4 +242,9 @@ function extractCopiedSheet(res) {
 
 function compactDate(ymd) {
   return String(ymd || '').replace(/-/g, '.');
+}
+
+function monthDay(ymd) {
+  const match = String(ymd || '').match(/^\d{4}-(\d{2})-(\d{2})$/);
+  return match ? `${match[1]}${match[2]}` : '';
 }

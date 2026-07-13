@@ -115,7 +115,7 @@
         "enabled": false,
         "spreadsheetUrl": "正式组织周报模板wiki链接",
         "templateSheetId": "周报模板sheetId",
-        "titlePattern": "数字金融部周报 {{weekStart}}-{{weekEnd}}",
+        "titlePattern": "数字金融部周报{{weekEndMMDD}}",
         "copyTemplate": true,
         "reportScope": "allDailyTable",
         "reuseExisting": true,

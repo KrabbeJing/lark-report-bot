@@ -259,7 +259,7 @@ function normalizeWeeklySheetConfig(sheet) {
     wikiNodeToken: sheet.wikiNodeToken || sheet.wiki_node_token || parsedLink.wikiNodeToken || '',
     spreadsheetUrl: sheetUrl,
     templateSheetId: sheet.templateSheetId || sheet.template_sheet_id || parsedLink.sheetId || '',
-    titlePattern: sheet.titlePattern || '数字金融部周报 {{weekStart}}-{{weekEnd}}',
+    titlePattern: sheet.titlePattern || '数字金融部周报{{weekEndMMDD}}',
     copyTemplate: sheet.copyTemplate !== false,
     reportScope: sheet.reportScope || sheet.report_scope || 'group',
     reuseExisting: sheet.reuseExisting !== false,

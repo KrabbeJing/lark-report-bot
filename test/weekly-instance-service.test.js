@@ -5,7 +5,7 @@ import {
   ensureWeeklyInstancesForAllGroups,
 } from '../src/weekly-instance-service.js';
 
-test('copies, validates, writes only report period, then registers instance', async () => {
+test('copies, moves, validates, writes only report period, then registers instance', async () => {
   const calls = [];
   const group = buildGroup();
   const result = await ensureWeeklyInstanceForGroup({
@@ -18,16 +18,21 @@ test('copies, validates, writes only report period, then registers instance', as
       },
     },
     sheetWriter: {
-      ensureWeeklySheet: async () => ({
-        spreadsheetToken: 'sheet_token',
-        sheetId: 'week_29',
-        title: '本周周报',
-        created: true,
-        reused: false,
-      }),
-      discoverTemplateTargets: async () => ({
-        reportPeriod: 'B2', metrics: {}, agileProjects: {}, management: {},
-      }),
+      ensureWeeklySheet: async () => {
+        calls.push(['copy']);
+        return {
+          spreadsheetToken: 'sheet_token',
+          sheetId: 'week_29',
+          title: '本周周报',
+          created: true,
+          reused: false,
+        };
+      },
+      moveSheet: async () => calls.push(['move']),
+      discoverTemplateTargets: async () => {
+        calls.push(['locate']);
+        return { reportPeriod: 'B2', metrics: {}, agileProjects: {}, management: {} };
+      },
       writeCells: async (_config, sheetId, values) => calls.push(['write', sheetId, values]),
     },
     now: new Date('2026-07-13T01:00:00.000Z'),
@@ -35,9 +40,9 @@ test('copies, validates, writes only report period, then registers instance', as
   });
 
   assert.equal(result.instanceKey, '2026-W29');
-  assert.deepEqual(calls[0], ['write', 'week_29', { B2: '2026-07-13 至 2026-07-17' }]);
-  assert.equal(calls[1][0], 'register');
-  assert.equal(calls[1][1].status, '已创建');
+  assert.deepEqual(calls.map(([name]) => name), ['copy', 'move', 'locate', 'write', 'register']);
+  assert.deepEqual(calls[3], ['write', 'week_29', { B2: '2026-07-13 至 2026-07-17' }]);
+  assert.equal(calls[4][1].status, '已创建');
 });
 
 test('returns persistent instance without copying or writing', async () => {
@@ -77,6 +82,7 @@ test('registers a sheet reused by title after an earlier Base write failure', as
         created: false,
         reused: true,
       }),
+      moveSheet: async () => {},
       discoverTemplateTargets: async () => ({
         reportPeriod: 'B2', metrics: {}, agileProjects: {}, management: {},
       }),
@@ -103,6 +109,7 @@ test('retries template copy twice and succeeds on the third attempt', async () =
         if (attempts < 3) throw new Error('临时复制失败');
         return { spreadsheetToken: 'sheet_token', sheetId: 'week_29', title: '本周周报', reused: false };
       },
+      moveSheet: async () => {},
       discoverTemplateTargets: async () => ({
         reportPeriod: 'B2', metrics: {}, agileProjects: {}, management: {},
       }),
@@ -131,9 +138,84 @@ test('returns the original copy error after three failed attempts', async () => 
     },
     now: new Date('2026-07-13T01:00:00.000Z'),
     retryDelayMs: 0,
-  }), error => error === originalError);
+  }), error => error === originalError && error.weeklyInstanceStage === 'copy_sheet');
 
   assert.equal(attempts, 3);
+});
+
+test('stages movement failures, avoids Base writes, and moves a recovered sheet before retrying Base', async () => {
+  const order = [];
+  let moveAttempts = 0;
+  let baseCalls = 0;
+  const dependencies = {
+    group: buildGroup(),
+    bitable: {
+      findWeeklyInstanceRecord: async () => null,
+      upsertWeeklyInstance: async () => { baseCalls += 1; order.push('base'); return { created: true }; },
+    },
+    sheetWriter: {
+      ensureWeeklySheet: async () => {
+        order.push('copy');
+        return {
+          spreadsheetToken: 'sheet_token',
+          sheetId: 'week_29',
+          title: '数字金融部周报0717',
+          created: moveAttempts === 0,
+          reused: moveAttempts > 0,
+        };
+      },
+      moveSheet: async () => {
+        moveAttempts += 1;
+        order.push('move');
+        if (moveAttempts === 1) throw new Error('move failed');
+      },
+      discoverTemplateTargets: async () => {
+        order.push('locate');
+        return { reportPeriod: 'B2', metrics: {}, agileProjects: {}, management: {} };
+      },
+      writeCells: async () => { order.push('write'); return { rangeCount: 1 }; },
+    },
+    now: new Date('2026-07-13T01:00:00.000Z'),
+    retryDelayMs: 0,
+  };
+
+  await assert.rejects(
+    ensureWeeklyInstanceForGroup(dependencies),
+    error => error.weeklyInstanceStage === 'move_sheet',
+  );
+  assert.equal(baseCalls, 0);
+
+  const recovered = await ensureWeeklyInstanceForGroup(dependencies);
+  assert.equal(recovered.reused, true);
+  assert.equal(baseCalls, 1);
+  assert.deepEqual(order, ['copy', 'move', 'copy', 'move', 'locate', 'write', 'base']);
+});
+
+test('marks locate, write, and Base failures with their stable stage names', async () => {
+  for (const [failingMethod, expectedStage] of [
+    ['discoverTemplateTargets', 'locate_template'],
+    ['writeCells', 'write_period'],
+    ['upsertWeeklyInstance', 'write_instance_base'],
+  ]) {
+    const originalError = new Error(`${failingMethod} failed`);
+    const bitable = {
+      findWeeklyInstanceRecord: async () => null,
+      upsertWeeklyInstance: async () => ({ created: true }),
+    };
+    const sheetWriter = {
+      ensureWeeklySheet: async () => ({ spreadsheetToken: 'sheet_token', sheetId: 'week_29', title: '周报' }),
+      moveSheet: async () => {},
+      discoverTemplateTargets: async () => ({ reportPeriod: 'B2', metrics: {}, agileProjects: {}, management: {} }),
+      writeCells: async () => ({ rangeCount: 1 }),
+    };
+    if (failingMethod === 'upsertWeeklyInstance') bitable.upsertWeeklyInstance = async () => { throw originalError; };
+    else sheetWriter[failingMethod] = async () => { throw originalError; };
+
+    await assert.rejects(
+      ensureWeeklyInstanceForGroup({ group: buildGroup(), bitable, sheetWriter, now: new Date('2026-07-13T01:00:00.000Z') }),
+      error => error === originalError && error.weeklyInstanceStage === expectedStage,
+    );
+  }
 });
 
 test('processes configured groups sequentially and reports skipped groups', async () => {
