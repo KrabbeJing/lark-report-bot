@@ -134,7 +134,9 @@ test('local group configs map supervisor users and contact agile groups', () => 
         `${filePath} ${group.chatId} dailyFactTable.直属上级 应配置为人员字段 user`,
       );
       assert.equal(group.dailyFactTable?.fieldTypes?.sourceTime, 'datetime');
-      assert.equal(group.dailyFactTable?.fieldTypes?.divisionalLeader, 'user');
+      if (group.dailyFactTable?.fields?.divisionalLeader) {
+        assert.equal(group.dailyFactTable?.fieldTypes?.divisionalLeader, 'user');
+      }
       assert.equal(
         group.contactTable?.fields?.agileGroup,
         '敏捷小组',
@@ -142,6 +144,10 @@ test('local group configs map supervisor users and contact agile groups', () => 
       );
     }
   }
+
+  const personal = normalizeConfig(JSON.parse(readFileSync('config/groups.personal.json', 'utf8')));
+  assert.equal(personal.groups[0].contactTable.fields.divisionalLeader, undefined);
+  assert.equal(personal.groups[0].dailyFactTable.fields.divisionalLeader, undefined);
 });
 
 test('parses bitable wiki link with table and view ids', () => {

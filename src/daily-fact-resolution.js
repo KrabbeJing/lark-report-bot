@@ -58,7 +58,9 @@ export function resolveIncrementalDailyFact({ existing = null, incoming }) {
       mergeStatus: existing.mergeStatus || '按时间取最新',
       conflictStatus: existing.conflictStatus || '已自动处理',
       autoResolutionNote: existing.autoResolutionNote
-        || `按来源时间采用${result.winner.source === 'form' ? '表单' : '群聊'}版本`,
+        || (existing.conflictStatus === '已自动处理'
+          ? `按来源时间采用${result.winner.source === 'form' ? '表单' : '群聊'}版本`
+          : ''),
     };
   }
   return result;

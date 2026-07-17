@@ -24,7 +24,7 @@
     "timezone": "Asia/Shanghai"
   },
   "dailyFactSync": {
-    "enabled": false,
+    "enabled": true,
     "time": "18:10",
     "timezone": "Asia/Shanghai",
     "lookbackDays": 7
@@ -58,27 +58,28 @@
       },
       "dailyFactTable": {
         "wikiUrl": "https://acncyn3n5k6i.feishu.cn/wiki/TOnDw6LUAiDNi4kc8yYcITpRnde?fromScene=spaceOverview&table=tbl0JWIeyHu8WSCU&view=vewf9t6U5V",
+        "fields": {
+          "divisionalLeader": ""
+        },
         "fieldTypes": {
           "reportDate": "date",
           "reporterName": "user",
           "supervisor": "user",
-          "divisionalLeader": "user",
           "messageTime": "datetime",
           "sourceTime": "datetime",
           "syncedAt": "datetime"
         }
       },
       "contactTable": {
-        "appToken": "Ic8FbuOr2aYeBasWrelcFw6enxe",
-        "tableId": "tblz5tlDWsLyFzv7",
-        "viewId": "vewVnQxucW",
+        "wikiUrl": "https://acncyn3n5k6i.feishu.cn/wiki/TOnDw6LUAiDNi4kc8yYcITpRnde?base_hp_from=larktab&table=tblivzutgDzJymmo&view=vewVnQxucW",
         "fields": {
           "teamName": "团队名称",
           "teamMember": "团队成员",
           "memberRealName": "成员真实姓名",
           "agileGroup": "敏捷小组",
           "teamRole": "团队身份",
-          "supervisor": "直属上级"
+          "supervisor": "直属上级",
+          "divisionalLeader": ""
         }
       },
       "weeklyTable": null,

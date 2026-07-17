@@ -76,6 +76,20 @@ test('incremental same-source refresh preserves known two-source conflict', () =
   assert.equal(result.conflictStatus, '已自动处理');
 });
 
+test('same-source refresh does not invent a note for an equal two-source merge', () => {
+  const result = resolveIncrementalDailyFact({
+    existing: {
+      source: 'form+chat', effectiveSource: 'chat', sourceTime: 2000,
+      fingerprint: 'same', matchingStatus: '已匹配', factStatus: '有效',
+      mergeStatus: '重复已合并', conflictStatus: '无冲突', autoResolutionNote: '',
+    },
+    incoming: candidate('chat', 2000, 'same', '已匹配'),
+  });
+  assert.equal(result.mergeStatus, '重复已合并');
+  assert.equal(result.conflictStatus, '无冲突');
+  assert.equal(result.autoResolutionNote, '');
+});
+
 function candidate(source, sourceTime, fingerprint, matchingStatus) {
   return { source, sourceTime, fingerprint, matchingStatus };
 }

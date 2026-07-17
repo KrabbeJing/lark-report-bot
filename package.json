@@ -8,6 +8,7 @@
     "dev": "node --watch src/index.js",
     "weekly:ensure": "node scripts/ensure-weekly-instance.js",
     "daily-fact:backfill": "node scripts/backfill-daily-facts.js",
+    "daily-chat:replay": "node scripts/replay-chat-daily-reports.js",
     "test": "node --test"
   },
   "dependencies": {

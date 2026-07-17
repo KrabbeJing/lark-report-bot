@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BitableService, normalizeSourceTimestamp } from '../src/bitable-service.js';
+import { BitableService, fieldValuesEqual, normalizeSourceTimestamp } from '../src/bitable-service.js';
 import { normalizeConfig } from '../src/config.js';
 import { buildContentFingerprint } from '../src/daily-record-utils.js';
 
@@ -32,6 +32,28 @@ test('normalizes text source times as Asia Shanghai timestamps', () => {
   } finally {
     process.env.TZ = previousTz;
   }
+});
+
+test('ignores Feishu display metadata when comparing person fields', () => {
+  assert.equal(fieldValuesEqual(
+    [{ id: 'ou_member', name: '成员姓名' }],
+    [{
+      id: 'ou_member',
+      name: '成员姓名',
+      en_name: 'Member',
+      avatar_url: 'https://example.invalid/avatar.png',
+    }],
+  ), true);
+  assert.equal(fieldValuesEqual(
+    [{ id: 'ou_member' }],
+    [{ id: 'ou_other' }],
+  ), false);
+});
+
+test('treats omitted and explicit empty Bitable fields as equal', () => {
+  assert.equal(fieldValuesEqual('', undefined), true);
+  assert.equal(fieldValuesEqual([], undefined), true);
+  assert.equal(fieldValuesEqual([], [{ id: 'ou_member' }]), false);
 });
 
 test('builds daily record fields using configured field names', () => {
@@ -769,11 +791,12 @@ test('keeps rolling fact indexes on the frozen key during ordinary sync', async 
   });
 
   assert.equal(result.created, 0);
-  assert.equal(result.updated, 2);
+  assert.equal(result.updated, 1);
   assert.equal(creates.length, 0);
-  assert.equal(updates.length, 2);
+  assert.equal(updates.length, 1);
   assert.equal(updates[0].data.fields['事实唯一键'], 'open_id:ou_old:2026-07-10');
-  assert.equal(updates[1].path.record_id, 'rec_fact');
+  assert.equal(updates[0].path.record_id, 'rec_fact');
+  assert.equal(updates[0].data.fields['来源记录ID'], 'rec_second');
 });
 
 test('migrates the fact key and rolling indexes with a repaired snapshot', async () => {
@@ -789,11 +812,12 @@ test('migrates the fact key and rolling indexes with a repaired snapshot', async
   });
 
   assert.equal(result.created, 0);
-  assert.equal(result.updated, 2);
+  assert.equal(result.updated, 1);
   assert.equal(creates.length, 0);
-  assert.equal(updates.length, 2);
+  assert.equal(updates.length, 1);
   assert.equal(updates[0].data.fields['事实唯一键'], 'open_id:ou_new:2026-07-10');
-  assert.equal(updates[1].path.record_id, 'rec_fact');
+  assert.equal(updates[0].path.record_id, 'rec_fact');
+  assert.equal(updates[0].data.fields['来源记录ID'], 'rec_second');
 });
 
 function buildSnapshotKeySyncFixture({ secondContactOpenId }) {
@@ -863,6 +887,7 @@ function buildSnapshotKeySyncFixture({ secondContactOpenId }) {
                     成员OpenID: 'ou_old',
                     日报来源: 'form',
                     来源记录ID: 'rec_first',
+                    来源组合: 'form:rec_first\nform:rec_second',
                     匹配状态: '已匹配',
                     匹配方式: 'open_id',
                     事实记录状态: '有效',
@@ -922,6 +947,8 @@ test('marks same-content form and chat facts as duplicate merged without conflic
           sourceRecordId: '来源记录ID',
           messageId: '来源消息ID',
           sourceRefs: '来源组合',
+          reportType: '日报类型',
+          dateRange: '日期覆盖范围',
           messageTime: '消息时间',
           matchMethod: '匹配方式',
           matchingStatus: '匹配状态',
@@ -1070,6 +1097,8 @@ test('preserves existing form content when later chat source conflicts', async (
                 日报来源: 'form+chat',
                 来源记录ID: 'rec_form',
                 来源组合: 'form:rec_form',
+                日报类型: '表单日报',
+                日期覆盖范围: '2026-07-01',
                 直属上级: [{ id: 'ou_mgr', name: '王经理' }],
                 分管领导: [{ id: 'ou_leader', name: '赵总' }],
                 匹配方式: 'open_id',
@@ -1105,6 +1134,8 @@ test('preserves existing form content when later chat source conflicts', async (
     rawText: '群聊原始内容',
     chatId: 'oc_chat',
     messageTime: '2026/07/01 18:00:00',
+    reportType: '群聊日报',
+    dateRange: '2026-07-01 至 2026-07-02',
   });
 
   assert.equal(result.updated, true);
@@ -1131,6 +1162,8 @@ test('preserves existing form content when later chat source conflicts', async (
   assert.equal(updatePayload.data.fields['冲突状态'], '已自动处理');
   assert.equal(updatePayload.data.fields['事实记录状态'], '有效');
   assert.equal(updatePayload.data.fields['来源组合'], 'form:rec_form\nchat_raw:rec_raw\nchat:om_chat');
+  assert.equal(updatePayload.data.fields['日报类型'], '表单日报');
+  assert.equal(updatePayload.data.fields['日期覆盖范围'], '2026-07-01');
 });
 
 test('merges existing chat source refs when incoming form source wins', async () => {
@@ -1407,6 +1440,66 @@ test('does not mark blank-identity chat raw rows historical', async () => {
   });
 
   assert.equal(result.created, true);
+  assert.equal(result.historicalUpdated, 0);
+  assert.equal(updates.length, 0);
+});
+
+test('does not mark another reporter historical when forwarded by the same sender', async () => {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      chatDailyRawTable: {
+        appToken: 'bas',
+        tableId: 'tbl_chat_raw',
+        fields: {
+          messageId: '消息ID',
+          senderOpenId: '发送人OpenID',
+          reporterName: '标题姓名',
+          reportDates: '拆分日期列表',
+          rawRecordStatus: '原始记录状态',
+        },
+      },
+    }],
+  }).groups[0];
+  const updates = [];
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        create: async payload => ({
+          data: { data: { record: { record_id: 'rec_new', fields: payload.data.fields } } },
+        }),
+        list: async () => ({
+          data: {
+            items: [{
+              record_id: 'rec_other_reporter',
+              fields: {
+                消息ID: 'om_old',
+                发送人OpenID: 'ou_forwarder',
+                标题姓名: '李四',
+                拆分日期列表: '2026-07-13',
+                原始记录状态: '主版本',
+              },
+            }],
+          },
+        }),
+        update: async payload => {
+          updates.push(payload);
+          return { data: { data: { record: { record_id: payload.path.record_id } } } };
+        },
+      },
+    },
+  });
+
+  const result = await service.createChatDailyRawRecord(group, {
+    reporterName: '王治坤',
+    reportDate: '2026-07-13',
+    reportDates: ['2026-07-13'],
+    workSummaryText: '完成测试',
+  }, {
+    messageId: 'om_new',
+    senderOpenId: 'ou_forwarder',
+  });
+
   assert.equal(result.historicalUpdated, 0);
   assert.equal(updates.length, 0);
 });
@@ -2956,7 +3049,7 @@ test('matches contact by open id and uses real name for display', async () => {
   assert.equal(contact.teamMember, '刘喜双');
   assert.equal(contact.accountDisplayName, '用户400276');
   assert.equal(contact.teamMemberId, 'ou_external');
-  assert.equal(contact.matchMethod, 'open_id');
+  assert.equal(contact.matchMethod, '姓名');
   assert.equal(contact.matchingStatus, '已匹配');
   assert.equal(contact.divisionalLeader, '李总');
   assert.equal(contact.divisionalLeaderOpenId, 'ou_leader');
@@ -3000,8 +3093,50 @@ test('matches contact by alias when open id is unavailable', async () => {
 
   const contact = await service.findTeamContact(group, { reporterName: '小刘' });
   assert.equal(contact.teamMember, '刘喜双');
-  assert.equal(contact.matchMethod, 'name_fallback');
-  assert.equal(contact.matchingStatus, '姓名匹配');
+  assert.equal(contact.matchMethod, '别名');
+  assert.equal(contact.matchingStatus, '已匹配');
+});
+
+test('prefers an explicit reporter name over the forwarding sender open id', async () => {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      contactTable: { appToken: 'bas', tableId: 'tbl_contacts' },
+    }],
+  }).groups[0];
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async () => ({
+          data: {
+            items: [
+              {
+                record_id: 'rec_forwarder',
+                fields: { 团队成员: [{ id: 'ou_forwarder', name: '测试转发人' }] },
+              },
+              {
+                record_id: 'rec_reporter',
+                fields: {
+                  团队成员: [{ id: 'ou_reporter', name: '王治坤' }],
+                  直属上级: [{ id: 'ou_manager', name: '直属经理' }],
+                },
+              },
+            ],
+          },
+        }),
+      },
+    },
+  });
+
+  const contact = await service.findTeamContact(group, {
+    reporterName: '王治坤',
+    senderOpenId: 'ou_forwarder',
+  });
+
+  assert.equal(contact.teamMember, '王治坤');
+  assert.equal(contact.teamMemberId, 'ou_reporter');
+  assert.equal(contact.supervisor, '直属经理');
+  assert.equal(contact.matchMethod, '姓名');
 });
 
 test('matches contact by member real name field alias', async () => {

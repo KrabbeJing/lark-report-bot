@@ -19,6 +19,7 @@ import {
   startWeeklyScheduler,
 } from './scheduler.js';
 import { runGroupedWorkflow } from './scheduled-workflows.js';
+import { SerialTaskQueue } from './serial-task-queue.js';
 import { ensureWeeklyInstanceForGroup } from './weekly-instance-service.js';
 import { generateWeeklyReportForGroup } from './weekly-reporter.js';
 import { WeeklySheetWriter } from './weekly-sheet-writer.js';
@@ -48,6 +49,8 @@ const bitable = new BitableService(client);
 const aiProvider = createAiProvider();
 const sheetWriter = new WeeklySheetWriter(client);
 const processedMessageIds = new Set();
+const processingMessageIds = new Set();
+const messageQueue = new SerialTaskQueue();
 const notifyFailure = async ({ task, scope, stage, errors }) => reportOperationalFailure({
   task,
   scope,
@@ -62,29 +65,36 @@ const eventDispatcher = new lark.EventDispatcher({}).register({
     const { message } = data;
     const messageId = message.message_id;
 
-    if (processedMessageIds.has(messageId)) {
+    if (processedMessageIds.has(messageId) || processingMessageIds.has(messageId)) {
       console.log('[dedupe] already processing/processed');
       return;
     }
-    rememberMessageId(messageId);
+    processingMessageIds.add(messageId);
 
     console.log('[event] message received', {
       chat_type: message.chat_type,
       message_type: message.message_type,
     });
 
-    handleMessageEvent({
-      data,
-      client,
-      messenger,
-      bitable,
-      config,
-      aiProvider,
-      sheetWriter,
-      outDir: OUT_DIR,
-    }).catch(async (err) => {
-      console.error(`[handler] failed ${formatOperationalError(err, { stage: 'handler' })}`);
-      await reportHandlerError({ err, message, messenger, config });
+    return messageQueue.enqueue(async () => {
+      try {
+        await handleMessageEvent({
+          data,
+          client,
+          messenger,
+          bitable,
+          config,
+          aiProvider,
+          sheetWriter,
+          outDir: OUT_DIR,
+        });
+        rememberMessageId(messageId);
+      } catch (err) {
+        console.error(`[handler] failed ${formatOperationalError(err, { stage: 'handler' })}`);
+        await reportHandlerError({ err, message, messenger, config });
+      } finally {
+        processingMessageIds.delete(messageId);
+      }
     });
   },
 });

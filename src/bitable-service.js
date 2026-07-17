@@ -9,6 +9,7 @@ export class BitableService {
   constructor(client) {
     this.client = client;
     this.tableAppTokenCache = new Map();
+    this.contactCache = new Map();
   }
 
   async resolveTableConfig(table, name = 'table') {
@@ -182,10 +183,11 @@ export class BitableService {
       const recordName = normalizeFieldValue(f[fields.reporterName]);
       const sameSender = Boolean(incomingSender && recordSender && recordSender === incomingSender);
       const sameName = Boolean(incomingName && recordName && recordName === incomingName);
+      const sameIdentity = incomingName && recordName ? sameName : sameSender;
       const recordDates = splitMultiline(f[fields.reportDates]);
       const overlaps = recordDates.some(date => dates.has(date));
       const isMain = normalizeFieldValue(f[fields.rawRecordStatus]) === '主版本';
-      return overlaps && isMain && (sameSender || sameName);
+      return overlaps && isMain && sameIdentity;
     });
 
     for (const record of candidates) {
@@ -246,6 +248,25 @@ export class BitableService {
     const formRecords = await this.listRecords(group.dailyTable, 'dailyFactSync.form.list', { automaticFields: true });
     const chatRawRecords = await this.listRecords(group.chatDailyRawTable, 'dailyFactSync.chatRaw.list', { includeView: false });
     const targetRecords = await this.listRecords(group.dailyFactTable, 'dailyFactSync.fact.list', { includeView: false });
+    const selectedFormRecordIds = selectLatestFormRecordIds(
+      formRecords,
+      group.dailyTable.fields,
+      group,
+      startDate,
+      endDate,
+    );
+    const selectedChatEntries = await selectLatestChatEntries(
+      chatRawRecords,
+      group.chatDailyRawTable.fields,
+      group,
+      startDate,
+      endDate,
+      options.includeHistoricalChat === true,
+      (raw, record) => this.findTeamContactForReport(group, {
+        reporterName: raw.reporterName,
+        senderOpenId: raw.senderOpenId,
+      }, record.record_id),
+    );
     const targetByFactKey = indexRecordsByField(targetRecords, group.dailyFactTable.fields.factKey);
     const targetBySourceIdentity = indexFactRecordsBySourceIdentity(targetRecords, group.dailyFactTable.fields);
 
@@ -265,6 +286,10 @@ export class BitableService {
     for (const formRecord of formRecords) {
       const report = normalizeDailyRecord(formRecord, group.dailyTable.fields, group);
       if (!report.reportDate || report.reportDate < startDate || report.reportDate > endDate) {
+        filtered += 1;
+        continue;
+      }
+      if (!selectedFormRecordIds.has(formRecord.record_id)) {
         filtered += 1;
         continue;
       }
@@ -308,6 +333,7 @@ export class BitableService {
           || targetBySourceIdentity.get(buildFactSourceIdentity(input));
         const result = await this.upsertDailyFactRecord(group, input, {
           existingRecord,
+          existingLookupComplete: true,
           repairOrganization: options.repairOrganization === true,
         });
         updateFactRecordIndexes({
@@ -334,7 +360,7 @@ export class BitableService {
 
     for (const rawRecord of chatRawRecords) {
       const raw = normalizeChatRawRecord(rawRecord, group.chatDailyRawTable.fields, group);
-      if (raw.rawRecordStatus === '历史版本') {
+      if (raw.rawRecordStatus === '历史版本' && options.includeHistoricalChat !== true) {
         filtered += 1;
         continue;
       }
@@ -347,6 +373,10 @@ export class BitableService {
 
       for (const reportDate of reportDates) {
         if (!reportDate || reportDate < startDate || reportDate > endDate) {
+          filtered += 1;
+          continue;
+        }
+        if (!selectedChatEntries.has(buildChatEntryId(rawRecord.record_id, reportDate))) {
           filtered += 1;
           continue;
         }
@@ -393,6 +423,7 @@ export class BitableService {
             || targetBySourceIdentity.get(buildFactSourceIdentity(input));
           const result = await this.upsertDailyFactRecord(group, input, {
             existingRecord,
+            existingLookupComplete: true,
             repairOrganization: options.repairOrganization === true,
           });
           updateFactRecordIndexes({
@@ -509,10 +540,12 @@ export class BitableService {
   async upsertDailyFactRecord(group, input, options = {}) {
     const table = await this.resolveTableConfig(group.dailyFactTable, 'dailyFactTable');
     assertTable(table, 'dailyFactTable');
-    const existing = options.existingRecord || await this.findDailyFactRecordByFactKey(group, input.factKey);
+    const existing = options.existingLookupComplete
+      ? options.existingRecord
+      : options.existingRecord || await this.findDailyFactRecordByFactKey(group, input.factKey);
     const fields = buildDailyFactFields(table, input, existing, options);
     if (existing) {
-      if (fieldsEqualForUpdate(fields, existing.fields || {}, table.fields.syncedAt)) {
+      if (fieldsEqualForUpdate(fields, existing.fields || {}, table.fields.syncedAt, { source: input.source })) {
         return { unchanged: true, record: existing, fields };
       }
       const res = await withBitableErrorContext('dailyFact.update', table, () => (
@@ -603,9 +636,18 @@ export class BitableService {
 
   async findTeamContact(group, { reporterName = '', senderOpenId = '' } = {}) {
     if (!tableIsConfigured(group.contactTable)) return null;
-    const records = await this.listRecords(group.contactTable, 'contactTable.findTeamContact');
-    const fields = group.contactTable.fields;
-    const contacts = records.map(record => normalizeContactRecord(record, fields));
+    const table = await this.resolveTableConfig(group.contactTable, 'contactTable');
+    const cacheKey = `${table.appToken}:${table.tableId}`;
+    const cached = this.contactCache.get(cacheKey);
+    let contacts = cached?.expiresAt > Date.now() ? cached.contacts : null;
+    if (!contacts) {
+      const records = await this.listRecords(table, 'contactTable.findTeamContact');
+      contacts = records.map(record => normalizeContactRecord(record, table.fields));
+      this.contactCache.set(cacheKey, {
+        contacts,
+        expiresAt: Date.now() + 60_000,
+      });
+    }
     return findBestContact(contacts, { reporterName, senderOpenId });
   }
 
@@ -758,26 +800,47 @@ function getDailyReadTable(group) {
   return tableIsConfigured(group.dailyFactTable) ? group.dailyFactTable : group.dailyTable;
 }
 
+const RETRYABLE_BITABLE_CODES = new Set(['1254290', '1254291', '1254607']);
+const BITABLE_RETRY_DELAYS_MS = [300, 800, 1600];
+
 async function withBitableErrorContext(operation, table, fn) {
-  try {
-    const res = await fn();
-    const code = getBitableBusinessCode(res);
-    if (code != null && Number(code) !== 0) {
+  for (let attempt = 0; attempt <= BITABLE_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      const res = await fn();
+      const code = getBitableBusinessCode(res);
+      if (code != null && Number(code) !== 0) {
+        const err = new Error('Bitable business error');
+        err.code = code;
+        err.response = { data: extractBitablePayload(res) };
+        throw err;
+      }
+      return res;
+    } catch (err) {
+      const code = err?.response?.data?.code ?? err?.code;
+      if (RETRYABLE_BITABLE_CODES.has(String(code)) && attempt < BITABLE_RETRY_DELAYS_MS.length) {
+        const delayMs = BITABLE_RETRY_DELAYS_MS[attempt];
+        console.warn('[bitable] transient failure; retrying', {
+          operation,
+          code: sanitizeOperationalCode(code),
+          attempt: attempt + 1,
+          delayMs,
+        });
+        await delay(delayMs);
+        continue;
+      }
+
       const context = buildBitableFailureContext(operation, table, code);
       console.error('[bitable] request failed', context);
-      const err = new Error(buildBitableFailureMessage(context));
-      err.code = code;
-      err.response = { data: extractBitablePayload(res) };
-      err._bitableContextLogged = true;
+      err.message = buildBitableFailureMessage(context);
       throw err;
     }
-    return res;
-  } catch (err) {
-    const context = buildBitableFailureContext(operation, table, err?.response?.data?.code ?? err?.code);
-    if (!err._bitableContextLogged) console.error('[bitable] request failed', context);
-    err.message = buildBitableFailureMessage(context);
-    throw err;
   }
+
+  throw new Error(`Bitable request failed [operation=${operation}]`);
+}
+
+function delay(milliseconds) {
+  return new Promise(resolve => setTimeout(resolve, milliseconds));
 }
 
 function buildBitableFailureContext(operation, table, code) {
@@ -883,6 +946,68 @@ function normalizeChatRawRecord(record, fields, group) {
     messageTime: normalizeFieldValue(fields.messageTime ? f[fields.messageTime] : ''),
     rawRecordStatus: normalizeFieldValue(fields.rawRecordStatus ? f[fields.rawRecordStatus] : ''),
   };
+}
+
+function selectLatestFormRecordIds(records, fields, group, startDate, endDate) {
+  const selected = new Map();
+  for (const record of records) {
+    const report = normalizeDailyRecord(record, fields, group);
+    if (!report.reportDate || report.reportDate < startDate || report.reportDate > endDate) continue;
+    const identity = buildFactKey({
+      openId: report.senderOpenId,
+      name: report.reporterName,
+      reportDate: report.reportDate,
+    });
+    keepLatestSourceCandidate(selected, identity, {
+      id: record.record_id,
+      sourceTime: normalizeSourceTimestamp(record.last_modified_time || record.created_time),
+    });
+  }
+  return new Set([...selected.values()].map(candidate => candidate.id));
+}
+
+async function selectLatestChatEntries(
+  records,
+  fields,
+  group,
+  startDate,
+  endDate,
+  includeHistorical,
+  resolveContact,
+) {
+  const selected = new Map();
+  for (const record of records) {
+    const raw = normalizeChatRawRecord(record, fields, group);
+    if (raw.rawRecordStatus === '历史版本' && !includeHistorical) continue;
+    const contact = await resolveContact(raw, record);
+    const dates = raw.reportDates.length ? raw.reportDates : [raw.reportDate].filter(Boolean);
+    for (const reportDate of dates) {
+      if (!reportDate || reportDate < startDate || reportDate > endDate) continue;
+      const identity = buildFactKey({
+        openId: contact?.teamMemberId || (raw.reporterName ? '' : raw.senderOpenId),
+        name: contact?.teamMember || raw.reporterName,
+        reportDate,
+      });
+      keepLatestSourceCandidate(selected, identity, {
+        id: buildChatEntryId(record.record_id, reportDate),
+        sourceTime: normalizeSourceTimestamp(raw.messageTime),
+      });
+    }
+  }
+  return new Set([...selected.values()].map(candidate => candidate.id));
+}
+
+function keepLatestSourceCandidate(selected, identity, candidate) {
+  const existing = selected.get(identity);
+  if (!existing
+    || candidate.sourceTime > existing.sourceTime
+    || (candidate.sourceTime === existing.sourceTime && candidate.id > existing.id)) {
+    selected.set(identity, candidate);
+  }
+}
+
+function buildChatEntryId(recordId, reportDate) {
+  return `${recordId || ''}:${reportDate || ''}`;
 }
 
 function buildChatRawFields(table, report, context = {}) {
@@ -1031,8 +1156,8 @@ function buildDailyFactFields(table, input, existing, options = {}) {
   });
   setMappedField(recordFields, table, 'matchingStatus', snapshot.matchingStatus);
   setMappedField(recordFields, table, 'matchMethod', snapshot.matchMethod);
-  setMappedField(recordFields, table, 'reportType', input.reportType || '');
-  setMappedField(recordFields, table, 'dateRange', input.dateRange || '');
+  setCanonicalField(recordFields, 'reportType', input.reportType || '');
+  setCanonicalField(recordFields, 'dateRange', input.dateRange || '');
   setCanonicalField(recordFields, 'messageTime', input.messageTime || '');
   setMappedField(recordFields, table, 'syncedAt', input.syncedAt || formatDateTime(new Date(), DEFAULT_TIMEZONE));
   return recordFields;
@@ -1079,21 +1204,33 @@ function updateFactRecordIndexes({
   }
 }
 
-function fieldsEqualForUpdate(incomingFields, existingFields, syncedAtFieldName) {
+function fieldsEqualForUpdate(incomingFields, existingFields, syncedAtFieldName, debugContext = {}) {
+  const changedFields = [];
   for (const [fieldName, value] of Object.entries(incomingFields || {})) {
     if (fieldName === syncedAtFieldName) continue;
-    if (!fieldValuesEqual(value, existingFields?.[fieldName])) return false;
+    if (!fieldValuesEqual(value, existingFields?.[fieldName])) changedFields.push(fieldName);
   }
-  return true;
+  if (changedFields.length && process.env.DEBUG_BITABLE_DIFF === '1') {
+    console.warn('[bitable] update fields differ', {
+      source: debugContext.source || '',
+      fields: changedFields.sort(),
+    });
+  }
+  return changedFields.length === 0;
 }
 
-function fieldValuesEqual(a, b) {
+export function fieldValuesEqual(a, b) {
   return JSON.stringify(normalizeComparableFieldValue(a)) === JSON.stringify(normalizeComparableFieldValue(b));
 }
 
 function normalizeComparableFieldValue(value) {
-  if (Array.isArray(value)) return value.map(item => normalizeComparableFieldValue(item));
+  if (value == null || value === '') return '';
+  if (Array.isArray(value)) {
+    if (value.length === 0) return '';
+    return value.map(item => normalizeComparableFieldValue(item));
+  }
   if (value && typeof value === 'object') {
+    if (typeof value.id === 'string' && value.id) return { id: value.id };
     return Object.fromEntries(
       Object.entries(value)
         .sort(([a], [b]) => a.localeCompare(b))
@@ -1340,6 +1477,29 @@ function normalizeContactRecord(record, fields) {
 }
 
 function findBestContact(contacts, { reporterName = '', senderOpenId = '' } = {}) {
+  const name = String(reporterName || '').trim();
+  const exactRealName = name
+    ? contacts.find(contact => contact.teamMember === name)
+    : null;
+  if (exactRealName) {
+    return {
+      ...exactRealName,
+      matchMethod: '姓名',
+      matchingStatus: '已匹配',
+    };
+  }
+
+  const exactAlias = name
+    ? contacts.find(contact => contact.memberAliases?.includes(name))
+    : null;
+  if (exactAlias) {
+    return {
+      ...exactAlias,
+      matchMethod: '别名',
+      matchingStatus: '已匹配',
+    };
+  }
+
   const exactOpenId = senderOpenId
     ? contacts.find(contact => contact.teamMemberId === senderOpenId)
     : null;
@@ -1348,18 +1508,6 @@ function findBestContact(contacts, { reporterName = '', senderOpenId = '' } = {}
       ...exactOpenId,
       matchMethod: 'open_id',
       matchingStatus: '已匹配',
-    };
-  }
-
-  const name = String(reporterName || '').trim();
-  const exactName = name
-    ? contacts.find(contact => contact.teamMember === name || contact.memberAliases?.includes(name))
-    : null;
-  if (exactName) {
-    return {
-      ...exactName,
-      matchMethod: 'name_fallback',
-      matchingStatus: '姓名匹配',
     };
   }
 
