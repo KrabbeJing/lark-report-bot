@@ -882,6 +882,7 @@ function normalizeDailyRecord(record, fields, group) {
     agileGroup: normalizeFieldValue(fields.agileGroup ? f[fields.agileGroup] : ''),
     reportDate: normalizeDateFieldValue(f[fields.reportDate]),
     reporterName: reporter.name || normalizeFieldValue(f[fields.reporterName]),
+    memberOpenId: normalizeFieldValue(fields.memberOpenId ? f[fields.memberOpenId] : ''),
     senderOpenId: normalizeFieldValue(fields.senderOpenId ? f[fields.senderOpenId] : '') || reporter.id,
     supervisor: supervisor.name,
     supervisorOpenId: supervisor.id,

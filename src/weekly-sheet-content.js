@@ -73,6 +73,120 @@ export function getWeeklySheetExpectedCells(cellMap = EMPTY_WEEKLY_SHEET_CELL_MA
   return [...new Set(cells.filter(Boolean))];
 }
 
+export function buildWeeklyPreviewBuckets({ reports = [], cellMap = {}, group = {} } = {}) {
+  return [
+    ...buildAgilePreviewBuckets(reports, cellMap.agileProjects || {}),
+    ...buildManagementPreviewBuckets(reports, cellMap.management || {}, group),
+  ];
+}
+
+function buildAgilePreviewBuckets(reports, specs) {
+  return Object.entries(specs).map(([name, spec]) => {
+    const bucketReports = filterReportsForAgileBucket(reports, spec, name);
+    const current = collectPreviewReportItems(bucketReports, ['workItems'], 'current');
+    const nextDirect = collectPreviewReportItems(bucketReports, ['tomorrowPlanItems'], 'next');
+    const next = nextDirect.length
+      ? nextDirect
+      : collectPreviewFollowUpItems(bucketReports, ['workItems', 'riskItems'], 'next');
+    return buildPreviewBucket('agileProjects', name, spec, current, next);
+  });
+}
+
+function buildManagementPreviewBuckets(reports, specs, group) {
+  return Object.entries(specs).map(([name, spec]) => {
+    const bucketReports = filterReportsForBucket(reports, spec, name, group);
+    const current = collectMatchingPreviewItems(
+      reports, spec, name, ['workItems', 'riskItems'], group, 'current',
+    );
+    const nextDirect = collectMatchingPreviewItems(
+      reports, spec, name, ['tomorrowPlanItems'], group, 'next',
+    );
+    const next = nextDirect.length
+      ? nextDirect
+      : collectPreviewFollowUpItems(bucketReports, ['workItems', 'riskItems'], 'next');
+    return buildPreviewBucket('management', name, spec, current, next);
+  });
+}
+
+function buildPreviewBucket(module, name, spec, current, next) {
+  const maxTargets = module === 'management' ? 3 : Infinity;
+  return {
+    module,
+    name,
+    targets: {
+      current: toCellArray(spec.current).slice(0, maxTargets),
+      next: toCellArray(spec.next).slice(0, maxTargets),
+    },
+    sources: { current, next },
+  };
+}
+
+function collectPreviewReportItems(reports, keys, category) {
+  const items = [];
+  for (const report of reports) {
+    for (const key of keys) {
+      for (const [itemIndex, text] of toTextArray(report[key]).entries()) {
+        items.push(toPreviewItem(report, text, category, key, itemIndex));
+      }
+    }
+  }
+  return dedupePreviewItems(items);
+}
+
+function collectMatchingPreviewItems(reports, spec, bucketName, keys, group, category) {
+  const aliases = buildAliases(spec, bucketName, group);
+  const items = [];
+  for (const report of reports) {
+    const reportScoped = reportMatchesBucket(report, spec, bucketName, group, { ignoreItemText: true });
+    for (const key of keys) {
+      for (const [itemIndex, text] of toTextArray(report[key]).entries()) {
+        if (reportScoped || aliases.some(alias => includesNormalized(text, alias))) {
+          items.push(toPreviewItem(report, text, category, key, itemIndex));
+        }
+      }
+    }
+  }
+  return dedupePreviewItems(items);
+}
+
+function collectPreviewFollowUpItems(reports, keys, category) {
+  const items = [];
+  for (const report of reports) {
+    for (const key of keys) {
+      for (const [itemIndex, text] of toTextArray(report[key]).entries()) {
+        if (FOLLOW_UP_RE.test(text)) {
+          items.push(toPreviewItem(report, text, category, key, itemIndex));
+        }
+      }
+    }
+  }
+  return dedupePreviewItems(items);
+}
+
+function toPreviewItem(report, text, category, sourceField, itemIndex) {
+  const factRecordId = String(report.recordId || '');
+  return {
+    evidenceId: [factRecordId, category, sourceField, itemIndex].join(':'),
+    factRecordId,
+    category,
+    sourceField,
+    itemIndex,
+    date: String(report.reportDate || ''),
+    member: report.reporterName || report.senderOpenId || '',
+    text: cleanItemText(text),
+  };
+}
+
+function dedupePreviewItems(items) {
+  const seen = new Set();
+  return items.filter(item => {
+    const key = item.evidenceId;
+    if (!item.factRecordId || !item.text || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function filterReportsForBucket(reports, spec, bucketName, group) {
   return reports.filter(report => reportMatchesBucket(report, spec, bucketName, group));
 }

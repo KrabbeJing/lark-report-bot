@@ -9,6 +9,7 @@
     "weekly:ensure": "node scripts/ensure-weekly-instance.js",
     "daily-fact:backfill": "node scripts/backfill-daily-facts.js",
     "daily-chat:replay": "node scripts/replay-chat-daily-reports.js",
+    "weekly:ai-preview": "node scripts/preview-weekly-ai.js",
     "test": "node --test"
   },
   "dependencies": {

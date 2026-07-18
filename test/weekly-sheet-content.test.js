@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizeConfig } from '../src/config.js';
-import { buildWeeklySheetValues, getWeeklySheetExpectedCells } from '../src/weekly-sheet-content.js';
+import {
+  buildWeeklyPreviewBuckets,
+  buildWeeklySheetValues,
+  getWeeklySheetExpectedCells,
+} from '../src/weekly-sheet-content.js';
 
 const cellMap = {
   reportPeriod: 'B2',
@@ -127,4 +131,59 @@ test('exposes the full configured cell list', () => {
   assert.equal(cells.includes('C26'), true);
   assert.equal(cells.includes('C68'), true);
   assert.equal(cells.includes('B2'), true);
+});
+
+test('builds preview buckets from persisted fact organization without core metric targets', () => {
+  const buckets = buildWeeklyPreviewBuckets({
+    group: { project: '数字金融部', contactTable: { appToken: 'must-not-be-read' } },
+    reports: [{
+      recordId: 'fact_history',
+      reportDate: '2026-07-13',
+      reporterName: '张三',
+      senderOpenId: 'ou_zhangsan',
+      project: '历史归属项目',
+      agileGroup: '收单项目组',
+      workItems: ['完成历史归属联调'],
+      tomorrowPlanItems: ['下周上线'],
+      riskItems: [],
+    }],
+    cellMap: {
+      reportPeriod: 'B2',
+      coreMetrics: { current: ['B5'] },
+      agileProjects: { 收单项目组: { current: 'C1', next: 'C2', aliases: ['收单'] } },
+      management: { 渠道创新建设: { current: ['C3', 'C4', 'C5', 'C9'], next: ['C6', 'C7', 'C8', 'C10'], aliases: ['收单'] } },
+    },
+  });
+
+  assert.equal(buckets.length, 2);
+  assert.deepEqual(buckets[0], {
+    module: 'agileProjects',
+    name: '收单项目组',
+    targets: { current: ['C1'], next: ['C2'] },
+    sources: {
+      current: [{
+        evidenceId: 'fact_history:current:workItems:0',
+        factRecordId: 'fact_history',
+        category: 'current',
+        sourceField: 'workItems',
+        itemIndex: 0,
+        date: '2026-07-13',
+        member: '张三',
+        text: '完成历史归属联调',
+      }],
+      next: [{
+        evidenceId: 'fact_history:next:tomorrowPlanItems:0',
+        factRecordId: 'fact_history',
+        category: 'next',
+        sourceField: 'tomorrowPlanItems',
+        itemIndex: 0,
+        date: '2026-07-13',
+        member: '张三',
+        text: '下周上线',
+      }],
+    },
+  });
+  assert.equal(buckets.some(bucket => bucket.targets.current.includes('B5')), false);
+  assert.deepEqual(buckets[1].targets.current, ['C3', 'C4', 'C5']);
+  assert.deepEqual(buckets[1].targets.next, ['C6', 'C7', 'C8']);
 });

@@ -2941,6 +2941,35 @@ test('only returns effective fact records for weekly summaries', async () => {
   assert.deepEqual(reports.map(report => report.recordId), ['rec_ok']);
 });
 
+test('exposes persisted member open ids from fact records', async () => {
+  const group = normalizeConfig({ groups: [{
+    chatId: 'oc_test', project: '支付平台',
+    dailyFactTable: { appToken: 'bas_test', tableId: 'tbl_fact' },
+  }] }).groups[0];
+  const service = new BitableService({ bitable: { appTableRecord: { list: async () => ({ data: { items: [
+    {
+      record_id: 'rec_a',
+      fields: {
+        所属板块: '支付平台', 日报日期: '2026-07-13', 实际日报提交人: '甲', 成员OpenID: 'ou_member_a',
+        发送人OpenID: 'ou_forwarder', 今日工作总结: '事项A', 事实记录状态: '有效',
+      },
+    },
+    {
+      record_id: 'rec_b',
+      fields: {
+        所属板块: '支付平台', 日报日期: '2026-07-13', 实际日报提交人: '乙', 成员OpenID: 'ou_member_b',
+        发送人OpenID: 'ou_forwarder', 今日工作总结: '事项B', 事实记录状态: '有效',
+      },
+    },
+  ] } }) } } });
+
+  const reports = await service.listAllDailyReportsForRange(group, '2026-07-13', '2026-07-13');
+  assert.deepEqual(reports.map(report => [report.reporterName, report.memberOpenId, report.senderOpenId]), [
+    ['甲', 'ou_member_a', 'ou_forwarder'],
+    ['乙', 'ou_member_b', 'ou_forwarder'],
+  ]);
+});
+
 test('uses contact table to enrich team name and supervisor', async () => {
   const group = normalizeConfig({
     groups: [{
