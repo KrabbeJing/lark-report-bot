@@ -85,6 +85,7 @@ export class OpenAICompatibleProvider {
       res = await this.requestChatCompletion({
         system: '你是企业项目管理助手。请基于日报内容填写周报模板指定单元格，只输出合法 JSON，不要编造日报中没有的信息。',
         user: prompt,
+        jsonMode: true,
       });
     } catch (error) {
       if (!isAbortError(error)) throw error;
@@ -132,6 +133,7 @@ export class OpenAICompatibleProvider {
       res = await this.requestChatCompletion({
         system: '你是企业周报助手。只能使用提供的事实事项，只输出合法 JSON。',
         user: buildWeeklyPreviewPrompt(input),
+        jsonMode: true,
       });
     } catch (error) {
       if (isAbortError(error)) throw new Error('AI preview request timed out');
@@ -168,7 +170,7 @@ export class OpenAICompatibleProvider {
     };
   }
 
-  async requestChatCompletion({ system, user }) {
+  async requestChatCompletion({ system, user, jsonMode = false }) {
     return fetch(`${this.baseUrl.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -179,6 +181,7 @@ export class OpenAICompatibleProvider {
       body: JSON.stringify({
         model: this.model,
         temperature: 0.2,
+        ...(jsonMode ? { response_format: { type: 'json_object' } } : {}),
         messages: [
           { role: 'system', content: system },
           { role: 'user', content: user },

@@ -69,6 +69,66 @@ test('strict preview returns structured cells with evidence ids', async () => {
   }
 });
 
+test('strict preview requests JSON mode', async () => {
+  const originalFetch = globalThis.fetch;
+  let body;
+  globalThis.fetch = async (_url, options) => {
+    body = JSON.parse(options.body);
+    return {
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: JSON.stringify({ cells: {} }) } }] }),
+    };
+  };
+
+  try {
+    await configuredProvider().generateWeeklySheetPreview(previewInput());
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(body.response_format, { type: 'json_object' });
+});
+
+test('weekly sheet summary requests JSON mode', async () => {
+  const originalFetch = globalThis.fetch;
+  let body;
+  globalThis.fetch = async (_url, options) => {
+    body = JSON.parse(options.body);
+    return {
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: JSON.stringify({ cells: {} }) } }] }),
+    };
+  };
+
+  try {
+    await configuredProvider().summarizeWeeklySheet(previewInput());
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(body.response_format, { type: 'json_object' });
+});
+
+test('plain weekly report summary does not request JSON mode', async () => {
+  const originalFetch = globalThis.fetch;
+  let body;
+  globalThis.fetch = async (_url, options) => {
+    body = JSON.parse(options.body);
+    return {
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: '本周完成收单联调' } }] }),
+    };
+  };
+
+  try {
+    await configuredProvider().summarizeWeeklyReports(previewInput());
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(Object.hasOwn(body, 'response_format'), false);
+});
+
 test('strict preview prompt describes the bucket module, section, and current and next targets', async () => {
   const originalFetch = globalThis.fetch;
   let prompt = '';
