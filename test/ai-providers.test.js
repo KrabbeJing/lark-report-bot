@@ -122,7 +122,13 @@ test('strict preview rejects HTTP failures without leaking key or response body'
 test('strict preview converts an aborted short timeout into a safe timeout error', async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (_url, request) => new Promise((_, reject) => {
-    request.signal.addEventListener('abort', () => reject(request.signal.reason), { once: true });
+    const guard = setTimeout(() => {
+      reject(new Error('mock fetch did not observe abort within 100ms'));
+    }, 100);
+    request.signal.addEventListener('abort', () => {
+      clearTimeout(guard);
+      reject(request.signal.reason);
+    }, { once: true });
   });
 
   try {

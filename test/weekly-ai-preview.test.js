@@ -284,6 +284,64 @@ test('CLI removes secrets and response bodies from serialized warnings and error
   assert.match(stderr.join(''), /weekly:ai-preview failed/);
 });
 
+test('CLI emits only whitelisted safe runPreview failure categories', async () => {
+  const cases = [
+    ['AI preview request timed out', 'weekly:ai-preview AI request timed out'],
+    ['AI preview request failed: status=429', 'weekly:ai-preview AI request failed: status=429'],
+    ['AI preview returned invalid JSON', 'weekly:ai-preview AI response invalid'],
+  ];
+
+  for (const [errorMessage, expectedMessage] of cases) {
+    const stderr = [];
+    const processRef = { exitCode: 0 };
+    const result = await runWeeklyAiPreviewCli({
+      argv: ['--start', '2026-07-13', '--end', '2026-07-17'],
+      createAiProvider: () => ({ name: 'openai-compatible', apiKey: 'test-ai-key' }),
+      createClient: () => ({}),
+      createBitable: () => ({}),
+      createSheetWriter: () => ({}),
+      loadConfig: () => ({ groups: [] }),
+      runPreview: async () => { throw new Error(errorMessage); },
+      stderr: text => stderr.push(text),
+      processRef,
+    });
+
+    assert.equal(result, null);
+    assert.equal(processRef.exitCode, 1);
+    assert.deepEqual(stderr, [`[weekly:ai-preview] ${expectedMessage}\n`]);
+  }
+});
+
+test('CLI keeps non-whitelisted runPreview failures generic', async () => {
+  const messages = [
+    'AI_API_KEY=secret',
+    'Authorization: Bearer secret',
+    'APP_SECRET=secret',
+    'response body: sensitive details',
+    'AI preview request failed: status=42',
+    'AI preview request failed: status=4290',
+    'AI preview request failed: status=429 response body: sensitive details',
+  ];
+
+  for (const errorMessage of messages) {
+    const stderr = [];
+    const result = await runWeeklyAiPreviewCli({
+      argv: ['--start', '2026-07-13', '--end', '2026-07-17'],
+      createAiProvider: () => ({ name: 'openai-compatible', apiKey: 'test-ai-key' }),
+      createClient: () => ({}),
+      createBitable: () => ({}),
+      createSheetWriter: () => ({}),
+      loadConfig: () => ({ groups: [] }),
+      runPreview: async () => { throw new Error(errorMessage); },
+      stderr: text => stderr.push(text),
+      processRef: { exitCode: 0 },
+    });
+
+    assert.equal(result, null);
+    assert.deepEqual(stderr, ['[weekly:ai-preview] weekly:ai-preview failed\n']);
+  }
+});
+
 test('creates a read-only preview from latest valid facts and validated model evidence', async () => {
   const calls = [];
   const forbidden = () => { throw new Error('write operation called'); };

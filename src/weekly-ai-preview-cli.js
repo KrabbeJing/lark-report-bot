@@ -52,13 +52,21 @@ export async function runWeeklyAiPreviewCli({
     stdout(output);
     return result;
   } catch (error) {
-    const message = error?.message === 'weekly:ai-preview requires AI_PROVIDER=openai-compatible'
-      ? error.message
-      : 'weekly:ai-preview failed';
+    const message = safeCliErrorMessage(error);
     stderr(`[weekly:ai-preview] ${message}\n`);
     processRef.exitCode = 1;
     return null;
   }
+}
+
+function safeCliErrorMessage(error) {
+  const message = error?.message;
+  if (message === 'weekly:ai-preview requires AI_PROVIDER=openai-compatible') return message;
+  if (message === 'AI preview request timed out') return 'weekly:ai-preview AI request timed out';
+  if (message === 'AI preview returned invalid JSON') return 'weekly:ai-preview AI response invalid';
+  const statusMatch = /^AI preview request failed: status=(\d{3})$/.exec(message || '');
+  if (statusMatch) return `weekly:ai-preview AI request failed: status=${statusMatch[1]}`;
+  return 'weekly:ai-preview failed';
 }
 
 function sanitizePreviewResult(result) {
