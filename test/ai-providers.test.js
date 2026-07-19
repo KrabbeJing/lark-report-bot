@@ -129,7 +129,7 @@ test('plain weekly report summary does not request JSON mode', async () => {
   assert.equal(Object.hasOwn(body, 'response_format'), false);
 });
 
-test('strict preview prompt describes the bucket module, section, and current and next targets', async () => {
+test('strict preview prompt describes targets and sends compact evidence items', async () => {
   const originalFetch = globalThis.fetch;
   let prompt = '';
   globalThis.fetch = async (_url, request) => {
@@ -156,9 +156,18 @@ test('strict preview prompt describes the bucket module, section, and current an
   assert.match(prompt, /模块二\/收单项目组\/本周重点事项说明 -> D30/);
   assert.match(prompt, /模块二\/收单项目组\/下周工作计划 -> D31/);
   assert.match(prompt, /单元格含义/);
-  assert.match(prompt, /rec_1:current:workItems:0/);
-  assert.match(prompt, /"factRecordId": "rec_1"/);
+  assert.match(prompt, /"evidenceId":\s*"rec_1:current:workItems:0"/);
+  assert.match(prompt, /"date":\s*"2026-07-13"/);
+  assert.match(prompt, /"member":\s*"张三"/);
+  assert.match(prompt, /"category":\s*"current"/);
+  assert.match(prompt, /"kind":\s*"workItems"/);
+  assert.match(prompt, /"text":\s*"完成收单联调"/);
   assert.match(prompt, /evidenceId 可作为 evidenceIds/);
+  assert.doesNotMatch(prompt, /factRecordId/);
+  assert.doesNotMatch(prompt, /itemIndex/);
+  assert.doesNotMatch(prompt, /"workItems"\s*:/);
+  assert.doesNotMatch(prompt, /"tomorrowPlanItems"\s*:/);
+  assert.doesNotMatch(prompt, /"riskItems"\s*:/);
 });
 
 test('strict preview rejects HTTP failures without leaking key or response body', async () => {

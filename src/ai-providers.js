@@ -261,17 +261,11 @@ function buildWeeklyPreviewPrompt(input) {
   const targetDescriptions = describeWeeklySheetTargets(input.cellMap);
   const reports = input.reports.map(report => ({
     evidenceId: report.evidenceId,
-    factRecordId: report.factRecordId,
-    category: report.category,
-    sourceField: report.sourceField,
-    itemIndex: report.itemIndex,
     date: report.reportDate,
-    name: report.reporterName,
-    project: report.project,
-    agileGroup: report.agileGroup,
-    workItems: report.workItems,
-    tomorrowPlanItems: report.tomorrowPlanItems,
-    riskItems: report.riskItems,
+    member: report.reporterName,
+    category: report.category,
+    kind: report.sourceField,
+    text: report[report.sourceField]?.[0] ?? '',
   }));
   const exampleCells = Object.fromEntries(cells.map(cell => [cell, [{ text: '', evidenceIds: [] }]]));
   return [
@@ -281,11 +275,11 @@ function buildWeeklyPreviewPrompt(input) {
     '单元格含义：',
     ...targetDescriptions,
     '',
-    '日报事实（每项的 evidenceId 可作为 evidenceIds，factRecordId 仅用于追溯）：',
-    JSON.stringify(reports, null, 2),
+    '日报事实（每项的 evidenceId 可作为 evidenceIds）：',
+    JSON.stringify(reports),
     '',
     `请只输出 JSON，格式为：${JSON.stringify({ cells: exampleCells })}。`,
-    '每个 cells 单元格值必须是数组；数组每项包含 text 字符串和 evidenceIds 字符串数组。只可引用提供的 evidenceId，不得引用 factRecordId 或编造事实。',
+    '每个 cells 单元格值必须是数组；数组每项包含 text 字符串和 evidenceIds 字符串数组。只可引用提供的 evidenceId，不得编造事实。',
   ].join('\n');
 }
 
