@@ -1,6 +1,12 @@
+import crypto from 'node:crypto';
 import { WEEKLY_FIELD_KEYS, tableIsConfigured } from './config.js';
 import { DEFAULT_TIMEZONE, addDaysToYmd, formatDateTime, formatYmd, parseYmd } from './date-utils.js';
-import { buildContentFingerprint, buildFactKey, buildSourceRefs } from './daily-record-utils.js';
+import {
+  buildContentFingerprint,
+  buildFactKey,
+  buildSourceRefs,
+  normalizeContentForFingerprint,
+} from './daily-record-utils.js';
 import { rebuildDailyFactFields, resolveDailyFactFields } from './daily-fact-resolution.js';
 import { sanitizeOperationalText } from './error-reporter.js';
 import { resolveOrganizationSnapshot } from './organization-snapshot.js';
@@ -303,6 +309,7 @@ export class BitableService {
       message: sourceListError?.message || String(sourceListError),
     }] : [];
     const rebuildGroups = new Map();
+    const weakGroupsByReporterDate = new Map();
     const claimedTargetRecordIds = new Set();
     const sourceCounts = {
       form: formRecords.length,
@@ -361,10 +368,10 @@ export class BitableService {
         };
         collectDailyFactRebuildCandidate({
           rebuildGroups,
-          claimedTargetRecordIds,
           targetByFactKey,
           targetBySourceIdentity,
           targetByReporterDate,
+          weakGroupsByReporterDate,
           input,
         });
         sourceCounts.formFacts += 1;
@@ -442,10 +449,10 @@ export class BitableService {
           };
           collectDailyFactRebuildCandidate({
             rebuildGroups,
-            claimedTargetRecordIds,
             targetByFactKey,
             targetBySourceIdentity,
             targetByReporterDate,
+            weakGroupsByReporterDate,
             input,
           });
           sourceCounts.chatFacts += 1;
@@ -461,9 +468,17 @@ export class BitableService {
       }
     }
 
+    for (const reporterDateAlias of weakGroupsByReporterDate.keys()) {
+      bridgeUnambiguousReporterDateGroups({
+        reporterDateAlias,
+        rebuildGroups,
+        weakGroupsByReporterDate,
+        targetByReporterDate,
+      });
+    }
+
     for (const rebuildGroup of new Set(rebuildGroups.values())) {
       try {
-        const input = consolidateDailyFactInputs(rebuildGroup.inputs);
         const existingRecord = rebuildGroup.existingRecord;
         const existingState = existingRecord
           ? readExistingDailyFactState(existingRecord.fields || {}, group.dailyFactTable.fields)
@@ -477,12 +492,16 @@ export class BitableService {
           existingFactStatus: existingState?.factStatus || '',
         });
         resolution = preserveExistingNonEmptyFactValues(resolution, existingState);
+        const input = consolidateDailyFactInputs(rebuildGroup.inputs, resolution);
         const result = await this.upsertDailyFactRecord(group, input, {
           existingRecord,
           existingLookupComplete: true,
           repairOrganization: options.repairOrganization === true,
           resolution,
         });
+        if (existingRecord?.record_id) {
+          claimedTargetRecordIds.add(existingRecord.record_id);
+        }
         if (result.created) created += 1;
         else if (result.updated) updated += 1;
         else if (result.unchanged) unchanged += 1;
@@ -1106,47 +1125,132 @@ function buildChatRawFields(table, report, context = {}) {
 
 function collectDailyFactRebuildCandidate({
   rebuildGroups,
-  claimedTargetRecordIds,
   targetByFactKey,
   targetBySourceIdentity,
   targetByReporterDate,
+  weakGroupsByReporterDate,
   input,
 }) {
   const reporterDateAlias = buildReporterDateIdentity(input.reporterName, input.reportDate);
   const existingRecord = targetByFactKey.get(input.factKey)
-    || targetBySourceIdentity.get(buildFactSourceIdentity(input))
-    || targetByReporterDate.get(reporterDateAlias);
+    || targetBySourceIdentity.get(buildFactSourceIdentity(input));
   const aliases = [
     existingRecord?.record_id ? `record:${existingRecord.record_id}` : '',
     input.factKey ? `fact:${input.factKey}` : '',
-    reporterDateAlias ? `reporter:${reporterDateAlias}` : '',
   ].filter(Boolean);
   const matchedGroups = [...new Set(aliases.map(alias => rebuildGroups.get(alias)).filter(Boolean))];
   const current = matchedGroups.shift() || {
     existingRecord,
     inputs: [],
+    weakBridgeCount: 0,
   };
   for (const duplicate of matchedGroups) {
+    if (!canMergeStrongRebuildGroups(current, duplicate)) continue;
     current.existingRecord ||= duplicate.existingRecord;
     current.inputs.push(...duplicate.inputs);
-    for (const [alias, rebuildGroup] of rebuildGroups.entries()) {
-      if (rebuildGroup === duplicate) rebuildGroups.set(alias, current);
-    }
+    current.weakBridgeCount += duplicate.weakBridgeCount || 0;
+    replaceRebuildGroupReferences(
+      duplicate,
+      current,
+      rebuildGroups,
+      weakGroupsByReporterDate,
+    );
   }
   current.existingRecord ||= existingRecord;
   current.inputs.push(input);
-  for (const alias of aliases) rebuildGroups.set(alias, current);
-  if (existingRecord?.record_id) claimedTargetRecordIds.add(existingRecord.record_id);
+  for (const alias of aliases) {
+    const aliasGroup = rebuildGroups.get(alias);
+    if (!aliasGroup || aliasGroup === current) rebuildGroups.set(alias, current);
+  }
+  if (reporterDateAlias) {
+    const weakGroups = weakGroupsByReporterDate.get(reporterDateAlias) || new Set();
+    weakGroups.add(current);
+    weakGroupsByReporterDate.set(reporterDateAlias, weakGroups);
+  }
 }
 
-function consolidateDailyFactInputs(inputs) {
-  const canonical = [...inputs].sort(compareDailyFactInputs).at(-1);
-  const organization = [...inputs]
+function bridgeUnambiguousReporterDateGroups({
+  reporterDateAlias,
+  rebuildGroups,
+  weakGroupsByReporterDate,
+  targetByReporterDate,
+}) {
+  const groups = weakGroupsByReporterDate.get(reporterDateAlias);
+  const existingRecords = targetByReporterDate.get(reporterDateAlias) || new Set();
+  if (!groups || groups.size !== 2 || existingRecords.size > 1) return;
+
+  const candidates = [...groups];
+  const matchedGroups = candidates.filter(hasSingleMatchedMemberIdentity);
+  const unmatchedGroups = candidates.filter(isSingleUnmatchedWeakGroup);
+  if (matchedGroups.length !== 1 || unmatchedGroups.length !== 1) return;
+
+  const matched = matchedGroups[0];
+  const unmatched = unmatchedGroups[0];
+  if (matched === unmatched || matched.weakBridgeCount > 0) return;
+  const matchedRecordId = matched.existingRecord?.record_id || '';
+  const onlyWeakRecordId = [...existingRecords][0]?.record_id || '';
+  if (onlyWeakRecordId && onlyWeakRecordId !== matchedRecordId) return;
+
+  matched.inputs.push(...unmatched.inputs);
+  matched.weakBridgeCount += 1;
+  replaceRebuildGroupReferences(
+    unmatched,
+    matched,
+    rebuildGroups,
+    weakGroupsByReporterDate,
+  );
+}
+
+function hasSingleMatchedMemberIdentity(group) {
+  const matchedIds = new Set(group.inputs
     .filter(input => input.contact && input.matchingStatus !== '未匹配')
-    .sort(compareDailyFactInputs)
-    .at(-1) || canonical;
-  const form = selectLatestPrimarySourceInput(inputs, 'form', input => input.sourceRecordId);
-  const chat = selectLatestPrimarySourceInput(inputs, 'chat', input => input.messageId);
+    .map(input => String(input.memberOpenId || '').trim())
+    .filter(Boolean));
+  return matchedIds.size === 1;
+}
+
+function isSingleUnmatchedWeakGroup(group) {
+  return !group.existingRecord
+    && (group.weakBridgeCount || 0) === 0
+    && group.inputs.length > 0
+    && group.inputs.every(input => !input.contact || input.matchingStatus === '未匹配');
+}
+
+function canMergeStrongRebuildGroups(left, right) {
+  const leftRecordId = left.existingRecord?.record_id || '';
+  const rightRecordId = right.existingRecord?.record_id || '';
+  if (leftRecordId && rightRecordId && leftRecordId !== rightRecordId) return false;
+
+  const matchedIds = new Set([...left.inputs, ...right.inputs]
+    .filter(input => input.contact && input.matchingStatus !== '未匹配')
+    .map(input => String(input.memberOpenId || '').trim())
+    .filter(Boolean));
+  return matchedIds.size <= 1;
+}
+
+function replaceRebuildGroupReferences(
+  previous,
+  next,
+  rebuildGroups,
+  weakGroupsByReporterDate,
+) {
+  for (const [alias, rebuildGroup] of rebuildGroups.entries()) {
+    if (rebuildGroup === previous) rebuildGroups.set(alias, next);
+  }
+  for (const groups of weakGroupsByReporterDate.values()) {
+    if (!groups.delete(previous)) continue;
+    groups.add(next);
+  }
+}
+
+function consolidateDailyFactInputs(inputs, resolution) {
+  const form = selectResolutionContributor(inputs, 'form', resolution);
+  const chat = selectResolutionContributor(inputs, 'chat', resolution);
+  const canonical = selectCanonicalTraceInput(inputs, resolution);
+  const organization = selectCanonicalTraceInput(
+    inputs.filter(input => input.contact && input.matchingStatus !== '未匹配'),
+    resolution,
+  ) || canonical;
   const sourceRefs = inputs.reduce((refs, input) => mergeSourceRefs(refs, buildSourceRefs({
     source: input.source,
     sourceRecordId: input.sourceRecordId,
@@ -1169,27 +1273,89 @@ function consolidateDailyFactInputs(inputs) {
   };
 }
 
-function selectLatestPrimarySourceInput(inputs, source, selectPrimaryId) {
+function selectResolutionContributor(inputs, source, resolution) {
   return inputs
-    .filter(input => input.source === source)
-    .sort((left, right) => {
-      const timeDifference = normalizeSourceTimestamp(left.sourceTime)
-        - normalizeSourceTimestamp(right.sourceTime);
-      if (timeDifference !== 0) return timeDifference;
-      const leftId = `${selectPrimaryId(left) || ''}\u0000${left.sourceRecordId || ''}`;
-      const rightId = `${selectPrimaryId(right) || ''}\u0000${right.sourceRecordId || ''}`;
-      if (leftId === rightId) return 0;
-      return leftId > rightId ? 1 : -1;
-    })
+    .filter(input => !source || input.source === source)
+    .sort((left, right) => compareResolutionContributors(left, right, resolution))
     .at(-1);
 }
 
-function compareDailyFactInputs(left, right) {
-  const timeDifference = normalizeSourceTimestamp(left.sourceTime)
-    - normalizeSourceTimestamp(right.sourceTime);
+function selectCanonicalTraceInput(inputs, resolution) {
+  return [...inputs].sort((left, right) => {
+    const timeDifference = normalizeSourceTimestamp(left.sourceTime)
+      - normalizeSourceTimestamp(right.sourceTime);
+    if (timeDifference !== 0) return timeDifference;
+    const contributionDifference = compareResolutionContributors(left, right, resolution);
+    if (contributionDifference !== 0) return contributionDifference;
+    if (left.source === right.source) return 0;
+    return left.source === 'form' ? 1 : -1;
+  }).at(-1);
+}
+
+function compareResolutionContributors(left, right, resolution) {
+  const leftScore = buildResolutionContributionScore(left, resolution);
+  const rightScore = buildResolutionContributionScore(right, resolution);
+  const metadataDifference = leftScore.metadataMatches - rightScore.metadataMatches;
+  if (metadataDifference !== 0) return metadataDifference;
+  const selectedDifference = leftScore.selectedMatches - rightScore.selectedMatches;
+  if (selectedDifference !== 0) return selectedDifference;
+  const timeDifference = leftScore.sourceTime - rightScore.sourceTime;
   if (timeDifference !== 0) return timeDifference;
-  if (left.source === right.source) return 0;
-  return left.source === 'form' ? 1 : -1;
+  if (leftScore.stableKey === rightScore.stableKey) return 0;
+  return leftScore.stableKey > rightScore.stableKey ? 1 : -1;
+}
+
+function buildResolutionContributionScore(input, resolution) {
+  const candidate = toDailyFactCandidate(input);
+  let metadataMatches = 0;
+  let selectedMatches = 0;
+  // Prefer the input contributing the most final per-source fields, then final selected fields.
+  for (const key of ['workItems', 'tomorrowPlanItems', 'riskItems']) {
+    const value = candidate.values[key];
+    if (!normalizeContentForFingerprint(value)) continue;
+    const fingerprint = buildDailyFactFieldFingerprint(value);
+    const fieldSource = resolution.fieldSources?.[key];
+    const sourceMetadata = fieldSource?.sources?.[candidate.source];
+    if (
+      Number(sourceMetadata?.sourceTime) !== candidate.sourceTime
+      || sourceMetadata?.fingerprint !== fingerprint
+    ) {
+      continue;
+    }
+    metadataMatches += 1;
+    if (
+      fieldSource.source === candidate.source
+      && Number(fieldSource.sourceTime) === candidate.sourceTime
+      && fieldSource.fingerprint === fingerprint
+    ) {
+      selectedMatches += 1;
+    }
+  }
+  return {
+    metadataMatches,
+    selectedMatches,
+    sourceTime: candidate.sourceTime,
+    stableKey: JSON.stringify({
+      source: candidate.source,
+      values: ['workItems', 'tomorrowPlanItems', 'riskItems']
+        .map(key => normalizeContentForFingerprint(candidate.values[key])),
+      rawText: normalizeContentForFingerprint(input.rawText),
+      senderOpenId: String(input.senderOpenId || ''),
+      chatId: String(input.chatId || ''),
+      reportType: String(input.reportType || ''),
+      dateRange: String(input.dateRange || ''),
+      messageTime: String(input.messageTime || ''),
+      sourceRecordId: String(input.sourceRecordId || ''),
+      messageId: String(input.messageId || ''),
+    }),
+  };
+}
+
+function buildDailyFactFieldFingerprint(value) {
+  return crypto
+    .createHash('sha256')
+    .update(normalizeContentForFingerprint(value))
+    .digest('hex');
 }
 
 function toDailyFactCandidate(input) {
@@ -1203,7 +1369,7 @@ function toDailyFactCandidate(input) {
 
 function buildDailyFactRebuildCandidates(inputs, existingState) {
   const candidates = inputs.map(toDailyFactCandidate);
-  if (!existingState || !inputs.some(input => input.source === 'chat')) return candidates;
+  if (!existingState) return candidates;
 
   for (const key of ['tomorrowPlanItems', 'riskItems']) {
     const rawChatCanRecoverField = candidates.some(candidate => (
@@ -2030,7 +2196,10 @@ function indexFactRecordsByReporterDate(records, fields) {
       || reporter.name;
     const reportDate = normalizeDateFieldValue(record.fields?.[fields.reportDate]);
     const identity = buildReporterDateIdentity(reporterName, reportDate);
-    if (identity) index.set(identity, record);
+    if (!identity) continue;
+    const matches = index.get(identity) || new Set();
+    matches.add(record);
+    index.set(identity, matches);
   }
   return index;
 }

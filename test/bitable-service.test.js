@@ -2890,7 +2890,35 @@ test('scheduled rebuild lets a newer recoverable form plan and risk beat synthet
   assert.equal(snapshot.riskItems.source, 'form');
 });
 
-function buildChatPlanRiskRebuildFixture({ formTime, chatSnapshotTime }) {
+test('scheduled rebuild preserves newer chat plan and risk with zero selected chat rows', async () => {
+  const formTime = 1783690000000;
+  const chatTime = 1783699200000;
+  const { service, group, getUpdate } = buildChatPlanRiskRebuildFixture({
+    formTime,
+    chatSnapshotTime: chatTime,
+    includeChatRaw: false,
+  });
+
+  await service.syncDailyFactRecordsForGroup(group, {
+    startDate: '2026-07-01',
+    endDate: '2026-07-01',
+  });
+
+  const fields = getUpdate().data.fields;
+  const snapshot = JSON.parse(fields['字段来源快照']);
+  assert.equal(fields['明日工作计划'], '群聊计划');
+  assert.equal(fields['遇到的问题'], '群聊风险');
+  assert.equal(snapshot.tomorrowPlanItems.source, 'chat');
+  assert.equal(snapshot.tomorrowPlanItems.sourceTime, chatTime);
+  assert.equal(snapshot.riskItems.source, 'chat');
+  assert.equal(snapshot.riskItems.sourceTime, chatTime);
+});
+
+function buildChatPlanRiskRebuildFixture({
+  formTime,
+  chatSnapshotTime,
+  includeChatRaw = true,
+}) {
   const group = normalizeConfig({
     groups: [{
       dailyTable: { appToken: 'bas', tableId: 'tbl_source' },
@@ -2927,7 +2955,7 @@ function buildChatPlanRiskRebuildFixture({ formTime, chatSnapshotTime }) {
           if (path.table_id === 'tbl_chat_raw') {
             return {
               data: {
-                items: [{
+                items: includeChatRaw ? [{
                   record_id: 'rec_raw',
                   fields: {
                     消息ID: 'om_chat',
@@ -2938,7 +2966,7 @@ function buildChatPlanRiskRebuildFixture({ formTime, chatSnapshotTime }) {
                     消息时间: chatSnapshotTime,
                     原始记录状态: '主版本',
                   },
-                }],
+                }] : [],
               },
             };
           }
@@ -3023,22 +3051,148 @@ test('scheduled rebuild selects the newest primary IDs and retains every source 
   );
 });
 
-test('scheduled rebuild resolves exact-time primary ID ties by stable source ID', async () => {
-  const tiedTime = 1783699200000;
-  const { service, group, getCreate } = buildMultiRevisionSourceFixture({
-    formTimes: [tiedTime, tiedTime],
-    chatTimes: [tiedTime, tiedTime],
-  });
+test('equal-time form audit fields follow the fingerprint winner in either input order', async () => {
+  for (const order of [['a', 'z'], ['z', 'a']]) {
+    const { service, group, getCreate } = buildEqualTimeAuditFixture({
+      source: 'form',
+      order,
+    });
 
-  await service.syncDailyFactRecordsForGroup(group, {
-    startDate: '2026-07-01',
-    endDate: '2026-07-01',
-  });
+    await service.syncDailyFactRecordsForGroup(group, {
+      startDate: '2026-07-01',
+      endDate: '2026-07-01',
+    });
 
-  const fields = getCreate().data.fields;
-  assert.equal(fields['来源记录ID'], 'rec_form_z');
-  assert.equal(fields['来源消息ID'], 'om_chat_z');
+    const fields = getCreate().data.fields;
+    assert.equal(fields['今日工作总结'], 'beta');
+    assert.equal(fields['来源记录ID'], 'rec_form_a');
+    assert.equal(fields['原文'], 'form raw a');
+    assert.deepEqual(
+      new Set(fields['来源组合'].split('\n')),
+      new Set(['form:rec_form_a', 'form:rec_form_z']),
+    );
+  }
 });
+
+test('equal-time chat audit fields follow the fingerprint winner in either input order', async () => {
+  for (const order of [['a', 'z'], ['z', 'a']]) {
+    const { service, group, getCreate } = buildEqualTimeAuditFixture({
+      source: 'chat',
+      order,
+    });
+
+    await service.syncDailyFactRecordsForGroup(group, {
+      startDate: '2026-07-01',
+      endDate: '2026-07-01',
+    });
+
+    const fields = getCreate().data.fields;
+    assert.equal(fields['今日工作总结'], 'beta');
+    assert.equal(fields['来源消息ID'], 'om_chat_a');
+    assert.equal(fields['原文'], 'chat raw a');
+    assert.deepEqual(
+      new Set(fields['来源组合'].split('\n')),
+      new Set([
+        'chat_raw:rec_chat_a',
+        'chat:om_chat_a',
+        'chat_raw:rec_chat_z',
+        'chat:om_chat_z',
+      ]),
+    );
+  }
+});
+
+function buildEqualTimeAuditFixture({ source, order }) {
+  const tiedTime = 1783699200000;
+  const group = normalizeConfig({
+    groups: [{
+      dailyTable: {
+        appToken: 'bas',
+        tableId: 'tbl_source',
+        fields: { rawText: '原文' },
+      },
+      chatDailyRawTable: { appToken: 'bas', tableId: 'tbl_chat_raw' },
+      dailyFactTable: {
+        appToken: 'bas',
+        tableId: 'tbl_fact',
+        fieldTypes: { reportDate: 'date', sourceTime: 'datetime' },
+      },
+    }],
+  }).groups[0];
+  const bodies = { a: 'beta', z: 'alpha' };
+  const formRecords = source === 'form'
+    ? order.map(suffix => ({
+      record_id: `rec_form_${suffix}`,
+      last_modified_time: tiedTime,
+      fields: {
+        日报日期: Date.UTC(2026, 6, 1),
+        日报提交人: [{
+          id: `ou_form_${suffix}`,
+          name: `审计成员${suffix.toUpperCase()}`,
+        }],
+        今日工作总结: bodies[suffix],
+        原文: `form raw ${suffix}`,
+      },
+    }))
+    : [];
+  const chatRecords = source === 'chat'
+    ? order.map(suffix => ({
+      record_id: `rec_chat_${suffix}`,
+      fields: {
+        消息ID: `om_chat_${suffix}`,
+        发送人OpenID: `ou_chat_${suffix}`,
+        标题姓名: `审计成员${suffix.toUpperCase()}`,
+        拆分日期列表: '2026-07-01',
+        原始消息文本: `chat raw ${suffix}`,
+        解析后工作总结: bodies[suffix],
+        消息时间: tiedTime,
+        原始记录状态: '主版本',
+      },
+    }))
+    : [];
+  let createPayload;
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async ({ path }) => {
+          if (path.table_id === 'tbl_source') return { data: { items: formRecords } };
+          if (path.table_id === 'tbl_chat_raw') return { data: { items: chatRecords } };
+          return { data: { items: [] } };
+        },
+        create: async payload => {
+          createPayload = payload;
+          return {
+            data: {
+              record: {
+                record_id: 'rec_fact',
+                fields: payload.data.fields,
+              },
+            },
+          };
+        },
+      },
+    },
+  });
+  const chatContactCalls = new Map();
+  const contact = {
+    teamName: '渠道创新建设',
+    teamMember: '审计成员',
+    teamMemberId: 'ou_member',
+    matchingStatus: '已匹配',
+    matchMethod: '姓名',
+  };
+  service.findTeamContactForReport = async (_group, _report, sourceRecordId) => {
+    if (source !== 'chat') return contact;
+    const calls = chatContactCalls.get(sourceRecordId) || 0;
+    chatContactCalls.set(sourceRecordId, calls + 1);
+    return calls === 0 ? null : contact;
+  };
+  return {
+    service,
+    group,
+    getCreate: () => createPayload,
+  };
+}
 
 function buildMultiRevisionSourceFixture({ formTimes, chatTimes }) {
   const group = normalizeConfig({
@@ -3171,6 +3325,186 @@ test('keeps matched organization when a later unmatched candidate already shares
   assert.equal(fields['事实记录状态'], '有效');
   assert.equal(fields['来源消息ID'], 'om_chat');
 });
+
+test('does not weak-bridge two unmatched reporters with the same name and date', async () => {
+  const { service, group, creates } = buildWeakAliasCollisionFixture({
+    contactMode: 'unmatched',
+  });
+
+  const result = await service.syncDailyFactRecordsForGroup(group, {
+    startDate: '2026-07-01',
+    endDate: '2026-07-01',
+  });
+
+  assert.equal(result.created, 2);
+  assert.equal(creates.length, 2);
+  assert.deepEqual(
+    new Set(creates.map(payload => payload.data.fields['事实唯一键'])),
+    new Set([
+      'open_id:ou_sender_1:2026-07-01',
+      'open_id:ou_sender_2:2026-07-01',
+    ]),
+  );
+});
+
+test('does not weak-bridge two matched members with the same name and date', async () => {
+  const { service, group, creates } = buildWeakAliasCollisionFixture({
+    contactMode: 'matched',
+  });
+
+  const result = await service.syncDailyFactRecordsForGroup(group, {
+    startDate: '2026-07-01',
+    endDate: '2026-07-01',
+  });
+
+  assert.equal(result.created, 2);
+  assert.equal(creates.length, 2);
+  assert.deepEqual(
+    new Set(creates.map(payload => payload.data.fields['事实唯一键'])),
+    new Set([
+      'open_id:ou_member_1:2026-07-01',
+      'open_id:ou_member_2:2026-07-01',
+    ]),
+  );
+});
+
+test('does not retain an early weak bridge after a second unmatched group appears', async () => {
+  const { service, group, creates } = buildWeakAliasCollisionFixture({
+    contactMode: 'one-matched',
+    candidateCount: 3,
+  });
+
+  const result = await service.syncDailyFactRecordsForGroup(group, {
+    startDate: '2026-07-01',
+    endDate: '2026-07-01',
+  });
+
+  assert.equal(result.created, 3);
+  assert.equal(creates.length, 3);
+});
+
+test('keeps same-name existing facts separate and writes every claimed record', async () => {
+  const { service, group, creates, updates } = buildWeakAliasCollisionFixture({
+    contactMode: 'unmatched',
+    includeExistingFacts: true,
+  });
+
+  const result = await service.syncDailyFactRecordsForGroup(group, {
+    startDate: '2026-07-01',
+    endDate: '2026-07-01',
+  });
+
+  assert.equal(result.created, 0);
+  assert.equal(result.updated, 2);
+  assert.equal(creates.length, 0);
+  assert.deepEqual(
+    new Set(updates.map(payload => payload.path.record_id)),
+    new Set(['rec_fact_1', 'rec_fact_2']),
+  );
+  assert.deepEqual(
+    new Set(updates.map(payload => payload.data.fields['事实唯一键'])),
+    new Set([
+      'open_id:ou_sender_1:2026-07-01',
+      'open_id:ou_sender_2:2026-07-01',
+    ]),
+  );
+});
+
+function buildWeakAliasCollisionFixture({
+  contactMode,
+  includeExistingFacts = false,
+  candidateCount = 2,
+}) {
+  const group = normalizeConfig({
+    groups: [{
+      dailyTable: { appToken: 'bas', tableId: 'tbl_source' },
+      chatDailyRawTable: { appToken: 'bas', tableId: 'tbl_chat_raw' },
+      dailyFactTable: {
+        appToken: 'bas',
+        tableId: 'tbl_fact',
+        fieldTypes: { reportDate: 'date', sourceTime: 'datetime' },
+      },
+    }],
+  }).groups[0];
+  const formRecords = Array.from({ length: candidateCount }, (_, offset) => offset + 1)
+    .map(index => ({
+    record_id: `rec_form_${index}`,
+    last_modified_time: 1783690000000 + index,
+    fields: {
+      日报日期: Date.UTC(2026, 6, 1),
+      日报提交人: [{ id: `ou_sender_${index}`, name: '同名成员' }],
+      今日工作总结: `成员${index}正文`,
+    },
+    }));
+  const existingFacts = includeExistingFacts
+    ? [1, 2].map(index => ({
+      record_id: `rec_fact_${index}`,
+      fields: {
+        事实唯一键: `open_id:ou_sender_${index}:2026-07-01`,
+        日报日期: Date.UTC(2026, 6, 1),
+        日报提交人姓名: '同名成员',
+        成员OpenID: `ou_sender_${index}`,
+        今日工作总结: `成员${index}旧正文`,
+        日报来源: 'form',
+        有效来源: 'form',
+        来源记录ID: `rec_form_${index}`,
+        来源组合: `form:rec_form_${index}`,
+        来源时间: 1783680000000 + index,
+        事实记录状态: '有效',
+        匹配状态: '未匹配',
+      },
+    }))
+    : [];
+  const creates = [];
+  const updates = [];
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async ({ path }) => {
+          if (path.table_id === 'tbl_source') return { data: { items: formRecords } };
+          if (path.table_id === 'tbl_chat_raw') return { data: { items: [] } };
+          if (path.table_id === 'tbl_fact') return { data: { items: existingFacts } };
+          return { data: { items: [] } };
+        },
+        create: async payload => {
+          creates.push(payload);
+          return {
+            data: {
+              record: {
+                record_id: `rec_created_${creates.length}`,
+                fields: payload.data.fields,
+              },
+            },
+          };
+        },
+        update: async payload => {
+          updates.push(payload);
+          return {
+            data: {
+              record: {
+                record_id: payload.path.record_id,
+                fields: payload.data.fields,
+              },
+            },
+          };
+        },
+      },
+    },
+  });
+  service.findTeamContactForReport = async (_group, _report, sourceRecordId) => {
+    if (contactMode === 'unmatched') return null;
+    const index = sourceRecordId.endsWith('_1') ? 1 : 2;
+    if (contactMode === 'one-matched' && index !== 1) return null;
+    return {
+      teamName: `项目${index}`,
+      teamMember: '同名成员',
+      teamMemberId: `ou_member_${index}`,
+      matchingStatus: '已匹配',
+      matchMethod: 'OpenID',
+    };
+  };
+  return { service, group, creates, updates };
+}
 
 function buildMixedOrganizationSyncFixture({ chatSenderOpenId }) {
   const formTime = 1783690000000;
