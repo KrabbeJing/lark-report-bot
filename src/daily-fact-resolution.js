@@ -1,3 +1,185 @@
+import crypto from 'node:crypto';
+import { normalizeContentForFingerprint } from './daily-record-utils.js';
+
+export const DAILY_FACT_CONTENT_KEYS = Object.freeze([
+  'workItems',
+  'tomorrowPlanItems',
+  'riskItems',
+]);
+
+const FIELD_LABELS = Object.freeze({
+  workItems: '今日工作总结',
+  tomorrowPlanItems: '明日工作计划',
+  riskItems: '遇到的问题',
+});
+
+/**
+ * Resolves daily-fact content independently per field. The returned provenance
+ * is safe to persist because it deliberately contains no report text.
+ */
+export function resolveDailyFactFields({ existing = null, incoming }) {
+  if (!incoming) throw new Error('An incoming daily fact candidate is required');
+
+  const existingValues = existing?.values || {};
+  const existingSources = existing?.fieldSources || {};
+  const values = {};
+  const fieldSources = {};
+  const relations = {};
+
+  for (const key of DAILY_FACT_CONTENT_KEYS) {
+    const selection = chooseField(
+      existingValues[key],
+      existingProvenance(existingSources[key], existing, existingValues[key]),
+      incoming.values?.[key],
+      incoming,
+    );
+    values[key] = selection.value;
+    fieldSources[key] = selection.source;
+    relations[key] = selection.relation;
+  }
+
+  const observedSources = joinSources([
+    ...splitSources(existing?.observedSources || existing?.source),
+    incoming.source,
+  ]);
+  const effectiveSources = joinSources(
+    DAILY_FACT_CONTENT_KEYS
+      .filter(key => normalizeText(values[key]))
+      .map(key => fieldSources[key]?.source),
+  );
+  const sourceTime = Math.max(
+    0,
+    ...DAILY_FACT_CONTENT_KEYS
+      .filter(key => normalizeText(values[key]))
+      .map(key => Number(fieldSources[key]?.sourceTime) || 0),
+  );
+  const preservesConflict = existing?.conflictStatus === '已自动处理';
+  const hasConflict = preservesConflict || Object.values(relations).includes('conflict');
+  const mergeStatus = deriveMergeStatus(observedSources, relations, hasConflict);
+  const conflictStatus = hasConflict ? '已自动处理' : '无冲突';
+  const factStatus = deriveFactStatus(existing?.factStatus, incoming.matchingStatus);
+
+  return {
+    values,
+    fieldSources,
+    observedSources,
+    effectiveSources,
+    sourceTime,
+    mergeStatus,
+    conflictStatus,
+    factStatus,
+    autoResolutionNote: conflictStatus === '已自动处理'
+      ? buildAutoResolutionNote(values, fieldSources, relations)
+      : '',
+  };
+}
+
+function chooseField(existingValue, existingSource, incomingValue, incoming) {
+  if (!normalizeText(incomingValue)) {
+    return { value: normalizeValue(existingValue), source: existingSource, relation: 'missing' };
+  }
+  if (!normalizeText(existingValue)) {
+    return {
+      value: normalizeValue(incomingValue),
+      source: provenance(incoming, incomingValue),
+      relation: 'complement',
+    };
+  }
+
+  if (fingerprint(existingValue) === fingerprint(incomingValue)) {
+    return shouldChooseIncoming(existingSource, incoming, incomingValue)
+      ? { value: normalizeValue(incomingValue), source: provenance(incoming, incomingValue), relation: 'same' }
+      : { value: normalizeValue(existingValue), source: existingSource, relation: 'same' };
+  }
+
+  return shouldChooseIncoming(existingSource, incoming, incomingValue)
+    ? { value: normalizeValue(incomingValue), source: provenance(incoming, incomingValue), relation: 'conflict' }
+    : { value: normalizeValue(existingValue), source: existingSource, relation: 'conflict' };
+}
+
+function shouldChooseIncoming(existingSource, incoming, incomingValue) {
+  const existingTime = Number(existingSource?.sourceTime) || 0;
+  const incomingTime = Number(incoming.sourceTime) || 0;
+  if (incomingTime !== existingTime) return incomingTime > existingTime;
+
+  const existingSourceName = existingSource?.source || '';
+  if (incoming.source !== existingSourceName) return incoming.source === 'form';
+
+  // Same-source equal timestamps are uncommon, but a stable hash tie-breaker
+  // makes replaying candidates independent of their arrival order as well.
+  return fingerprint(incomingValue).localeCompare(existingSource?.fingerprint || '') >= 0;
+}
+
+function existingProvenance(source, existing, value) {
+  if (source?.source) return source;
+  const fallbackSource = splitSources(existing?.effectiveSources || existing?.effectiveSource || existing?.source)[0] || '';
+  return {
+    source: fallbackSource,
+    sourceTime: Number(existing?.sourceTime) || 0,
+    fingerprint: fingerprint(value),
+  };
+}
+
+function provenance(candidate, value) {
+  return {
+    source: candidate.source || '',
+    sourceTime: Number(candidate.sourceTime) || 0,
+    fingerprint: fingerprint(value),
+  };
+}
+
+function deriveMergeStatus(observedSources, relations, hasConflict) {
+  if (splitSources(observedSources).length <= 1) return '单来源';
+  if (hasConflict) return '按字段取最新';
+  if (Object.values(relations).includes('complement')) return '互补已合并';
+  return '重复已合并';
+}
+
+function deriveFactStatus(existingFactStatus, incomingMatchingStatus) {
+  if (existingFactStatus === '忽略') return '忽略';
+  if (existingFactStatus === '有效' || incomingMatchingStatus !== '未匹配') return '有效';
+  return '待人工确认';
+}
+
+function buildAutoResolutionNote(values, fieldSources, relations) {
+  return DAILY_FACT_CONTENT_KEYS
+    .filter(key => normalizeText(values[key]))
+    .map(key => {
+      const source = sourceLabel(fieldSources[key]?.source);
+      return relations[key] === 'conflict'
+        ? `${FIELD_LABELS[key]}按来源时间采用${source}`
+        : `${FIELD_LABELS[key]}保留${source}`;
+    })
+    .join('；');
+}
+
+function joinSources(sources) {
+  const found = new Set(sources.flatMap(splitSources).filter(Boolean));
+  return ['form', 'chat'].filter(source => found.has(source)).join('+');
+}
+
+function splitSources(value) {
+  return String(value || '').split('+').filter(source => source === 'form' || source === 'chat');
+}
+
+function sourceLabel(source) {
+  return source === 'form' ? '表单' : source === 'chat' ? '群聊' : '未知来源';
+}
+
+function normalizeValue(value) {
+  return value == null ? '' : String(value);
+}
+
+function normalizeText(value) {
+  return normalizeContentForFingerprint(value);
+}
+
+function fingerprint(value) {
+  return crypto.createHash('sha256').update(normalizeText(value)).digest('hex');
+}
+
+// These two exports preserve the pre-Task-3 call sites until they begin
+// supplying values and persisted field provenance to the resolver above.
 export function resolveDailyFactCandidates({ form = null, chat = null, existingFactStatus = '' }) {
   if (!form && !chat) throw new Error('At least one daily fact candidate is required');
 

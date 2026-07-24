@@ -1,95 +1,158 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveDailyFactCandidates, resolveIncrementalDailyFact } from '../src/daily-fact-resolution.js';
+import { resolveDailyFactFields } from '../src/daily-fact-resolution.js';
 
-test('marks equal form and chat content as duplicate merged', () => {
-  const result = resolveDailyFactCandidates({
-    form: candidate('form', 1000, 'same', '已匹配'),
-    chat: candidate('chat', 2000, 'same', '已匹配'),
+test('later chat work keeps earlier non-empty form plan', () => {
+  const form = candidate('form', 1000, {
+    workItems: '表单总结',
+    tomorrowPlanItems: '表单计划',
+    riskItems: '',
   });
-  assert.equal(result.winner.source, 'chat');
+  const afterForm = resolveDailyFactFields({ incoming: form });
+  const result = resolveDailyFactFields({
+    existing: afterForm,
+    incoming: candidate('chat', 2000, {
+      workItems: '群聊总结',
+      tomorrowPlanItems: '',
+      riskItems: '',
+    }),
+  });
+
+  assert.deepEqual(result.values, {
+    workItems: '群聊总结',
+    tomorrowPlanItems: '表单计划',
+    riskItems: '',
+  });
+  assert.equal(result.fieldSources.workItems.source, 'chat');
+  assert.equal(result.fieldSources.tomorrowPlanItems.source, 'form');
+  assert.equal(result.observedSources, 'form+chat');
+  assert.equal(result.effectiveSources, 'form+chat');
+  assert.equal(result.mergeStatus, '按字段取最新');
+  assert.equal(result.conflictStatus, '已自动处理');
+  assert.equal(result.autoResolutionNote, '今日工作总结按来源时间采用群聊；明日工作计划保留表单');
+  assert.ok(!result.autoResolutionNote.includes('表单总结'));
+  assert.ok(!result.autoResolutionNote.includes('群聊总结'));
+});
+
+test('identical overlapping fields are duplicate merged', () => {
+  const result = resolveInOrder([
+    candidate('form', 1000, { workItems: '相同内容' }),
+    candidate('chat', 2000, { workItems: '相同内容' }),
+  ]);
+
   assert.equal(result.mergeStatus, '重复已合并');
   assert.equal(result.conflictStatus, '无冲突');
-  assert.equal(result.factStatus, '有效');
+  assert.equal(result.values.workItems, '相同内容');
+  assert.equal(result.fieldSources.workItems.source, 'chat');
 });
 
-test('uses the later source when content differs', () => {
-  const result = resolveDailyFactCandidates({
-    form: candidate('form', 1000, 'form', '已匹配'),
-    chat: candidate('chat', 2000, 'chat', '已匹配'),
+test('non-overlapping fields are complement merged', () => {
+  const result = resolveInOrder([
+    candidate('form', 1000, { workItems: '表单总结' }),
+    candidate('chat', 2000, { tomorrowPlanItems: '群聊计划' }),
+  ]);
+
+  assert.equal(result.mergeStatus, '互补已合并');
+  assert.equal(result.conflictStatus, '无冲突');
+  assert.equal(result.effectiveSources, 'form+chat');
+});
+
+test('form wins an exact cross-source timestamp tie', () => {
+  const result = resolveInOrder([
+    candidate('chat', 2000, { workItems: '群聊版本' }),
+    candidate('form', 2000, { workItems: '表单版本' }),
+  ]);
+
+  assert.equal(result.values.workItems, '表单版本');
+  assert.deepEqual(result.fieldSources.workItems, {
+    source: 'form',
+    sourceTime: 2000,
+    fingerprint: result.fieldSources.workItems.fingerprint,
   });
-  assert.equal(result.winner.source, 'chat');
-  assert.equal(result.mergeStatus, '按时间取最新');
+  assert.equal(result.mergeStatus, '按字段取最新');
   assert.equal(result.conflictStatus, '已自动处理');
-  assert.equal(result.autoResolutionNote, '按来源时间采用群聊版本');
 });
 
-test('uses form on an exact source-time tie', () => {
-  const result = resolveDailyFactCandidates({
-    form: candidate('form', 2000, 'form', '姓名匹配'),
-    chat: candidate('chat', 2000, 'chat', '已匹配'),
-  });
-  assert.equal(result.winner.source, 'form');
+test('later blank from the same source preserves an existing non-empty field', () => {
+  const result = resolveInOrder([
+    candidate('form', 1000, { tomorrowPlanItems: '保留的计划' }),
+    candidate('form', 2000, { tomorrowPlanItems: '' }),
+  ]);
+
+  assert.equal(result.values.tomorrowPlanItems, '保留的计划');
+  assert.equal(result.fieldSources.tomorrowPlanItems.source, 'form');
+  assert.equal(result.fieldSources.tomorrowPlanItems.sourceTime, 1000);
+  assert.equal(result.mergeStatus, '单来源');
 });
 
 test('preserves manual ignore status', () => {
-  const result = resolveDailyFactCandidates({
-    chat: candidate('chat', 2000, 'chat', '已匹配'),
-    existingFactStatus: '忽略',
+  const result = resolveDailyFactFields({
+    existing: { factStatus: '忽略' },
+    incoming: candidate('chat', 2000, { workItems: '群聊内容' }),
   });
+
   assert.equal(result.factStatus, '忽略');
 });
 
-test('keeps unmatched facts pending without a content conflict', () => {
-  const result = resolveDailyFactCandidates({
-    chat: candidate('chat', 2000, 'chat', '未匹配'),
+test('keeps an unmatched candidate pending manual confirmation', () => {
+  const result = resolveDailyFactFields({
+    incoming: candidate('chat', 2000, { workItems: '群聊内容' }, '未匹配'),
   });
+
+  assert.equal(result.factStatus, '待人工确认');
   assert.equal(result.mergeStatus, '单来源');
   assert.equal(result.conflictStatus, '无冲突');
-  assert.equal(result.factStatus, '待人工确认');
 });
 
-test('incremental merge lets a later chat version replace form content', () => {
-  const result = resolveIncrementalDailyFact({
-    existing: {
-      source: 'form', effectiveSource: 'form', sourceTime: 1000,
-      fingerprint: 'form', matchingStatus: '已匹配', factStatus: '有效',
-    },
-    incoming: candidate('chat', 2000, 'chat', '已匹配'),
+test('replaying candidates in the opposite arrival order keeps values and provenance stable', () => {
+  const candidates = [
+    candidate('form', 1000, { workItems: '表单总结', tomorrowPlanItems: '表单计划' }),
+    candidate('chat', 2000, { workItems: '群聊总结', riskItems: '群聊风险' }),
+  ];
+  const forward = resolveInOrder(candidates);
+  const reverse = resolveInOrder([...candidates].reverse());
+
+  assert.deepEqual(reverse.values, forward.values);
+  assert.deepEqual(reverse.fieldSources, forward.fieldSources);
+  assert.equal(reverse.observedSources, forward.observedSources);
+  assert.equal(reverse.effectiveSources, forward.effectiveSources);
+  assert.equal(reverse.sourceTime, forward.sourceTime);
+  assert.equal(reverse.mergeStatus, forward.mergeStatus);
+  assert.equal(reverse.conflictStatus, forward.conflictStatus);
+  assert.equal(reverse.autoResolutionNote, forward.autoResolutionNote);
+});
+
+test('same-source refresh preserves a known automatic conflict marker', () => {
+  const conflicted = resolveInOrder([
+    candidate('form', 1000, { workItems: '表单总结' }),
+    candidate('chat', 2000, { workItems: '群聊总结' }),
+  ]);
+  const result = resolveDailyFactFields({
+    existing: conflicted,
+    incoming: candidate('chat', 3000, { tomorrowPlanItems: '群聊计划' }),
   });
-  assert.equal(result.winner.source, 'chat');
-  assert.equal(result.mergeStatus, '按时间取最新');
+
   assert.equal(result.conflictStatus, '已自动处理');
+  assert.equal(result.mergeStatus, '按字段取最新');
 });
 
-test('incremental same-source refresh preserves known two-source conflict', () => {
-  const result = resolveIncrementalDailyFact({
-    existing: {
-      source: 'form+chat', effectiveSource: 'chat', sourceTime: 2000,
-      fingerprint: 'chat-old', matchingStatus: '已匹配', factStatus: '有效',
-      mergeStatus: '按时间取最新', conflictStatus: '已自动处理',
+function resolveInOrder(candidates) {
+  return candidates.reduce(
+    (existing, incoming) => resolveDailyFactFields({ existing, incoming }),
+    null,
+  );
+}
+
+function candidate(source, sourceTime, values = {}, matchingStatus = '已匹配') {
+  return {
+    source,
+    sourceTime,
+    matchingStatus,
+    values: {
+      workItems: '',
+      tomorrowPlanItems: '',
+      riskItems: '',
+      ...values,
     },
-    incoming: candidate('chat', 3000, 'chat-new', '已匹配'),
-  });
-  assert.equal(result.winner.source, 'chat');
-  assert.equal(result.mergeStatus, '按时间取最新');
-  assert.equal(result.conflictStatus, '已自动处理');
-});
-
-test('same-source refresh does not invent a note for an equal two-source merge', () => {
-  const result = resolveIncrementalDailyFact({
-    existing: {
-      source: 'form+chat', effectiveSource: 'chat', sourceTime: 2000,
-      fingerprint: 'same', matchingStatus: '已匹配', factStatus: '有效',
-      mergeStatus: '重复已合并', conflictStatus: '无冲突', autoResolutionNote: '',
-    },
-    incoming: candidate('chat', 2000, 'same', '已匹配'),
-  });
-  assert.equal(result.mergeStatus, '重复已合并');
-  assert.equal(result.conflictStatus, '无冲突');
-  assert.equal(result.autoResolutionNote, '');
-});
-
-function candidate(source, sourceTime, fingerprint, matchingStatus) {
-  return { source, sourceTime, fingerprint, matchingStatus };
+  };
 }
