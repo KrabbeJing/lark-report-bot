@@ -46,6 +46,8 @@ export function resolveDailyFactFields({
     observedSources: joinSources([
       ...splitSources(existing?.observedSources),
       ...splitSources(existing?.source),
+      ...splitSources(existing?.effectiveSources),
+      ...splitSources(existing?.effectiveSource),
       incoming.source,
       ...DAILY_FACT_CONTENT_KEYS
         .flatMap(key => Object.keys(fieldSources[key].sources)),
@@ -230,14 +232,21 @@ function normalizeExistingField(value, snapshot, existing) {
     return { value: '', source: emptyFieldSource() };
   }
 
-  const selectedSource = normalizeSource(snapshot?.source);
-  const selectedTime = Number(
-    snapshot?.sourceTime
-      ?? snapshot?.sources?.[selectedSource]?.sourceTime
-      ?? existing?.sourceTime,
-  ) || 0;
   const selectedFingerprint = fingerprint(normalizedValue);
   const sources = normalizeSourceMetadata(snapshot?.sources);
+  const selectedSource = normalizeSource(snapshot?.source)
+    || inferSelectedSource(sources, selectedFingerprint);
+  const selectedTime = selectedSource
+    ? firstValidSourceTime(
+      snapshot?.sourceTime,
+      sources[selectedSource]?.sourceTime,
+      existing?.sourceTime,
+    )
+    : maxValidSourceTime(
+      snapshot?.sourceTime,
+      existing?.sourceTime,
+      ...Object.values(sources).map(source => source.sourceTime),
+    );
   let ambiguous = Boolean(snapshot?.ambiguous);
 
   if (selectedSource) {
@@ -245,26 +254,28 @@ function normalizeExistingField(value, snapshot, existing) {
       sourceTime: selectedTime,
       fingerprint: selectedFingerprint,
     };
-  } else if (!snapshot?.source) {
-    const legacySources = splitSources(
-      existing?.effectiveSources || existing?.effectiveSource || existing?.source,
-    );
-    if (legacySources.length === 1) {
-      sources[legacySources[0]] = {
-        sourceTime: selectedTime,
-        fingerprint: selectedFingerprint,
-      };
-      return {
-        value: normalizedValue,
-        source: buildFieldSource({
-          source: legacySources[0],
+  } else {
+    if (!snapshot?.source) {
+      const legacySources = splitSources(
+        existing?.effectiveSources || existing?.effectiveSource || existing?.source,
+      );
+      if (legacySources.length === 1) {
+        sources[legacySources[0]] = {
           sourceTime: selectedTime,
           fingerprint: selectedFingerprint,
-        }, sources, {
-          relation: snapshot?.relation,
-          conflict: snapshot?.relation === 'conflict',
-        }),
-      };
+        };
+        return {
+          value: normalizedValue,
+          source: buildFieldSource({
+            source: legacySources[0],
+            sourceTime: selectedTime,
+            fingerprint: selectedFingerprint,
+          }, sources, {
+            relation: snapshot?.relation,
+            conflict: snapshot?.relation === 'conflict',
+          }),
+        };
+      }
     }
     ambiguous = true;
   }
@@ -406,6 +417,36 @@ function normalizeFingerprint(value) {
 
 function normalizeSource(value) {
   return value === 'form' || value === 'chat' ? value : '';
+}
+
+function inferSelectedSource(sources, selectedFingerprint) {
+  const matches = ['form', 'chat']
+    .filter(source => sources[source]?.fingerprint === selectedFingerprint);
+  if (matches.length === 1) return matches[0];
+  if (matches.length !== 2) return '';
+
+  return chooseCrossSourceCandidate(
+    { source: 'form', sourceTime: sources.form.sourceTime },
+    { source: 'chat', sourceTime: sources.chat.sourceTime },
+  ).source;
+}
+
+function firstValidSourceTime(...values) {
+  for (const value of values) {
+    const time = validSourceTime(value);
+    if (time !== null) return time;
+  }
+  return 0;
+}
+
+function maxValidSourceTime(...values) {
+  return Math.max(0, ...values.map(validSourceTime).filter(time => time !== null));
+}
+
+function validSourceTime(value) {
+  if (value == null || String(value).trim() === '') return null;
+  const time = Number(value);
+  return Number.isFinite(time) && time > 0 ? time : null;
 }
 
 function assertSupportedSource(source) {

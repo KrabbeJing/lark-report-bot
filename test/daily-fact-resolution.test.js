@@ -506,6 +506,42 @@ test('partial snapshot prefers selected-source field time over aggregate sourceT
   assert.equal(result.conflictStatus, '无冲突');
 });
 
+test('corrupt snapshot head time falls back to selected-source metadata', () => {
+  const persisted = partialSnapshotFixture();
+  persisted.fieldSources.workItems.sourceTime = 'corrupt';
+
+  const result = resolveDailyFactFields({
+    existing: jsonRoundtrip(persisted),
+    incoming: candidate('chat', 500, { workItems: 'stale-chat-500' }),
+  });
+
+  assertStaleChatDidNotRollback(result);
+});
+
+test('empty snapshot head time falls back to selected-source metadata', () => {
+  const persisted = partialSnapshotFixture();
+  persisted.fieldSources.workItems.sourceTime = '';
+
+  const result = resolveDailyFactFields({
+    existing: jsonRoundtrip(persisted),
+    incoming: candidate('chat', 500, { workItems: 'stale-chat-500' }),
+  });
+
+  assertStaleChatDidNotRollback(result);
+});
+
+test('bogus snapshot head source is inferred from matching nested provenance', () => {
+  const persisted = partialSnapshotFixture();
+  persisted.fieldSources.workItems.source = 'bogus';
+
+  const result = resolveDailyFactFields({
+    existing: jsonRoundtrip(persisted),
+    incoming: candidate('chat', 500, { workItems: 'stale-chat-500' }),
+  });
+
+  assertStaleChatDidNotRollback(result);
+});
+
 test('field source metadata repairs stale or missing observedSources after JSON roundtrip', () => {
   const conflicted = resolveInOrder([
     candidate('form', 1000, { workItems: 'form-work' }),
@@ -530,6 +566,36 @@ test('field source metadata repairs stale or missing observedSources after JSON 
     assert.equal(result.conflictStatus, '已自动处理');
     assert.equal(result.autoResolutionNote, conflicted.autoResolutionNote);
   }
+});
+
+test('effectiveSources repairs missing observed and legacy source aggregates', () => {
+  const legacy = {
+    values: {
+      workItems: 'legacy-selected',
+      tomorrowPlanItems: '',
+      riskItems: '',
+    },
+    effectiveSources: 'form+chat',
+    sourceTime: 5000,
+    mergeStatus: '重复已合并',
+    conflictStatus: '无冲突',
+    factStatus: '有效',
+    autoResolutionNote: '',
+  };
+  const result = resolveDailyFactFields({
+    existing: jsonRoundtrip(legacy),
+    incoming: candidate('chat', 4000),
+  });
+
+  assert.equal(result.values.workItems, 'legacy-selected');
+  assert.equal(result.fieldSources.workItems.source, '');
+  assert.equal(result.fieldSources.workItems.ambiguous, true);
+  assert.equal(result.fieldSources.workItems.relation, 'ambiguous');
+  assert.equal(result.observedSources, 'form+chat');
+  assert.equal(result.effectiveSources, 'form+chat');
+  assert.equal(result.mergeStatus, '重复已合并');
+  assert.equal(result.conflictStatus, '无冲突');
+  assert.equal(result.autoResolutionNote, '');
 });
 
 test('source rebuild output is plain JSON and never contains candidate body text', () => {
@@ -566,6 +632,31 @@ function resolveInOrder(candidates) {
 
 function jsonRoundtrip(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+function partialSnapshotFixture() {
+  return jsonRoundtrip(resolveInOrder([
+    candidate('form', 1000, { workItems: 'form-1000' }),
+    candidate('chat', 5000, { tomorrowPlanItems: 'chat-plan-5000' }),
+  ]));
+}
+
+function assertStaleChatDidNotRollback(result) {
+  assert.equal(result.values.workItems, 'form-1000');
+  assert.equal(result.values.tomorrowPlanItems, 'chat-plan-5000');
+  assert.equal(result.fieldSources.workItems.source, 'form');
+  assert.equal(result.fieldSources.workItems.sourceTime, 1000);
+  assert.equal(result.fieldSources.workItems.sources.form.sourceTime, 1000);
+  assert.equal(result.fieldSources.workItems.sources.chat.sourceTime, 500);
+  assert.equal(result.observedSources, 'form+chat');
+  assert.equal(result.effectiveSources, 'form+chat');
+  assert.equal(result.mergeStatus, '按字段取最新');
+  assert.equal(result.conflictStatus, '已自动处理');
+  assert.equal(
+    result.autoResolutionNote,
+    '今日工作总结按来源时间采用表单；明日工作计划保留群聊',
+  );
+  assert.ok(!result.autoResolutionNote.includes('未知来源'));
 }
 
 function permutations(items) {
