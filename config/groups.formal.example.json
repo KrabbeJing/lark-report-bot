@@ -9,7 +9,25 @@
   "weeklyPush": {
     "enabled": false,
     "dayOfWeek": 6,
-    "time": "10:00",
+    "time": "11:00",
+    "timezone": "Asia/Shanghai"
+  },
+  "weeklyDraft": {
+    "enabled": false,
+    "dayOfWeek": 5,
+    "time": "16:30",
+    "timezone": "Asia/Shanghai"
+  },
+  "weeklyOwnerReminder": {
+    "enabled": false,
+    "dayOfWeek": 5,
+    "time": "17:00",
+    "timezone": "Asia/Shanghai"
+  },
+  "weeklyRefresh": {
+    "enabled": false,
+    "dayOfWeek": 6,
+    "time": "09:30",
     "timezone": "Asia/Shanghai"
   },
   "weeklyInstanceCreation": {
@@ -57,7 +75,6 @@
         "fields": {
           "teamName": "团队名称",
           "teamMember": "团队成员",
-          "agileGroup": "敏捷小组",
           "teamRole": "团队身份",
           "supervisor": "直属上级"
         }
@@ -71,20 +88,42 @@
       },
       "dailyFactTable": {
         "wikiUrl": "正式组织日报统一事实表wiki链接，需带table参数",
-        "fields": {
-          "divisionalLeader": "分管领导"
-        },
         "fieldTypes": {
           "reportDate": "date",
           "reporterName": "user",
           "supervisor": "user",
-          "divisionalLeader": "user",
           "messageTime": "datetime",
           "sourceTime": "datetime",
           "syncedAt": "datetime"
         }
       },
       "weeklyTable": null,
+      "weeklyDelivery": {
+        "departmentChatId": "",
+        "smallTeams": [
+          {
+            "key": "team-a",
+            "name": "正式小团队A",
+            "enabled": false,
+            "chatId": "",
+            "sectionTargets": ["融羲项目组", "零售客群经营"]
+          },
+          {
+            "key": "team-b",
+            "name": "正式小团队B",
+            "enabled": false,
+            "chatId": "",
+            "sectionTargets": ["收单项目组", "对公客群经营及场景建设"]
+          },
+          {
+            "key": "team-c",
+            "name": "正式小团队C",
+            "enabled": false,
+            "chatId": "",
+            "sectionTargets": ["线上营业厅项目组", "手机银行项目组", "新核心项目组", "渠道创新建设", "业务风控合规", "业务转型推动"]
+          }
+        ]
+      },
       "weeklyInstanceTable": {
         "appToken": "",
         "tableId": "",

@@ -63,6 +63,19 @@ export function getWorkWeekRange(now = new Date(), timeZone = DEFAULT_TIMEZONE) 
   };
 }
 
+export function getWeeklyReportRange(now = new Date(), timeZone = DEFAULT_TIMEZONE) {
+  const today = formatYmd(now, timeZone);
+  const parsed = parseYmd(today);
+  const day = new Date(Date.UTC(parsed.year, parsed.month - 1, parsed.day)).getUTCDay();
+  const fridayOffset = day === 6 ? -1 : day <= 5 ? 5 - day : -2;
+  const reportDate = addDaysToYmd(today, fridayOffset);
+  return {
+    reportDate,
+    start: addDaysToYmd(reportDate, -7),
+    end: addDaysToYmd(reportDate, -1),
+  };
+}
+
 export function getIsoWeekInfo(ymd) {
   const parsed = parseYmd(ymd);
   if (!parsed) throw new Error(`Invalid YYYY-MM-DD date: ${ymd}`);

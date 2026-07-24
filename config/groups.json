@@ -7,9 +7,27 @@
     "adminChatIds": ["oc_62db465477f911b8825e5a01d01f520b"]
   },
   "weeklyPush": {
-    "enabled": true,
+    "enabled": false,
     "dayOfWeek": 6,
-    "time": "10:00",
+    "time": "11:00",
+    "timezone": "Asia/Shanghai"
+  },
+  "weeklyDraft": {
+    "enabled": false,
+    "dayOfWeek": 5,
+    "time": "16:30",
+    "timezone": "Asia/Shanghai"
+  },
+  "weeklyOwnerReminder": {
+    "enabled": false,
+    "dayOfWeek": 5,
+    "time": "17:00",
+    "timezone": "Asia/Shanghai"
+  },
+  "weeklyRefresh": {
+    "enabled": false,
+    "dayOfWeek": 6,
+    "time": "09:30",
     "timezone": "Asia/Shanghai"
   },
   "dailySupervisorPush": {
@@ -56,7 +74,6 @@
           "reportDate": "date",
           "reporterName": "user",
           "supervisor": "user",
-          "divisionalLeader": "user",
           "messageTime": "datetime",
           "sourceTime": "datetime",
           "syncedAt": "datetime"
@@ -70,12 +87,37 @@
           "teamName": "团队名称",
           "teamMember": "团队成员",
           "memberRealName": "成员真实姓名",
-          "agileGroup": "敏捷小组",
           "teamRole": "团队身份",
           "supervisor": "直属上级"
         }
       },
       "weeklyTable": null,
+      "weeklyDelivery": {
+        "departmentChatId": "oc_127d0a4ec12a42a31de3110fdf9b51f3",
+        "smallTeams": [
+          {
+            "key": "team-a",
+            "name": "测试小团队A",
+            "enabled": true,
+            "chatId": "oc_127d0a4ec12a42a31de3110fdf9b51f3",
+            "sectionTargets": ["融羲项目组", "零售客群经营"]
+          },
+          {
+            "key": "team-b",
+            "name": "测试小团队B",
+            "enabled": true,
+            "chatId": "oc_127d0a4ec12a42a31de3110fdf9b51f3",
+            "sectionTargets": ["收单项目组", "对公客群经营及场景建设"]
+          },
+          {
+            "key": "team-c",
+            "name": "测试小团队C",
+            "enabled": true,
+            "chatId": "oc_127d0a4ec12a42a31de3110fdf9b51f3",
+            "sectionTargets": ["线上营业厅项目组", "手机银行项目组", "新核心项目组", "渠道创新建设", "业务风控合规", "业务转型推动"]
+          }
+        ]
+      },
       "weeklySheet": {
         "enabled": false,
         "spreadsheetToken": "",

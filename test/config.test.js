@@ -113,7 +113,7 @@ test('normalizes chat raw and daily fact table configs', () => {
   assert.equal(group.dailyFactTable.fields.sourceTime, '来源时间');
   assert.equal(group.dailyFactTable.fields.effectiveSource, '有效来源');
   assert.equal(group.dailyFactTable.fields.autoResolutionNote, '自动处理说明');
-  assert.equal(group.dailyFactTable.fields.divisionalLeader, '分管领导');
+  assert.equal(group.dailyFactTable.fields.fieldSourceSnapshot, '字段来源快照');
 });
 
 test('does not normalize group agileGroup as organization configuration', () => {
@@ -124,7 +124,59 @@ test('does not normalize group agileGroup as organization configuration', () => 
   assert.equal(Object.hasOwn(group, 'agileGroup'), false);
 });
 
-test('local group configs map supervisor users and contact agile groups', () => {
+test('normalizes the weekly workflow configuration schema with disabled defaults', () => {
+  const config = normalizeConfig({
+    weeklyDraft: { enabled: false },
+    weeklyOwnerReminder: { enabled: false },
+    weeklyRefresh: { enabled: false },
+    weeklyPush: { enabled: false },
+    groups: [{
+      chatId: 'oc_test',
+      dailyFactTable: { appToken: 'bas_test', tableId: 'tbl_fact' },
+      contactTable: { appToken: 'bas_test', tableId: 'tbl_contact' },
+      weeklySourceMappingTable: { appToken: 'bas_test', tableId: 'tbl_mapping' },
+      weeklySectionRuleTable: { appToken: 'bas_test', tableId: 'tbl_rule' },
+      weeklyStyleExampleTable: { appToken: 'bas_test', tableId: 'tbl_style' },
+      coreMetricOwnerTable: { appToken: 'bas_test', tableId: 'tbl_metric' },
+      weeklyDelivery: {
+        departmentChatId: 'oc_department',
+        smallTeams: [{
+          key: 'team-a',
+          name: '测试小团队A',
+          enabled: true,
+          chatId: 'oc_test',
+          sectionTargets: ['融羲项目组', '零售客群经营'],
+        }],
+      },
+    }],
+  });
+  const group = config.groups[0];
+
+  assert.equal(group.contactTable.fields.agileGroup, undefined);
+  assert.equal(group.contactTable.fields.divisionalLeader, undefined);
+  assert.equal(group.dailyFactTable.fields.agileGroup, undefined);
+  assert.equal(group.dailyFactTable.fields.divisionalLeader, undefined);
+  assert.equal(group.dailyFactTable.fields.fieldSourceSnapshot, '字段来源快照');
+  assert.ok(group.weeklySourceMappingTable);
+  assert.ok(group.weeklySectionRuleTable);
+  assert.ok(group.weeklyStyleExampleTable);
+  assert.ok(group.coreMetricOwnerTable);
+  assert.deepEqual(config.weeklyDraft, {
+    enabled: false,
+    dayOfWeek: 5,
+    time: '16:30',
+    timezone: 'Asia/Shanghai',
+  });
+  assert.deepEqual(group.weeklyDelivery.smallTeams[0], {
+    key: 'team-a',
+    name: '测试小团队A',
+    enabled: true,
+    chatId: 'oc_test',
+    sectionTargets: ['融羲项目组', '零售客群经营'],
+  });
+});
+
+test('local group configs map supervisor users without obsolete organization fields', () => {
   for (const filePath of ['config/groups.json', 'config/groups.personal.json']) {
     const config = normalizeConfig(JSON.parse(readFileSync(filePath, 'utf8')));
     for (const group of config.groups) {
@@ -134,20 +186,15 @@ test('local group configs map supervisor users and contact agile groups', () => 
         `${filePath} ${group.chatId} dailyFactTable.直属上级 应配置为人员字段 user`,
       );
       assert.equal(group.dailyFactTable?.fieldTypes?.sourceTime, 'datetime');
-      if (group.dailyFactTable?.fields?.divisionalLeader) {
-        assert.equal(group.dailyFactTable?.fieldTypes?.divisionalLeader, 'user');
-      }
-      assert.equal(
-        group.contactTable?.fields?.agileGroup,
-        '敏捷小组',
-        `${filePath} ${group.chatId} contactTable 需要映射敏捷小组字段`,
-      );
+      assert.equal(group.contactTable?.fields?.agileGroup, undefined);
+      assert.equal(group.contactTable?.fields?.divisionalLeader, undefined);
+      assert.equal(group.dailyFactTable?.fields?.agileGroup, undefined);
+      assert.equal(group.dailyFactTable?.fields?.divisionalLeader, undefined);
     }
   }
 
   const personal = normalizeConfig(JSON.parse(readFileSync('config/groups.personal.json', 'utf8')));
-  assert.equal(personal.groups[0].contactTable.fields.divisionalLeader, undefined);
-  assert.equal(personal.groups[0].dailyFactTable.fields.divisionalLeader, undefined);
+  assert.equal(personal.groups[0].dailyFactTable.fields.fieldSourceSnapshot, '字段来源快照');
 });
 
 test('parses bitable wiki link with table and view ids', () => {

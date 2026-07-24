@@ -9,7 +9,6 @@ const DEFAULT_CONFIG_PATH = path.resolve(__dirname, '..', 'config', 'groups.json
 export const DAILY_FIELD_KEYS = {
   reportDate: '日报日期',
   project: '所属板块',
-  agileGroup: '敏捷小组',
   reporterName: '日报提交人',
   workItems: '今日工作总结',
   tomorrowPlanItems: '明日工作计划',
@@ -55,13 +54,12 @@ export const DAILY_FACT_FIELD_KEYS = {
   senderOpenId: '发送人OpenID',
   chatId: '群ID',
   project: '所属板块',
-  agileGroup: '敏捷小组',
   supervisor: '直属上级',
-  divisionalLeader: '分管领导',
   rawText: '原文',
   workItems: '今日工作总结',
   tomorrowPlanItems: '明日工作计划',
   riskItems: '遇到的问题',
+  fieldSourceSnapshot: '字段来源快照',
   contentFingerprint: '内容指纹',
   source: '日报来源',
   sourceRecordId: '来源记录ID',
@@ -91,9 +89,56 @@ export const CONTACT_FIELD_KEYS = {
   accountType: '账号类型',
   memberStatus: '成员状态',
   teamRole: '团队身份',
-  agileGroup: '敏捷小组',
   supervisor: '直属上级',
-  divisionalLeader: '分管领导',
+};
+
+export const WEEKLY_SOURCE_MAPPING_FIELD_KEYS = {
+  mappingKey: '映射唯一键',
+  member: '成员',
+  memberRealName: '成员真实姓名',
+  memberOpenId: '成员OpenID',
+  module2Targets: '模块二可归集板块',
+  module3Target: '模块三归属板块',
+  effectiveFrom: '生效日期',
+  effectiveTo: '失效日期',
+  enabled: '是否启用',
+  note: '备注',
+};
+
+export const WEEKLY_SECTION_RULE_FIELD_KEYS = {
+  ruleKey: '规则唯一键',
+  module: '模块',
+  target: '周报板块',
+  contentType: '内容类型',
+  includeTopics: '包含主题',
+  excludeTopics: '排除主题',
+  owners: '周报负责人',
+  remindOwners: '负责人提醒',
+  order: '排序',
+  enabled: '是否启用',
+  note: '备注',
+};
+
+export const WEEKLY_STYLE_EXAMPLE_FIELD_KEYS = {
+  exampleKey: '样例唯一键',
+  module: '模块',
+  target: '周报板块',
+  contentType: '内容类型',
+  weekKey: '样例周次',
+  finalText: '最终样例正文',
+  reviewer: '审核人',
+  reviewedAt: '审核时间',
+  highQuality: '纳入优质样例',
+  enabled: '是否启用',
+  note: '备注',
+};
+
+export const CORE_METRIC_OWNER_FIELD_KEYS = {
+  metricName: '指标名称',
+  owners: '指标负责人',
+  remindersEnabled: '启用提醒',
+  enabled: '是否启用',
+  note: '备注',
 };
 
 export const WEEKLY_FIELD_KEYS = {
@@ -154,12 +199,26 @@ export function normalizeConfig(raw) {
   const timezone = raw.timezone || process.env.TZ || DEFAULT_TIMEZONE;
   const botNames = raw.botNames?.length ? raw.botNames : ['数金小助手'];
   const errorReporting = normalizeErrorReporting(raw.errorReporting || raw.error_reporting || {});
-  const weeklyPush = {
-    enabled: raw.weeklyPush?.enabled !== false,
-    dayOfWeek: Number(raw.weeklyPush?.dayOfWeek ?? 6),
-    time: raw.weeklyPush?.time || '10:00',
-    timezone: raw.weeklyPush?.timezone || timezone,
-  };
+  const weeklyDraft = normalizeWeeklySchedule(raw.weeklyDraft, {
+    dayOfWeek: 5,
+    time: '16:30',
+    timezone,
+  });
+  const weeklyOwnerReminder = normalizeWeeklySchedule(raw.weeklyOwnerReminder, {
+    dayOfWeek: 5,
+    time: '17:00',
+    timezone,
+  });
+  const weeklyRefresh = normalizeWeeklySchedule(raw.weeklyRefresh, {
+    dayOfWeek: 6,
+    time: '09:30',
+    timezone,
+  });
+  const weeklyPush = normalizeWeeklySchedule(raw.weeklyPush, {
+    dayOfWeek: 6,
+    time: '11:00',
+    timezone,
+  });
   const weeklyInstanceCreation = {
     enabled: raw.weeklyInstanceCreation?.enabled === true,
     dayOfWeek: Number(raw.weeklyInstanceCreation?.dayOfWeek ?? 1),
@@ -195,7 +254,24 @@ export function normalizeConfig(raw) {
         group.weeklyInstanceTable || raw.weeklyInstanceTable,
         WEEKLY_INSTANCE_FIELD_KEYS,
       ),
+      weeklySourceMappingTable: normalizeTableConfig(
+        group.weeklySourceMappingTable || raw.weeklySourceMappingTable,
+        WEEKLY_SOURCE_MAPPING_FIELD_KEYS,
+      ),
+      weeklySectionRuleTable: normalizeTableConfig(
+        group.weeklySectionRuleTable || raw.weeklySectionRuleTable,
+        WEEKLY_SECTION_RULE_FIELD_KEYS,
+      ),
+      weeklyStyleExampleTable: normalizeTableConfig(
+        group.weeklyStyleExampleTable || raw.weeklyStyleExampleTable,
+        WEEKLY_STYLE_EXAMPLE_FIELD_KEYS,
+      ),
+      coreMetricOwnerTable: normalizeTableConfig(
+        group.coreMetricOwnerTable || raw.coreMetricOwnerTable,
+        CORE_METRIC_OWNER_FIELD_KEYS,
+      ),
       weeklySheet: normalizeWeeklySheetConfig(group.weeklySheet || raw.weeklySheet),
+      weeklyDelivery: normalizeWeeklyDelivery(group.weeklyDelivery || raw.weeklyDelivery),
       };
     });
 
@@ -203,11 +279,37 @@ export function normalizeConfig(raw) {
     timezone,
     botNames,
     errorReporting,
+    weeklyDraft,
+    weeklyOwnerReminder,
+    weeklyRefresh,
     weeklyPush,
     weeklyInstanceCreation,
     dailySupervisorPush,
     dailyFactSync,
     groups,
+  };
+}
+
+function normalizeWeeklySchedule(schedule, defaults) {
+  return {
+    enabled: schedule?.enabled === true,
+    dayOfWeek: Number(schedule?.dayOfWeek ?? defaults.dayOfWeek),
+    time: schedule?.time || defaults.time,
+    timezone: schedule?.timezone || defaults.timezone,
+  };
+}
+
+function normalizeWeeklyDelivery(delivery) {
+  return {
+    departmentChatId: String(delivery?.departmentChatId || delivery?.department_chat_id || '').trim(),
+    smallTeams: (Array.isArray(delivery?.smallTeams) ? delivery.smallTeams : [])
+      .map(team => ({
+        key: String(team?.key || '').trim(),
+        name: String(team?.name || '').trim(),
+        enabled: team?.enabled === true,
+        chatId: String(team?.chatId || team?.chat_id || '').trim(),
+        sectionTargets: normalizeStringList(team?.sectionTargets || team?.section_targets),
+      })),
   };
 }
 
