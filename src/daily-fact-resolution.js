@@ -7,6 +7,11 @@ export const DAILY_FACT_CONTENT_KEYS = Object.freeze([
   'riskItems',
 ]);
 
+export const DAILY_FACT_RESOLUTION_MODES = Object.freeze({
+  PERSISTED_INCREMENTAL: 'persisted-incremental',
+  SOURCE_REBUILD: 'source-rebuild',
+});
+
 const FIELD_LABELS = Object.freeze({
   workItems: '今日工作总结',
   tomorrowPlanItems: '明日工作计划',
@@ -15,9 +20,15 @@ const FIELD_LABELS = Object.freeze({
 
 /**
  * Resolves daily-fact content independently per field. The returned provenance
- * is safe to persist because it deliberately contains no report text.
+ * is safe to persist because it deliberately contains no report text. The
+ * default mode retains conflict history read from a persisted fact; callers
+ * replaying source records must pass mode: 'source-rebuild' to recompute it.
  */
-export function resolveDailyFactFields({ existing = null, incoming }) {
+export function resolveDailyFactFields({
+  existing = null,
+  incoming,
+  mode = DAILY_FACT_RESOLUTION_MODES.PERSISTED_INCREMENTAL,
+}) {
   if (!incoming) throw new Error('An incoming daily fact candidate is required');
 
   const existingValues = existing?.values || {};
@@ -53,7 +64,8 @@ export function resolveDailyFactFields({ existing = null, incoming }) {
       .filter(key => normalizeText(values[key]))
       .map(key => Number(fieldSources[key]?.sourceTime) || 0),
   );
-  const preservesConflict = existing?.conflictStatus === '已自动处理';
+  const preservesConflict = mode === DAILY_FACT_RESOLUTION_MODES.PERSISTED_INCREMENTAL
+    && existing?.conflictStatus === '已自动处理';
   const hasConflict = preservesConflict || Object.values(relations).includes('conflict');
   const mergeStatus = deriveMergeStatus(observedSources, relations, hasConflict);
   const conflictStatus = hasConflict ? '已自动处理' : '无冲突';
@@ -112,6 +124,13 @@ function shouldChooseIncoming(existingSource, incoming, incomingValue) {
 }
 
 function existingProvenance(source, existing, value) {
+  if (!normalizeText(value)) {
+    return {
+      source: '',
+      sourceTime: 0,
+      fingerprint: fingerprint(''),
+    };
+  }
   if (source?.source) return source;
   const fallbackSource = splitSources(existing?.effectiveSources || existing?.effectiveSource || existing?.source)[0] || '';
   return {

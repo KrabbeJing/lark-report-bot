@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveDailyFactFields } from '../src/daily-fact-resolution.js';
+import {
+  DAILY_FACT_RESOLUTION_MODES,
+  resolveDailyFactFields,
+} from '../src/daily-fact-resolution.js';
 
 test('later chat work keeps earlier non-empty form plan', () => {
   const form = candidate('form', 1000, {
@@ -73,6 +76,23 @@ test('form wins an exact cross-source timestamp tie', () => {
   assert.equal(result.conflictStatus, '已自动处理');
 });
 
+test('sparse cross-source ties keep complete field provenance stable without inventing empty-field sources', () => {
+  const candidates = [
+    candidate('form', 2000, { workItems: '表单版本' }),
+    candidate('chat', 2000, { workItems: '群聊版本' }),
+  ];
+  const forward = resolveInOrder(candidates);
+  const reverse = resolveInOrder([...candidates].reverse());
+
+  assert.deepEqual(reverse.fieldSources, forward.fieldSources);
+  assert.equal(forward.fieldSources.workItems.source, 'form');
+  for (const key of ['tomorrowPlanItems', 'riskItems']) {
+    assert.equal(forward.fieldSources[key].source, '');
+    assert.equal(forward.fieldSources[key].sourceTime, 0);
+    assert.match(forward.fieldSources[key].fingerprint, /^[a-f0-9]{64}$/);
+  }
+});
+
 test('later blank from the same source preserves an existing non-empty field', () => {
   const result = resolveInOrder([
     candidate('form', 1000, { tomorrowPlanItems: '保留的计划' }),
@@ -110,6 +130,28 @@ test('same-source equal-time revisions are deterministic without a conflict', ()
   assert.deepEqual(reverse.values, forward.values);
   assert.deepEqual(reverse.fieldSources, forward.fieldSources);
   assert.equal(forward.mergeStatus, '单来源');
+  assert.equal(forward.conflictStatus, '无冲突');
+  assert.equal(forward.autoResolutionNote, '');
+});
+
+test('source rebuild converges revised candidates independently of arrival order', () => {
+  const candidates = [
+    candidate('form', 1000, { workItems: '表单旧版本' }),
+    candidate('chat', 2000, { workItems: '已收敛版本' }),
+    candidate('form', 3000, { workItems: '已收敛版本' }),
+  ];
+  const forward = resolveInOrder(candidates, DAILY_FACT_RESOLUTION_MODES.SOURCE_REBUILD);
+  const reverse = resolveInOrder([...candidates].reverse(), DAILY_FACT_RESOLUTION_MODES.SOURCE_REBUILD);
+
+  assert.deepEqual(reverse.values, forward.values);
+  assert.deepEqual(reverse.fieldSources, forward.fieldSources);
+  assert.equal(reverse.mergeStatus, forward.mergeStatus);
+  assert.equal(reverse.conflictStatus, forward.conflictStatus);
+  assert.equal(reverse.autoResolutionNote, forward.autoResolutionNote);
+  assert.equal(forward.values.workItems, '已收敛版本');
+  assert.equal(forward.fieldSources.workItems.source, 'form');
+  assert.equal(forward.fieldSources.workItems.sourceTime, 3000);
+  assert.equal(forward.mergeStatus, '重复已合并');
   assert.equal(forward.conflictStatus, '无冲突');
   assert.equal(forward.autoResolutionNote, '');
 });
@@ -165,9 +207,31 @@ test('same-source refresh preserves a known automatic conflict marker', () => {
   assert.equal(result.mergeStatus, '按字段取最新');
 });
 
-function resolveInOrder(candidates) {
+test('persisted incremental conflict is retained while source rebuild can clear convergence', () => {
+  const formOld = candidate('form', 1000, { workItems: '表单旧版本' });
+  const chat = candidate('chat', 2000, { workItems: '已收敛版本' });
+  const formNew = candidate('form', 3000, { workItems: '已收敛版本' });
+  const persisted = resolveInOrder([formOld, chat], DAILY_FACT_RESOLUTION_MODES.SOURCE_REBUILD);
+
+  const incremental = resolveDailyFactFields({
+    existing: persisted,
+    incoming: candidate('chat', 4000, { tomorrowPlanItems: '群聊计划' }),
+  });
+  const rebuilt = resolveInOrder(
+    [formOld, chat, formNew],
+    DAILY_FACT_RESOLUTION_MODES.SOURCE_REBUILD,
+  );
+
+  assert.equal(incremental.conflictStatus, '已自动处理');
+  assert.equal(incremental.mergeStatus, '按字段取最新');
+  assert.equal(rebuilt.conflictStatus, '无冲突');
+  assert.equal(rebuilt.mergeStatus, '重复已合并');
+  assert.equal(rebuilt.autoResolutionNote, '');
+});
+
+function resolveInOrder(candidates, mode) {
   return candidates.reduce(
-    (existing, incoming) => resolveDailyFactFields({ existing, incoming }),
+    (existing, incoming) => resolveDailyFactFields({ existing, incoming, mode }),
     null,
   );
 }
