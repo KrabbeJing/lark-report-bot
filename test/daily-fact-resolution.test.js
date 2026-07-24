@@ -85,6 +85,35 @@ test('later blank from the same source preserves an existing non-empty field', (
   assert.equal(result.mergeStatus, '单来源');
 });
 
+test('later same-source revision stays single-source without a conflict', () => {
+  const result = resolveInOrder([
+    candidate('form', 1000, { workItems: '旧版本' }),
+    candidate('form', 2000, { workItems: '新版本' }),
+  ]);
+
+  assert.equal(result.values.workItems, '新版本');
+  assert.equal(result.fieldSources.workItems.source, 'form');
+  assert.equal(result.fieldSources.workItems.sourceTime, 2000);
+  assert.equal(result.mergeStatus, '单来源');
+  assert.equal(result.conflictStatus, '无冲突');
+  assert.equal(result.autoResolutionNote, '');
+});
+
+test('same-source equal-time revisions are deterministic without a conflict', () => {
+  const candidates = [
+    candidate('chat', 2000, { workItems: '版本甲' }),
+    candidate('chat', 2000, { workItems: '版本乙' }),
+  ];
+  const forward = resolveInOrder(candidates);
+  const reverse = resolveInOrder([...candidates].reverse());
+
+  assert.deepEqual(reverse.values, forward.values);
+  assert.deepEqual(reverse.fieldSources, forward.fieldSources);
+  assert.equal(forward.mergeStatus, '单来源');
+  assert.equal(forward.conflictStatus, '无冲突');
+  assert.equal(forward.autoResolutionNote, '');
+});
+
 test('preserves manual ignore status', () => {
   const result = resolveDailyFactFields({
     existing: { factStatus: '忽略' },

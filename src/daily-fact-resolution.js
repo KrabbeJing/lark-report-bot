@@ -92,9 +92,10 @@ function chooseField(existingValue, existingSource, incomingValue, incoming) {
       : { value: normalizeValue(existingValue), source: existingSource, relation: 'same' };
   }
 
+  const relation = existingSource?.source === incoming.source ? 'revision' : 'conflict';
   return shouldChooseIncoming(existingSource, incoming, incomingValue)
-    ? { value: normalizeValue(incomingValue), source: provenance(incoming, incomingValue), relation: 'conflict' }
-    : { value: normalizeValue(existingValue), source: existingSource, relation: 'conflict' };
+    ? { value: normalizeValue(incomingValue), source: provenance(incoming, incomingValue), relation }
+    : { value: normalizeValue(existingValue), source: existingSource, relation };
 }
 
 function shouldChooseIncoming(existingSource, incoming, incomingValue) {
