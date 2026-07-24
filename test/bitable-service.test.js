@@ -2845,6 +2845,424 @@ test('scheduled rebuild and real-time incremental candidates persist the same re
   );
 });
 
+test('scheduled rebuild preserves newer chat plan and risk that raw chat cannot recover', async () => {
+  const formTime = 1783690000000;
+  const chatTime = 1783699200000;
+  const { service, group, getUpdate } = buildChatPlanRiskRebuildFixture({
+    formTime,
+    chatSnapshotTime: chatTime,
+  });
+
+  await service.syncDailyFactRecordsForGroup(group, {
+    startDate: '2026-07-01',
+    endDate: '2026-07-01',
+  });
+
+  const fields = getUpdate().data.fields;
+  const snapshot = JSON.parse(fields['字段来源快照']);
+  assert.equal(fields['今日工作总结'], '群聊总结');
+  assert.equal(fields['明日工作计划'], '群聊计划');
+  assert.equal(fields['遇到的问题'], '群聊风险');
+  assert.equal(snapshot.tomorrowPlanItems.source, 'chat');
+  assert.equal(snapshot.tomorrowPlanItems.sourceTime, chatTime);
+  assert.equal(snapshot.riskItems.source, 'chat');
+  assert.equal(snapshot.riskItems.sourceTime, chatTime);
+});
+
+test('scheduled rebuild lets a newer recoverable form plan and risk beat synthetic chat values', async () => {
+  const chatTime = 1783690000000;
+  const formTime = 1783699200000;
+  const { service, group, getUpdate } = buildChatPlanRiskRebuildFixture({
+    formTime,
+    chatSnapshotTime: chatTime,
+  });
+
+  await service.syncDailyFactRecordsForGroup(group, {
+    startDate: '2026-07-01',
+    endDate: '2026-07-01',
+  });
+
+  const fields = getUpdate().data.fields;
+  const snapshot = JSON.parse(fields['字段来源快照']);
+  assert.equal(fields['明日工作计划'], '表单计划');
+  assert.equal(fields['遇到的问题'], '表单风险');
+  assert.equal(snapshot.tomorrowPlanItems.source, 'form');
+  assert.equal(snapshot.riskItems.source, 'form');
+});
+
+function buildChatPlanRiskRebuildFixture({ formTime, chatSnapshotTime }) {
+  const group = normalizeConfig({
+    groups: [{
+      dailyTable: { appToken: 'bas', tableId: 'tbl_source' },
+      chatDailyRawTable: { appToken: 'bas', tableId: 'tbl_chat_raw' },
+      dailyFactTable: {
+        appToken: 'bas',
+        tableId: 'tbl_fact',
+        fieldTypes: { reportDate: 'date', sourceTime: 'datetime' },
+      },
+    }],
+  }).groups[0];
+  let updatePayload;
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async ({ path }) => {
+          if (path.table_id === 'tbl_source') {
+            return {
+              data: {
+                items: [{
+                  record_id: 'rec_form',
+                  last_modified_time: formTime,
+                  fields: {
+                    日报日期: Date.UTC(2026, 6, 1),
+                    日报提交人: [{ id: 'ou_liu', name: '刘喜双' }],
+                    今日工作总结: '表单总结',
+                    明日工作计划: '表单计划',
+                    遇到的问题: '表单风险',
+                  },
+                }],
+              },
+            };
+          }
+          if (path.table_id === 'tbl_chat_raw') {
+            return {
+              data: {
+                items: [{
+                  record_id: 'rec_raw',
+                  fields: {
+                    消息ID: 'om_chat',
+                    发送人OpenID: 'ou_liu',
+                    标题姓名: '刘喜双',
+                    拆分日期列表: '2026-07-01',
+                    解析后工作总结: '群聊总结',
+                    消息时间: chatSnapshotTime,
+                    原始记录状态: '主版本',
+                  },
+                }],
+              },
+            };
+          }
+          if (path.table_id === 'tbl_fact') {
+            return {
+              data: {
+                items: [{
+                  record_id: 'rec_fact',
+                  fields: {
+                    事实唯一键: 'open_id:ou_liu:2026-07-01',
+                    日报日期: Date.UTC(2026, 6, 1),
+                    日报提交人姓名: '刘喜双',
+                    成员OpenID: 'ou_liu',
+                    今日工作总结: '群聊总结',
+                    明日工作计划: '群聊计划',
+                    遇到的问题: '群聊风险',
+                    日报来源: 'form+chat',
+                    有效来源: 'chat',
+                    来源记录ID: 'rec_form',
+                    来源消息ID: 'om_chat',
+                    来源组合: 'form:rec_form\nchat_raw:rec_raw\nchat:om_chat',
+                    来源时间: chatSnapshotTime,
+                    事实记录状态: '有效',
+                    匹配状态: '已匹配',
+                    字段来源快照: JSON.stringify({
+                      workItems: { source: 'chat', sourceTime: chatSnapshotTime },
+                      tomorrowPlanItems: { source: 'chat', sourceTime: chatSnapshotTime },
+                      riskItems: { source: 'chat', sourceTime: chatSnapshotTime },
+                    }),
+                  },
+                }],
+              },
+            };
+          }
+          return { data: { items: [] } };
+        },
+        update: async payload => {
+          updatePayload = payload;
+          return {
+            data: {
+              record: {
+                record_id: payload.path.record_id,
+                fields: payload.data.fields,
+              },
+            },
+          };
+        },
+      },
+    },
+  });
+  return {
+    service,
+    group,
+    getUpdate: () => updatePayload,
+  };
+}
+
+test('scheduled rebuild selects the newest primary IDs and retains every source reference', async () => {
+  const { service, group, getCreate } = buildMultiRevisionSourceFixture({
+    formTimes: [1783690000000, 1783699200000],
+    chatTimes: [1783691000000, 1783700200000],
+  });
+
+  await service.syncDailyFactRecordsForGroup(group, {
+    startDate: '2026-07-01',
+    endDate: '2026-07-01',
+  });
+
+  const fields = getCreate().data.fields;
+  assert.equal(fields['来源记录ID'], 'rec_form_z');
+  assert.equal(fields['来源消息ID'], 'om_chat_z');
+  assert.deepEqual(
+    new Set(fields['来源组合'].split('\n')),
+    new Set([
+      'form:rec_form_a',
+      'form:rec_form_z',
+      'chat_raw:rec_chat_a',
+      'chat:om_chat_a',
+      'chat_raw:rec_chat_z',
+      'chat:om_chat_z',
+    ]),
+  );
+});
+
+test('scheduled rebuild resolves exact-time primary ID ties by stable source ID', async () => {
+  const tiedTime = 1783699200000;
+  const { service, group, getCreate } = buildMultiRevisionSourceFixture({
+    formTimes: [tiedTime, tiedTime],
+    chatTimes: [tiedTime, tiedTime],
+  });
+
+  await service.syncDailyFactRecordsForGroup(group, {
+    startDate: '2026-07-01',
+    endDate: '2026-07-01',
+  });
+
+  const fields = getCreate().data.fields;
+  assert.equal(fields['来源记录ID'], 'rec_form_z');
+  assert.equal(fields['来源消息ID'], 'om_chat_z');
+});
+
+function buildMultiRevisionSourceFixture({ formTimes, chatTimes }) {
+  const group = normalizeConfig({
+    groups: [{
+      dailyTable: { appToken: 'bas', tableId: 'tbl_source' },
+      chatDailyRawTable: { appToken: 'bas', tableId: 'tbl_chat_raw' },
+      dailyFactTable: {
+        appToken: 'bas',
+        tableId: 'tbl_fact',
+        fieldTypes: { reportDate: 'date', sourceTime: 'datetime' },
+      },
+    }],
+  }).groups[0];
+  const formRecords = ['a', 'z'].map((suffix, index) => ({
+    record_id: `rec_form_${suffix}`,
+    last_modified_time: formTimes[index],
+    fields: {
+      日报日期: Date.UTC(2026, 6, 1),
+      日报提交人: [{
+        id: `ou_form_${suffix}`,
+        name: `刘喜双${suffix.toUpperCase()}`,
+      }],
+      今日工作总结: `表单总结${suffix.toUpperCase()}`,
+    },
+  }));
+  const chatRecords = ['a', 'z'].map((suffix, index) => ({
+    record_id: `rec_chat_${suffix}`,
+    fields: {
+      消息ID: `om_chat_${suffix}`,
+      发送人OpenID: `ou_chat_${suffix}`,
+      标题姓名: `刘喜双${suffix.toUpperCase()}`,
+      拆分日期列表: '2026-07-01',
+      解析后工作总结: `群聊总结${suffix.toUpperCase()}`,
+      消息时间: chatTimes[index],
+      原始记录状态: '主版本',
+    },
+  }));
+  let createPayload;
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async ({ path }) => {
+          if (path.table_id === 'tbl_source') {
+            return { data: { items: formRecords } };
+          }
+          if (path.table_id === 'tbl_chat_raw') {
+            return { data: { items: chatRecords } };
+          }
+          return { data: { items: [] } };
+        },
+        create: async payload => {
+          createPayload = payload;
+          return {
+            data: {
+              record: {
+                record_id: 'rec_fact',
+                fields: payload.data.fields,
+              },
+            },
+          };
+        },
+      },
+    },
+  });
+  const chatContactCalls = new Map();
+  const contact = {
+    teamName: '渠道创新建设',
+    teamMember: '刘喜双',
+    teamMemberId: 'ou_member',
+    supervisor: '王经理',
+    supervisorOpenId: 'ou_mgr',
+    matchingStatus: '已匹配',
+    matchMethod: '姓名',
+  };
+  service.findTeamContactForReport = async (_group, _report, sourceRecordId) => {
+    if (!sourceRecordId.startsWith('rec_chat_')) return contact;
+    const calls = chatContactCalls.get(sourceRecordId) || 0;
+    chatContactCalls.set(sourceRecordId, calls + 1);
+    return calls === 0 ? null : contact;
+  };
+  return {
+    service,
+    group,
+    getCreate: () => createPayload,
+  };
+}
+
+test('groups matched and unmatched candidates by reporter and date despite different sender open ids', async () => {
+  const { service, group, creates } = buildMixedOrganizationSyncFixture({
+    chatSenderOpenId: 'ou_forwarder',
+  });
+
+  const result = await service.syncDailyFactRecordsForGroup(group, {
+    startDate: '2026-07-01',
+    endDate: '2026-07-01',
+  });
+
+  assert.equal(result.created, 1);
+  assert.equal(creates.length, 1);
+  const fields = creates[0].data.fields;
+  assert.equal(fields['事实唯一键'], 'open_id:ou_member:2026-07-01');
+  assert.equal(fields['日报提交人姓名'], '刘喜双');
+  assert.equal(fields['成员OpenID'], 'ou_member');
+  assert.equal(fields['所属板块'], '渠道创新建设');
+  assert.deepEqual(fields['直属上级'], [{ id: 'ou_mgr', name: '王经理' }]);
+  assert.equal(fields['匹配状态'], '已匹配');
+  assert.equal(fields['事实记录状态'], '有效');
+  assert.equal(fields['日报来源'], 'form+chat');
+  assert.equal(fields['来源消息ID'], 'om_chat');
+});
+
+test('keeps matched organization when a later unmatched candidate already shares its fact key', async () => {
+  const { service, group, creates } = buildMixedOrganizationSyncFixture({
+    chatSenderOpenId: 'ou_member',
+  });
+
+  const result = await service.syncDailyFactRecordsForGroup(group, {
+    startDate: '2026-07-01',
+    endDate: '2026-07-01',
+  });
+
+  assert.equal(result.created, 1);
+  const fields = creates[0].data.fields;
+  assert.equal(fields['事实唯一键'], 'open_id:ou_member:2026-07-01');
+  assert.equal(fields['日报提交人姓名'], '刘喜双');
+  assert.equal(fields['成员OpenID'], 'ou_member');
+  assert.equal(fields['所属板块'], '渠道创新建设');
+  assert.deepEqual(fields['直属上级'], [{ id: 'ou_mgr', name: '王经理' }]);
+  assert.equal(fields['匹配状态'], '已匹配');
+  assert.equal(fields['事实记录状态'], '有效');
+  assert.equal(fields['来源消息ID'], 'om_chat');
+});
+
+function buildMixedOrganizationSyncFixture({ chatSenderOpenId }) {
+  const formTime = 1783690000000;
+  const chatTime = 1783699200000;
+  const group = normalizeConfig({
+    groups: [{
+      dailyTable: { appToken: 'bas', tableId: 'tbl_source' },
+      chatDailyRawTable: { appToken: 'bas', tableId: 'tbl_chat_raw' },
+      dailyFactTable: {
+        appToken: 'bas',
+        tableId: 'tbl_fact',
+        fieldTypes: {
+          reportDate: 'date',
+          reporterName: 'user',
+          supervisor: 'user',
+          sourceTime: 'datetime',
+        },
+      },
+    }],
+  }).groups[0];
+  const creates = [];
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async ({ path }) => {
+          if (path.table_id === 'tbl_source') {
+            return {
+              data: {
+                items: [{
+                  record_id: 'rec_form',
+                  last_modified_time: formTime,
+                  fields: {
+                    日报日期: Date.UTC(2026, 6, 1),
+                    日报提交人: [{ id: 'ou_form_sender', name: '刘喜双' }],
+                    今日工作总结: '表单总结',
+                    明日工作计划: '表单计划',
+                  },
+                }],
+              },
+            };
+          }
+          if (path.table_id === 'tbl_chat_raw') {
+            return {
+              data: {
+                items: [{
+                  record_id: 'rec_chat_raw',
+                  fields: {
+                    消息ID: 'om_chat',
+                    发送人OpenID: chatSenderOpenId,
+                    标题姓名: '刘喜双',
+                    拆分日期列表: '2026-07-01',
+                    原始消息文本: '刘喜双日报原文',
+                    解析后工作总结: '群聊总结',
+                    消息时间: chatTime,
+                    原始记录状态: '主版本',
+                  },
+                }],
+              },
+            };
+          }
+          return { data: { items: [] } };
+        },
+        create: async payload => {
+          creates.push(payload);
+          return {
+            data: {
+              record: {
+                record_id: `rec_fact_${creates.length}`,
+                fields: payload.data.fields,
+              },
+            },
+          };
+        },
+      },
+    },
+  });
+  service.findTeamContactForReport = async (_group, _report, sourceRecordId) => (
+    sourceRecordId === 'rec_form'
+      ? {
+        teamName: '渠道创新建设',
+        teamMember: '刘喜双',
+        teamMemberId: 'ou_member',
+        supervisor: '王经理',
+        supervisorOpenId: 'ou_mgr',
+        matchingStatus: '已匹配',
+        matchMethod: '姓名',
+      }
+      : null
+  );
+  return { service, group, creates };
+}
+
 test('initializes source-less historical facts without changing content or ignored status', async () => {
   const group = normalizeConfig({
     groups: [{

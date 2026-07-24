@@ -288,6 +288,10 @@ export class BitableService {
     );
     const targetByFactKey = indexRecordsByField(targetRecords, group.dailyFactTable.fields.factKey);
     const targetBySourceIdentity = indexFactRecordsBySourceIdentity(targetRecords, group.dailyFactTable.fields);
+    const targetByReporterDate = indexFactRecordsByReporterDate(
+      targetRecords,
+      group.dailyFactTable.fields,
+    );
 
     let created = 0;
     let updated = 0;
@@ -360,6 +364,7 @@ export class BitableService {
           claimedTargetRecordIds,
           targetByFactKey,
           targetBySourceIdentity,
+          targetByReporterDate,
           input,
         });
         sourceCounts.formFacts += 1;
@@ -440,6 +445,7 @@ export class BitableService {
             claimedTargetRecordIds,
             targetByFactKey,
             targetBySourceIdentity,
+            targetByReporterDate,
             input,
           });
           sourceCounts.chatFacts += 1;
@@ -455,15 +461,19 @@ export class BitableService {
       }
     }
 
-    for (const rebuildGroup of rebuildGroups.values()) {
+    for (const rebuildGroup of new Set(rebuildGroups.values())) {
       try {
         const input = consolidateDailyFactInputs(rebuildGroup.inputs);
         const existingRecord = rebuildGroup.existingRecord;
         const existingState = existingRecord
           ? readExistingDailyFactState(existingRecord.fields || {}, group.dailyFactTable.fields)
           : null;
+        const candidates = buildDailyFactRebuildCandidates(
+          rebuildGroup.inputs,
+          existingState,
+        );
         let resolution = rebuildDailyFactFields({
-          candidates: rebuildGroup.inputs.map(toDailyFactCandidate),
+          candidates,
           existingFactStatus: existingState?.factStatus || '',
         });
         resolution = preserveExistingNonEmptyFactValues(resolution, existingState);
@@ -1099,26 +1109,44 @@ function collectDailyFactRebuildCandidate({
   claimedTargetRecordIds,
   targetByFactKey,
   targetBySourceIdentity,
+  targetByReporterDate,
   input,
 }) {
+  const reporterDateAlias = buildReporterDateIdentity(input.reporterName, input.reportDate);
   const existingRecord = targetByFactKey.get(input.factKey)
-    || targetBySourceIdentity.get(buildFactSourceIdentity(input));
-  const groupKey = existingRecord?.record_id
-    ? `record:${existingRecord.record_id}`
-    : `fact:${input.factKey}`;
-  const current = rebuildGroups.get(groupKey) || {
+    || targetBySourceIdentity.get(buildFactSourceIdentity(input))
+    || targetByReporterDate.get(reporterDateAlias);
+  const aliases = [
+    existingRecord?.record_id ? `record:${existingRecord.record_id}` : '',
+    input.factKey ? `fact:${input.factKey}` : '',
+    reporterDateAlias ? `reporter:${reporterDateAlias}` : '',
+  ].filter(Boolean);
+  const matchedGroups = [...new Set(aliases.map(alias => rebuildGroups.get(alias)).filter(Boolean))];
+  const current = matchedGroups.shift() || {
     existingRecord,
     inputs: [],
   };
+  for (const duplicate of matchedGroups) {
+    current.existingRecord ||= duplicate.existingRecord;
+    current.inputs.push(...duplicate.inputs);
+    for (const [alias, rebuildGroup] of rebuildGroups.entries()) {
+      if (rebuildGroup === duplicate) rebuildGroups.set(alias, current);
+    }
+  }
+  current.existingRecord ||= existingRecord;
   current.inputs.push(input);
-  rebuildGroups.set(groupKey, current);
+  for (const alias of aliases) rebuildGroups.set(alias, current);
   if (existingRecord?.record_id) claimedTargetRecordIds.add(existingRecord.record_id);
 }
 
 function consolidateDailyFactInputs(inputs) {
   const canonical = [...inputs].sort(compareDailyFactInputs).at(-1);
-  const form = inputs.find(input => input.source === 'form');
-  const chat = inputs.find(input => input.source === 'chat');
+  const organization = [...inputs]
+    .filter(input => input.contact && input.matchingStatus !== '未匹配')
+    .sort(compareDailyFactInputs)
+    .at(-1) || canonical;
+  const form = selectLatestPrimarySourceInput(inputs, 'form', input => input.sourceRecordId);
+  const chat = selectLatestPrimarySourceInput(inputs, 'chat', input => input.messageId);
   const sourceRefs = inputs.reduce((refs, input) => mergeSourceRefs(refs, buildSourceRefs({
     source: input.source,
     sourceRecordId: input.sourceRecordId,
@@ -1126,10 +1154,34 @@ function consolidateDailyFactInputs(inputs) {
   })), '');
   return {
     ...canonical,
+    factKey: organization.factKey,
+    reporterName: organization.reporterName,
+    memberOpenId: organization.memberOpenId,
+    project: organization.project,
+    supervisor: organization.supervisor,
+    supervisorOpenId: organization.supervisorOpenId,
+    matchingStatus: organization.matchingStatus,
+    matchMethod: organization.matchMethod,
+    contact: organization.contact,
     formSourceRecordId: form?.sourceRecordId || '',
     chatMessageId: chat?.messageId || '',
     sourceRefs,
   };
+}
+
+function selectLatestPrimarySourceInput(inputs, source, selectPrimaryId) {
+  return inputs
+    .filter(input => input.source === source)
+    .sort((left, right) => {
+      const timeDifference = normalizeSourceTimestamp(left.sourceTime)
+        - normalizeSourceTimestamp(right.sourceTime);
+      if (timeDifference !== 0) return timeDifference;
+      const leftId = `${selectPrimaryId(left) || ''}\u0000${left.sourceRecordId || ''}`;
+      const rightId = `${selectPrimaryId(right) || ''}\u0000${right.sourceRecordId || ''}`;
+      if (leftId === rightId) return 0;
+      return leftId > rightId ? 1 : -1;
+    })
+    .at(-1);
 }
 
 function compareDailyFactInputs(left, right) {
@@ -1147,6 +1199,34 @@ function toDailyFactCandidate(input) {
     matchingStatus: input.matchingStatus || '',
     values: normalizeDailyFactCandidateValues(input),
   };
+}
+
+function buildDailyFactRebuildCandidates(inputs, existingState) {
+  const candidates = inputs.map(toDailyFactCandidate);
+  if (!existingState || !inputs.some(input => input.source === 'chat')) return candidates;
+
+  for (const key of ['tomorrowPlanItems', 'riskItems']) {
+    const rawChatCanRecoverField = candidates.some(candidate => (
+      candidate.source === 'chat' && String(candidate.values?.[key] || '').trim()
+    ));
+    const snapshot = existingState.fieldSources?.[key];
+    const value = existingState.values?.[key];
+    if (
+      rawChatCanRecoverField
+      || snapshot?.source !== 'chat'
+      || !String(value || '').trim()
+    ) {
+      continue;
+    }
+
+    candidates.push({
+      source: 'chat',
+      sourceTime: normalizeSourceTimestamp(snapshot.sourceTime),
+      matchingStatus: existingState.matchingStatus || '',
+      values: { [key]: value },
+    });
+  }
+  return candidates;
 }
 
 function buildDailyFactFields(table, input, existing, options = {}) {
@@ -1940,6 +2020,29 @@ function indexRecordsByField(records, fieldName) {
     if (value) index.set(String(value), record);
   }
   return index;
+}
+
+function indexFactRecordsByReporterDate(records, fields) {
+  const index = new Map();
+  for (const record of records || []) {
+    const reporter = normalizePersonValue(record.fields?.[fields.reporterName]);
+    const reporterName = normalizeFieldValue(record.fields?.[fields.reporterNameText])
+      || reporter.name;
+    const reportDate = normalizeDateFieldValue(record.fields?.[fields.reportDate]);
+    const identity = buildReporterDateIdentity(reporterName, reportDate);
+    if (identity) index.set(identity, record);
+  }
+  return index;
+}
+
+function buildReporterDateIdentity(reporterName, reportDate) {
+  const normalizedName = String(reporterName || '')
+    .normalize('NFKC')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLocaleLowerCase();
+  const date = String(reportDate || '').trim();
+  return normalizedName && date ? `${normalizedName}:${date}` : '';
 }
 
 function indexFactRecordsBySourceIdentity(records, fields) {
