@@ -315,13 +315,18 @@ test('writes configured chat reports to raw table and fact table', async () => {
   assert.equal(calls[1].input.rawText, `刘喜双6.30工作日报
 1、补发昨日数据提取进展`);
   assert.equal(calls[1].input.project, '渠道创新建设');
-  assert.equal(calls[1].input.agileGroup, 'A组');
   assert.equal(calls[1].input.supervisor, '王经理');
   assert.equal(calls[1].input.supervisorOpenId, 'ou_mgr');
-  assert.equal(calls[1].input.divisionalLeader, '赵总');
-  assert.equal(calls[1].input.divisionalLeaderOpenId, 'ou_leader');
+  assert.equal(calls[1].input.agileGroup, undefined);
+  assert.equal(calls[1].input.divisionalLeader, undefined);
+  assert.equal(calls[1].input.divisionalLeaderOpenId, undefined);
   assert.equal(calls[1].input.matchingStatus, '已匹配');
   assert.equal(calls[1].input.matchMethod, 'open_id');
+  assert.deepEqual(calls[1].input.values, {
+    workItems: '1、补发昨日数据提取进展',
+    tomorrowPlanItems: '',
+    riskItems: '',
+  });
 });
 
 test('passes configured group name to chat raw records', async () => {

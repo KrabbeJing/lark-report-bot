@@ -3,11 +3,8 @@ const MATCHED_STATUSES = new Set(['已匹配', '姓名匹配']);
 const EMPTY_SNAPSHOT = Object.freeze({
   reporterNameText: '',
   memberOpenId: '',
-  agileGroup: '',
   supervisor: '',
   supervisorOpenId: '',
-  divisionalLeader: '',
-  divisionalLeaderOpenId: '',
   matchingStatus: '未匹配',
   matchMethod: '',
 });
@@ -21,11 +18,8 @@ export function snapshotFromContact(contact) {
   return {
     reporterNameText: contact.teamMember || '',
     memberOpenId: contact.teamMemberId || '',
-    agileGroup: contact.agileGroup || '',
     supervisor: contact.supervisor || '',
     supervisorOpenId: contact.supervisorOpenId || '',
-    divisionalLeader: contact.divisionalLeader || '',
-    divisionalLeaderOpenId: contact.divisionalLeaderOpenId || '',
     matchingStatus: contact.matchingStatus || '已匹配',
     matchMethod: contact.matchMethod || '',
   };
@@ -41,7 +35,19 @@ export function resolveOrganizationSnapshot({
     return { snapshot: snapshotFromContact(contact), matched: true, source: 'contact' };
   }
   if (existingMatched) {
-    return { snapshot: { ...EMPTY_SNAPSHOT, ...existingSnapshot }, matched: true, source: 'existing' };
+    return {
+      snapshot: {
+        ...EMPTY_SNAPSHOT,
+        reporterNameText: existingSnapshot.reporterNameText || '',
+        memberOpenId: existingSnapshot.memberOpenId || '',
+        supervisor: existingSnapshot.supervisor || '',
+        supervisorOpenId: existingSnapshot.supervisorOpenId || '',
+        matchingStatus: existingSnapshot.matchingStatus || '已匹配',
+        matchMethod: existingSnapshot.matchMethod || '',
+      },
+      matched: true,
+      source: 'existing',
+    };
   }
   return { snapshot: { ...EMPTY_SNAPSHOT }, matched: false, source: 'unmatched' };
 }

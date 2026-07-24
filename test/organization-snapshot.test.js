@@ -17,15 +17,12 @@ const contact = {
   matchMethod: 'open_id',
 };
 
-test('builds the complete contact-derived snapshot', () => {
+test('builds only the retained contact-derived organization snapshot', () => {
   assert.deepEqual(snapshotFromContact(contact), {
     reporterNameText: '刘喜双',
     memberOpenId: 'ou_member',
-    agileGroup: '收单项目组',
     supervisor: '王经理',
     supervisorOpenId: 'ou_supervisor',
-    divisionalLeader: '李总',
-    divisionalLeaderOpenId: 'ou_leader',
     matchingStatus: '已匹配',
     matchMethod: 'open_id',
   });
@@ -40,8 +37,9 @@ test('preserves an existing matched snapshot during normal sync', () => {
   };
   const result = resolveOrganizationSnapshot({ contact, existingSnapshot });
   assert.equal(result.source, 'existing');
-  assert.equal(result.snapshot.agileGroup, '历史敏捷组');
   assert.equal(result.snapshot.supervisor, '历史上级');
+  assert.equal(result.snapshot.agileGroup, undefined);
+  assert.equal(result.snapshot.divisionalLeader, undefined);
 });
 
 test('fills a previously unmatched snapshot after contact matching', () => {
@@ -65,7 +63,10 @@ test('repair mode replaces an existing matched snapshot', () => {
     repairOrganization: true,
   });
   assert.equal(result.source, 'contact');
-  assert.equal(result.snapshot.agileGroup, '收单项目组');
+  assert.equal(result.snapshot.reporterNameText, '刘喜双');
+  assert.equal(result.snapshot.supervisor, '王经理');
+  assert.equal(result.snapshot.agileGroup, undefined);
+  assert.equal(result.snapshot.divisionalLeader, undefined);
 });
 
 test('returns blank contact-derived fields when no match exists', () => {
@@ -80,7 +81,7 @@ test('returns blank contact-derived fields when no match exists', () => {
   assert.equal(result.source, 'unmatched');
   assert.equal(result.matched, false);
   assert.equal(result.snapshot.reporterNameText, '');
-  assert.equal(result.snapshot.agileGroup, '');
   assert.equal(result.snapshot.supervisor, '');
-  assert.equal(result.snapshot.divisionalLeader, '');
+  assert.equal(result.snapshot.agileGroup, undefined);
+  assert.equal(result.snapshot.divisionalLeader, undefined);
 });

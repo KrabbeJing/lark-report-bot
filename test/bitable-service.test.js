@@ -73,6 +73,7 @@ test('builds daily record fields using configured field names', () => {
     source: 'chat',
     messageTimeText: '2026/06/26 10:00:00',
     contact: {
+      teamName: '支付平台',
       teamMember: '王治坤',
       teamMemberId: 'ou_1',
       matchingStatus: '已匹配',
@@ -369,7 +370,7 @@ test('reconciles form and chat sources with form priority and conflict status', 
   assert.equal(updatePayload.data.fields['今日工作总结'], '1、表单内容');
   assert.equal(updatePayload.data.fields['明日工作计划'], '2、表单明日计划');
   assert.equal(updatePayload.data.fields['遇到的问题'], '3、表单风险');
-  assert.equal(updatePayload.data.fields['合并状态'], '按时间取最新');
+  assert.equal(updatePayload.data.fields['合并状态'], '按字段取最新');
   assert.equal(updatePayload.data.fields['冲突状态'], '已自动处理');
   assert.equal(updatePayload.data.fields['事实记录状态'], '有效');
 });
@@ -430,9 +431,92 @@ test('uses later chat content when updating an earlier form fact', async () => {
   assert.equal(updatePayload.data.fields['有效来源'], 'chat');
   assert.equal(updatePayload.data.fields['来源记录ID'], 'rec_form');
   assert.equal(updatePayload.data.fields['来源消息ID'], 'om_later');
-  assert.equal(updatePayload.data.fields['合并状态'], '按时间取最新');
+  assert.equal(updatePayload.data.fields['合并状态'], '按字段取最新');
   assert.equal(updatePayload.data.fields['冲突状态'], '已自动处理');
-  assert.equal(updatePayload.data.fields['自动处理说明'], '按来源时间采用群聊版本');
+  assert.equal(updatePayload.data.fields['自动处理说明'], '今日工作总结按来源时间采用群聊');
+});
+
+test('merges a later chat summary with an earlier non-empty form plan by field', async () => {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      dailyFactTable: {
+        appToken: 'bas',
+        tableId: 'tbl_fact',
+        fields: {
+          agileGroup: '敏捷小组',
+          divisionalLeader: '分管领导',
+        },
+        fieldTypes: {
+          reportDate: 'date',
+          reporterName: 'user',
+          sourceTime: 'datetime',
+        },
+      },
+    }],
+  }).groups[0];
+  let updatePayload;
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        update: async payload => {
+          updatePayload = payload;
+          return { data: { record: { record_id: 'rec_fact', fields: payload.data.fields } } };
+        },
+      },
+    },
+  });
+  const existingRecord = {
+    record_id: 'rec_fact',
+    fields: {
+      事实唯一键: 'open_id:ou_liu:2026-07-01',
+      今日工作总结: '表单总结',
+      明日工作计划: '表单计划',
+      遇到的问题: '',
+      日报来源: 'form',
+      有效来源: 'form',
+      来源时间: 1000,
+      事实记录状态: '有效',
+      匹配状态: '已匹配',
+    },
+  };
+
+  await service.upsertDailyFactRecord(group, {
+    factKey: 'open_id:ou_liu:2026-07-01',
+    reportDate: '2026-07-01',
+    reporterName: '刘喜双',
+    memberOpenId: 'ou_liu',
+    source: 'chat',
+    sourceTime: 2000,
+    matchingStatus: '已匹配',
+    values: {
+      workItems: '群聊总结',
+      tomorrowPlanItems: '',
+      riskItems: '',
+    },
+    workSummaryText: '群聊总结',
+    tomorrowPlanItems: '',
+    riskItems: '',
+  }, { existingRecord });
+
+  const fields = updatePayload.data.fields;
+  assert.equal(fields['今日工作总结'], '群聊总结');
+  assert.equal(fields['明日工作计划'], '表单计划');
+  assert.equal(fields['日报来源'], 'form+chat');
+  assert.equal(fields['有效来源'], 'form+chat');
+  assert.equal(fields['合并状态'], '按字段取最新');
+  assert.equal(fields['冲突状态'], '已自动处理');
+  assert.equal(fields['敏捷小组'], undefined);
+  assert.equal(fields['分管领导'], undefined);
+  assert.equal(fields['内容指纹'], buildContentFingerprint({
+    workItems: '群聊总结',
+    tomorrowPlanItems: '表单计划',
+    riskItems: '',
+  }));
+  const snapshot = JSON.parse(fields['字段来源快照']);
+  assert.equal(snapshot.workItems.source, 'chat');
+  assert.equal(snapshot.tomorrowPlanItems.source, 'form');
+  assert.doesNotMatch(JSON.stringify(snapshot), /群聊总结|表单计划/);
 });
 
 test('preserves an ignored fact when a newer source is synchronized', async () => {
@@ -495,7 +579,7 @@ test('preserves an ignored fact when a newer source is synchronized', async () =
   assert.equal(updatePayload.data.fields['事实记录状态'], '忽略');
 });
 
-test('does not use group agileGroup when contact matching fails', () => {
+test('does not write deprecated agile fields when contact matching fails', () => {
   const group = normalizeConfig({
     groups: [{
       chatId: 'oc_test',
@@ -511,7 +595,7 @@ test('does not use group agileGroup when contact matching fails', () => {
     workItems: [],
   }, { contact: null, source: 'chat' });
   assert.equal(fields['日报提交人姓名'], '');
-  assert.equal(fields['敏捷小组'], '');
+  assert.equal(fields['敏捷小组'], undefined);
   assert.equal(fields['直属上级'], undefined);
   assert.equal(fields['事实记录状态'], '待人工确认');
 });
@@ -583,9 +667,10 @@ test('ordinary upsert preserves an existing matched organization snapshot', asyn
   assert.equal(fields['事实唯一键'], 'open_id:ou_old:2026-07-10');
   assert.equal(fields['日报提交人姓名'], '历史姓名');
   assert.equal(fields['成员OpenID'], 'ou_old');
-  assert.equal(fields['敏捷小组'], '历史敏捷组');
+  assert.equal(fields['所属板块'], '历史板块');
+  assert.equal(fields['敏捷小组'], undefined);
   assert.deepEqual(fields['直属上级'], [{ id: 'ou_old_mgr', name: '历史上级' }]);
-  assert.deepEqual(fields['分管领导'], [{ id: 'ou_old_leader', name: '历史领导' }]);
+  assert.equal(fields['分管领导'], undefined);
   assert.equal(fields['今日工作总结'], '更新后的日报内容');
 });
 
@@ -599,12 +684,13 @@ test('organization repair replaces a matched snapshot from contact', async () =>
   assert.equal(fields['事实唯一键'], 'open_id:ou_new:2026-07-10');
   assert.equal(fields['日报提交人姓名'], '刘喜双');
   assert.equal(fields['成员OpenID'], 'ou_new');
-  assert.equal(fields['敏捷小组'], '收单项目组');
+  assert.equal(fields['所属板块'], '新板块');
+  assert.equal(fields['敏捷小组'], undefined);
   assert.deepEqual(fields['直属上级'], [{ id: 'ou_new_mgr', name: '新上级' }]);
-  assert.deepEqual(fields['分管领导'], [{ id: 'ou_new_leader', name: '新领导' }]);
+  assert.equal(fields['分管领导'], undefined);
 });
 
-test('organization repair retains an existing divisional leader when the matched contact has no leader', async () => {
+test('organization repair never writes the deprecated divisional leader field', async () => {
   const { service, group, existingRecord, input, getUpdatePayload } = buildOrganizationUpsertFixture();
   input.contact.divisionalLeader = '';
   input.contact.divisionalLeaderOpenId = '';
@@ -619,7 +705,7 @@ test('organization repair retains an existing divisional leader when the matched
   assert.equal(fields['分管领导'], undefined);
 });
 
-test('organization repair preserves text supervisor and divisional leader fields when matched contact values are blank', async () => {
+test('organization repair preserves a text supervisor and omits the deprecated leader field', async () => {
   const group = normalizeConfig({
     groups: [{
       chatId: 'oc_test',
@@ -659,7 +745,7 @@ test('organization repair preserves text supervisor and divisional leader fields
   assert.equal(updatePayload.data.fields['分管领导'], undefined);
 });
 
-test('organization repair preserves configured user supervisor and divisional leader fields when matched contact values are blank', async () => {
+test('organization repair preserves a configured user supervisor and omits the deprecated leader field', async () => {
   const { service, group, existingRecord, input, getUpdatePayload } = buildOrganizationUpsertFixture();
   input.contact.supervisor = '';
   input.contact.supervisorOpenId = '';
@@ -686,10 +772,10 @@ test('clears existing organization user fields when a fact is unmatched', async 
 
   const fields = getUpdatePayload().data.fields;
   assert.equal(fields['日报提交人姓名'], '');
-  assert.equal(fields['敏捷小组'], '');
+  assert.equal(fields['敏捷小组'], undefined);
   assert.deepEqual(fields['实际日报提交人'], []);
   assert.deepEqual(fields['直属上级'], []);
-  assert.deepEqual(fields['分管领导'], []);
+  assert.equal(fields['分管领导'], undefined);
   assert.equal(fields['事实记录状态'], '待人工确认');
 });
 
@@ -710,7 +796,7 @@ test('clears existing organization user fields for unmatched source updates', ()
 
   assert.deepEqual(fields['实际日报提交人'], []);
   assert.deepEqual(fields['直属上级'], []);
-  assert.deepEqual(fields['分管领导'], []);
+  assert.equal(fields['分管领导'], undefined);
 });
 
 function buildOrganizationUpsertFixture() {
@@ -746,6 +832,7 @@ function buildOrganizationUpsertFixture() {
       日报提交人姓名: '历史姓名',
       实际日报提交人: [{ id: 'ou_old', name: '历史姓名' }],
       成员OpenID: 'ou_old',
+      所属板块: '历史板块',
       敏捷小组: '历史敏捷组',
       直属上级: [{ id: 'ou_old_mgr', name: '历史上级' }],
       分管领导: [{ id: 'ou_old_leader', name: '历史领导' }],
@@ -765,6 +852,7 @@ function buildOrganizationUpsertFixture() {
     sourceTime: Date.UTC(2026, 6, 10, 2),
     workSummaryText: '更新后的日报内容',
     contact: {
+      teamName: '新板块',
       teamMember: '刘喜双',
       teamMemberId: 'ou_new',
       agileGroup: '收单项目组',
@@ -1023,7 +1111,7 @@ test('marks same-content form and chat facts as duplicate merged without conflic
   assert.equal(updatePayload.data.fields['事实记录状态'], '有效');
 });
 
-test('preserves existing form content when later chat source conflicts', async () => {
+test('uses later chat fields while preserving the matched organization snapshot', async () => {
   const group = normalizeConfig({
     groups: [{
       chatId: 'oc_test',
@@ -1095,6 +1183,8 @@ test('preserves existing form content when later chat source conflicts', async (
                 遇到的问题: { text: '3、表单风险' },
                 内容指纹: existingFingerprint,
                 日报来源: 'form+chat',
+                有效来源: 'form',
+                来源时间: 1000,
                 来源记录ID: 'rec_form',
                 来源组合: 'form:rec_form',
                 日报类型: '表单日报',
@@ -1127,6 +1217,7 @@ test('preserves existing form content when later chat source conflicts', async (
     tomorrowPlanItems: '2、群聊不同计划',
     riskItems: '3、群聊不同风险',
     source: 'chat',
+    sourceTime: 2000,
     sourceRecordId: 'rec_raw',
     messageId: 'om_chat',
     project: '群聊板块',
@@ -1143,27 +1234,31 @@ test('preserves existing form content when later chat source conflicts', async (
   assert.deepEqual(updatePayload.data.fields['实际日报提交人'], [{ id: 'ou_liu', name: '刘喜双' }]);
   assert.equal(updatePayload.data.fields['日报提交人姓名'], '刘喜双');
   assert.equal(updatePayload.data.fields['成员OpenID'], 'ou_liu');
-  assert.equal(updatePayload.data.fields['发送人OpenID'], 'ou_form_sender');
+  assert.equal(updatePayload.data.fields['发送人OpenID'], 'ou_liu');
   assert.equal(updatePayload.data.fields['来源记录ID'], 'rec_form');
   assert.equal(updatePayload.data.fields['所属板块'], '表单板块');
-  assert.equal(updatePayload.data.fields['敏捷小组'], '表单敏捷组');
-  assert.equal(updatePayload.data.fields['今日工作总结'], '1、表单内容');
-  assert.equal(updatePayload.data.fields['明日工作计划'], '2、表单明日计划');
-  assert.equal(updatePayload.data.fields['遇到的问题'], '3、表单风险');
+  assert.equal(updatePayload.data.fields['敏捷小组'], undefined);
+  assert.equal(updatePayload.data.fields['今日工作总结'], '1、群聊不同内容');
+  assert.equal(updatePayload.data.fields['明日工作计划'], '2、群聊不同计划');
+  assert.equal(updatePayload.data.fields['遇到的问题'], '3、群聊不同风险');
   assert.deepEqual(updatePayload.data.fields['直属上级'], [{ id: 'ou_mgr', name: '王经理' }]);
-  assert.deepEqual(updatePayload.data.fields['分管领导'], [{ id: 'ou_leader', name: '赵总' }]);
+  assert.equal(updatePayload.data.fields['分管领导'], undefined);
   assert.equal(updatePayload.data.fields['匹配方式'], 'open_id');
   assert.equal(updatePayload.data.fields['匹配状态'], '已匹配');
-  assert.equal(updatePayload.data.fields['原始内容'], '表单原始内容');
-  assert.equal(updatePayload.data.fields['群ID'], 'oc_form');
-  assert.equal(updatePayload.data.fields['消息时间'], '2026/07/01 09:00:00');
-  assert.equal(updatePayload.data.fields['内容指纹'], existingFingerprint);
-  assert.equal(updatePayload.data.fields['合并状态'], '按时间取最新');
+  assert.equal(updatePayload.data.fields['原始内容'], '群聊原始内容');
+  assert.equal(updatePayload.data.fields['群ID'], 'oc_chat');
+  assert.equal(updatePayload.data.fields['消息时间'], '2026/07/01 18:00:00');
+  assert.equal(updatePayload.data.fields['内容指纹'], buildContentFingerprint({
+    workItems: '1、群聊不同内容',
+    tomorrowPlanItems: '2、群聊不同计划',
+    riskItems: '3、群聊不同风险',
+  }));
+  assert.equal(updatePayload.data.fields['合并状态'], '按字段取最新');
   assert.equal(updatePayload.data.fields['冲突状态'], '已自动处理');
   assert.equal(updatePayload.data.fields['事实记录状态'], '有效');
   assert.equal(updatePayload.data.fields['来源组合'], 'form:rec_form\nchat_raw:rec_raw\nchat:om_chat');
-  assert.equal(updatePayload.data.fields['日报类型'], '表单日报');
-  assert.equal(updatePayload.data.fields['日期覆盖范围'], '2026-07-01');
+  assert.equal(updatePayload.data.fields['日报类型'], '群聊日报');
+  assert.equal(updatePayload.data.fields['日期覆盖范围'], '2026-07-01 至 2026-07-02');
 });
 
 test('merges existing chat source refs when incoming form source wins', async () => {
@@ -2464,11 +2559,11 @@ test('syncs chat raw facts with reporter real name from contact table', async ()
   assert.equal(createPayload.data.fields['日报提交人姓名'], '刘喜双');
   assert.equal(createPayload.data.fields['成员OpenID'], 'ou_external');
   assert.equal(createPayload.data.fields['所属板块'], '渠道创新建设');
-  assert.equal(createPayload.data.fields['敏捷小组'], '收单项目组');
+  assert.equal(createPayload.data.fields['敏捷小组'], undefined);
   assert.deepEqual(createPayload.data.fields['直属上级'], [{ id: 'ou_mgr', name: '王经理' }]);
 });
 
-test('reuses newly created form fact when syncing matching chat raw in the same run', async () => {
+test('rebuilds matching form and chat candidates with one fact write', async () => {
   const group = normalizeConfig({
     groups: [{
       chatId: 'oc_test',
@@ -2597,14 +2692,315 @@ test('reuses newly created form fact when syncing matching chat raw in the same 
 
   assert.equal(result.created, 1);
   assert.equal(sourceListParams.automatic_fields, true);
-  assert.equal(result.updated, 1);
+  assert.equal(result.updated, 0);
   assert.equal(creates.length, 1);
-  assert.equal(updates.length, 1);
-  assert.equal(updates[0].path.record_id, 'rec_fact');
-  assert.equal(updates[0].data.fields['日报来源'], 'form+chat');
-  assert.equal(updates[0].data.fields['来源记录ID'], 'rec_form');
-  assert.equal(updates[0].data.fields['来源组合'], 'form:rec_form\nchat_raw:rec_raw\nchat:om_chat');
-  assert.equal(updates[0].data.fields['来源时间'], 1783699200123);
+  assert.equal(updates.length, 0);
+  assert.equal(creates[0].data.fields['日报来源'], 'form+chat');
+  assert.equal(creates[0].data.fields['来源记录ID'], 'rec_form');
+  assert.equal(creates[0].data.fields['来源组合'], 'form:rec_form\nchat_raw:rec_raw\nchat:om_chat');
+  assert.equal(creates[0].data.fields['来源时间'], 1783699200123);
+  const snapshot = JSON.parse(creates[0].data.fields['字段来源快照']);
+  assert.deepEqual(Object.keys(snapshot.workItems.sources), ['form', 'chat']);
+});
+
+test('scheduled rebuild and real-time incremental candidates persist the same resolution', async () => {
+  const formTime = 1783690000000;
+  const chatTime = 1783699200000;
+  const realtimeGroup = normalizeConfig({
+    groups: [{
+      dailyFactTable: {
+        appToken: 'bas',
+        tableId: 'tbl_fact',
+        fieldTypes: { reportDate: 'date', sourceTime: 'datetime' },
+      },
+    }],
+  }).groups[0];
+  const realtimeService = new BitableService({
+    bitable: {
+      appTableRecord: {
+        create: async payload => ({
+          data: { record: { record_id: 'rec_fact', fields: payload.data.fields } },
+        }),
+        update: async payload => ({
+          data: { record: { record_id: 'rec_fact', fields: payload.data.fields } },
+        }),
+      },
+    },
+  });
+  const baseInput = {
+    factKey: 'open_id:ou_liu:2026-07-01',
+    reportDate: '2026-07-01',
+    reporterName: '刘喜双',
+    memberOpenId: 'ou_liu',
+    senderOpenId: 'ou_liu',
+    matchingStatus: '未匹配',
+  };
+  const afterForm = await realtimeService.upsertDailyFactRecord(realtimeGroup, {
+    ...baseInput,
+    source: 'form',
+    sourceTime: formTime,
+    sourceRecordId: 'rec_form',
+    values: {
+      workItems: '表单总结',
+      tomorrowPlanItems: '表单计划',
+      riskItems: '',
+    },
+  }, { existingLookupComplete: true });
+  const realtimeResult = await realtimeService.upsertDailyFactRecord(realtimeGroup, {
+    ...baseInput,
+    source: 'chat',
+    sourceTime: chatTime,
+    sourceRecordId: 'rec_raw',
+    messageId: 'om_chat',
+    values: {
+      workItems: '群聊总结',
+      tomorrowPlanItems: '',
+      riskItems: '',
+    },
+  }, {
+    existingLookupComplete: true,
+    existingRecord: { record_id: 'rec_fact', fields: afterForm.fields },
+  });
+
+  const scheduledGroup = normalizeConfig({
+    groups: [{
+      dailyTable: { appToken: 'bas', tableId: 'tbl_source' },
+      chatDailyRawTable: { appToken: 'bas', tableId: 'tbl_chat_raw' },
+      dailyFactTable: {
+        appToken: 'bas',
+        tableId: 'tbl_fact',
+        fieldTypes: { reportDate: 'date', sourceTime: 'datetime' },
+      },
+    }],
+  }).groups[0];
+  let scheduledFields;
+  const scheduledService = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async ({ path }) => {
+          if (path.table_id === 'tbl_source') {
+            return {
+              data: {
+                items: [{
+                  record_id: 'rec_form',
+                  last_modified_time: formTime,
+                  fields: {
+                    日报日期: Date.UTC(2026, 6, 1),
+                    日报提交人: [{ id: 'ou_liu', name: '刘喜双' }],
+                    今日工作总结: '表单总结',
+                    明日工作计划: '表单计划',
+                  },
+                }],
+              },
+            };
+          }
+          if (path.table_id === 'tbl_chat_raw') {
+            return {
+              data: {
+                items: [{
+                  record_id: 'rec_raw',
+                  fields: {
+                    消息ID: 'om_chat',
+                    发送人OpenID: 'ou_liu',
+                    标题姓名: '刘喜双',
+                    拆分日期列表: '2026-07-01',
+                    解析后工作总结: '群聊总结',
+                    消息时间: chatTime,
+                    原始记录状态: '主版本',
+                  },
+                }],
+              },
+            };
+          }
+          return { data: { items: [] } };
+        },
+        create: async payload => {
+          scheduledFields = payload.data.fields;
+          return { data: { record: { record_id: 'rec_fact', fields: scheduledFields } } };
+        },
+      },
+    },
+  });
+
+  await scheduledService.syncDailyFactRecordsForGroup(scheduledGroup, {
+    startDate: '2026-07-01',
+    endDate: '2026-07-01',
+  });
+
+  const resolutionFields = [
+    '今日工作总结',
+    '明日工作计划',
+    '遇到的问题',
+    '内容指纹',
+    '日报来源',
+    '有效来源',
+    '来源时间',
+    '合并状态',
+    '冲突状态',
+    '字段来源快照',
+  ];
+  assert.deepEqual(
+    Object.fromEntries(resolutionFields.map(key => [key, scheduledFields[key]])),
+    Object.fromEntries(resolutionFields.map(key => [key, realtimeResult.fields[key]])),
+  );
+});
+
+test('initializes source-less historical facts without changing content or ignored status', async () => {
+  const group = normalizeConfig({
+    groups: [{
+      dailyTable: { appToken: 'bas', tableId: 'tbl_source' },
+      chatDailyRawTable: { appToken: 'bas', tableId: 'tbl_chat_raw' },
+      dailyFactTable: {
+        appToken: 'bas',
+        tableId: 'tbl_fact',
+        fieldTypes: { reportDate: 'date', sourceTime: 'datetime' },
+      },
+    }],
+  }).groups[0];
+  const updates = [];
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async ({ path }) => {
+          if (path.table_id !== 'tbl_fact') return { data: { items: [] } };
+          return {
+            data: {
+              items: [
+                {
+                  record_id: 'rec_known',
+                  fields: {
+                    事实唯一键: 'name:甲:2026-07-01',
+                    日报日期: Date.UTC(2026, 6, 1),
+                    日报提交人姓名: '甲',
+                    今日工作总结: '已知来源正文',
+                    明日工作计划: '已知来源计划',
+                    日报来源: 'form',
+                    有效来源: 'form',
+                    来源时间: 1000,
+                    事实记录状态: '有效',
+                    匹配状态: '已匹配',
+                  },
+                },
+                {
+                  record_id: 'rec_ambiguous',
+                  fields: {
+                    事实唯一键: 'name:乙:2026-07-01',
+                    日报日期: Date.UTC(2026, 6, 1),
+                    日报提交人姓名: '乙',
+                    今日工作总结: '模糊来源正文',
+                    明日工作计划: '模糊来源计划',
+                    日报来源: 'form+chat',
+                    有效来源: 'form+chat',
+                    来源时间: 2000,
+                    事实记录状态: '忽略',
+                    匹配状态: '已匹配',
+                  },
+                },
+              ],
+            },
+          };
+        },
+        update: async payload => {
+          updates.push(payload);
+          return { data: { record: { record_id: payload.path.record_id, fields: payload.data.fields } } };
+        },
+      },
+    },
+  });
+
+  const result = await service.syncDailyFactRecordsForGroup(group, {
+    startDate: '2026-07-01',
+    endDate: '2026-07-01',
+  });
+
+  assert.equal(result.updated, 2);
+  assert.equal(updates[0].data.fields['今日工作总结'], '已知来源正文');
+  assert.equal(updates[0].data.fields['明日工作计划'], '已知来源计划');
+  assert.equal(JSON.parse(updates[0].data.fields['字段来源快照']).workItems.source, 'form');
+  assert.equal(updates[1].data.fields['今日工作总结'], '模糊来源正文');
+  assert.equal(updates[1].data.fields['明日工作计划'], '模糊来源计划');
+  assert.equal(updates[1].data.fields['事实记录状态'], '忽略');
+  assert.equal(JSON.parse(updates[1].data.fields['字段来源快照']).workItems.ambiguous, true);
+  assert.doesNotMatch(updates[1].data.fields['字段来源快照'], /模糊来源正文|模糊来源计划/);
+});
+
+test('complete source rebuild does not erase a non-empty historical field with a blank candidate', async () => {
+  const group = normalizeConfig({
+    groups: [{
+      dailyTable: { appToken: 'bas', tableId: 'tbl_source' },
+      chatDailyRawTable: { appToken: 'bas', tableId: 'tbl_chat_raw' },
+      dailyFactTable: {
+        appToken: 'bas',
+        tableId: 'tbl_fact',
+        fieldTypes: { reportDate: 'date', sourceTime: 'datetime' },
+      },
+    }],
+  }).groups[0];
+  let updatePayload;
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async ({ path }) => {
+          if (path.table_id === 'tbl_source') {
+            return {
+              data: {
+                items: [{
+                  record_id: 'rec_form',
+                  last_modified_time: 2000,
+                  fields: {
+                    日报日期: Date.UTC(2026, 6, 1),
+                    日报提交人: [{ id: 'ou_liu', name: '刘喜双' }],
+                    今日工作总结: '更新后的总结',
+                    明日工作计划: '',
+                  },
+                }],
+              },
+            };
+          }
+          if (path.table_id === 'tbl_fact') {
+            return {
+              data: {
+                items: [{
+                  record_id: 'rec_fact',
+                  fields: {
+                    事实唯一键: 'open_id:ou_liu:2026-07-01',
+                    日报日期: Date.UTC(2026, 6, 1),
+                    日报提交人姓名: '刘喜双',
+                    成员OpenID: 'ou_liu',
+                    今日工作总结: '历史总结',
+                    明日工作计划: '不可删除的历史计划',
+                    日报来源: 'form',
+                    有效来源: 'form',
+                    来源时间: 1000,
+                    事实记录状态: '有效',
+                    匹配状态: '已匹配',
+                  },
+                }],
+              },
+            };
+          }
+          return { data: { items: [] } };
+        },
+        update: async payload => {
+          updatePayload = payload;
+          return { data: { record: { record_id: 'rec_fact', fields: payload.data.fields } } };
+        },
+      },
+    },
+  });
+
+  await service.syncDailyFactRecordsForGroup(group, {
+    startDate: '2026-07-01',
+    endDate: '2026-07-01',
+  });
+
+  assert.equal(updatePayload.data.fields['今日工作总结'], '更新后的总结');
+  assert.equal(updatePayload.data.fields['明日工作计划'], '不可删除的历史计划');
+  assert.equal(updatePayload.data.fields['合并状态'], '单来源');
+  assert.equal(
+    JSON.parse(updatePayload.data.fields['字段来源快照']).tomorrowPlanItems.source,
+    'form',
+  );
 });
 
 test('reuses an existing merged form and chat fact for a changed contact identity', async () => {
@@ -2617,11 +3013,10 @@ test('reuses an existing merged form and chat fact for a changed contact identit
   });
 
   assert.equal(result.created, 0);
-  assert.equal(result.updated, 2);
+  assert.equal(result.updated, 1);
   assert.equal(creates.length, 0);
-  assert.deepEqual(updates.map(payload => payload.path.record_id), ['rec_fact', 'rec_fact']);
+  assert.deepEqual(updates.map(payload => payload.path.record_id), ['rec_fact']);
   assert.equal(updates[0].data.fields['事实唯一键'], 'open_id:ou_old:2026-07-10');
-  assert.equal(updates[1].data.fields['事实唯一键'], 'open_id:ou_old:2026-07-10');
 });
 
 test('recovers an existing merged fact from a chat raw source reference alone', async () => {
@@ -3080,8 +3475,8 @@ test('matches contact by open id and uses real name for display', async () => {
   assert.equal(contact.teamMemberId, 'ou_external');
   assert.equal(contact.matchMethod, '姓名');
   assert.equal(contact.matchingStatus, '已匹配');
-  assert.equal(contact.divisionalLeader, '李总');
-  assert.equal(contact.divisionalLeaderOpenId, 'ou_leader');
+  assert.equal(contact.divisionalLeader, undefined);
+  assert.equal(contact.divisionalLeaderOpenId, undefined);
 });
 
 test('matches contact by alias when open id is unavailable', async () => {
@@ -3256,8 +3651,8 @@ test('builds contact-enriched daily fields from real directory identity', () => 
 
   assert.equal(fields['日报提交人姓名'], '刘喜双');
   assert.deepEqual(fields['实际日报提交人'], [{ id: 'ou_external', name: '刘喜双' }]);
-  assert.equal(fields['敏捷小组'], '敏捷一组');
-  assert.deepEqual(fields['分管领导'], [{ id: 'ou_leader', name: '李总' }]);
+  assert.equal(fields['敏捷小组'], undefined);
+  assert.equal(fields['分管领导'], undefined);
 });
 
 test('normalizes supervisor user field from daily report records', async () => {

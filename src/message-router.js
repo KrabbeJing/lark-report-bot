@@ -130,12 +130,9 @@ export async function handleMessageEvent({
         rawRecordId,
         rawText: parsed.rawText,
         chatId: message.chat_id,
-        project: contact?.teamName || group.project || '',
-        agileGroup: contact?.agileGroup || '',
+        project: contact?.teamName || '',
         supervisor: contact?.supervisor || '',
         supervisorOpenId: contact?.supervisorOpenId || '',
-        divisionalLeader: contact?.divisionalLeader || '',
-        divisionalLeaderOpenId: contact?.divisionalLeaderOpenId || '',
         matchingStatus: contact?.matchingStatus || (contact ? '已匹配' : '未匹配'),
         matchMethod: contact?.matchMethod || '',
         reportType: parsed.reportType,
@@ -143,6 +140,11 @@ export async function handleMessageEvent({
         messageTime: context.messageTimeText,
         sourceTime: messageTime.getTime(),
         contact,
+        values: {
+          workItems: parsed.workSummaryText || '',
+          tomorrowPlanItems: joinCandidateItems(parsed.tomorrowPlanItems),
+          riskItems: joinCandidateItems(parsed.riskItems),
+        },
       };
       factResults.push(await bitable.upsertDailyFactRecord(group, factInput));
     }
@@ -223,4 +225,8 @@ async function findTeamContactSafely(bitable, group, query) {
 function sanitizeOperationalCode(value) {
   const text = String(value ?? '');
   return /^[A-Za-z0-9_.:-]{1,64}$/.test(text) ? sanitizeOperationalText(text) : '';
+}
+
+function joinCandidateItems(value) {
+  return Array.isArray(value) ? value.join('\n') : String(value || '');
 }
