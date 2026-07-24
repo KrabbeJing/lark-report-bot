@@ -18,6 +18,8 @@ const FIELD_LABELS = Object.freeze({
   riskItems: '遇到的问题',
 });
 
+const SOURCE_REBUILD_STATE = Symbol('dailyFactSourceRebuildState');
+
 /**
  * Resolves daily-fact content independently per field. The returned provenance
  * is safe to persist because it deliberately contains no report text. The
@@ -31,6 +33,13 @@ export function resolveDailyFactFields({
 }) {
   if (!incoming) throw new Error('An incoming daily fact candidate is required');
 
+  if (mode === DAILY_FACT_RESOLUTION_MODES.SOURCE_REBUILD) {
+    return resolveSourceRebuild({ existing, incoming });
+  }
+  return resolvePersistedIncremental({ existing, incoming });
+}
+
+function resolvePersistedIncremental({ existing, incoming }) {
   const existingValues = existing?.values || {};
   const existingSources = existing?.fieldSources || {};
   const values = {};
@@ -53,6 +62,149 @@ export function resolveDailyFactFields({
     ...splitSources(existing?.observedSources || existing?.source),
     incoming.source,
   ]);
+  return buildResolution({
+    values,
+    fieldSources,
+    relations,
+    observedSources,
+    existingFactStatus: existing?.factStatus,
+    incomingMatchingStatus: incoming.matchingStatus,
+    preservesConflict: existing?.conflictStatus === '已自动处理',
+  });
+}
+
+function resolveSourceRebuild({ existing, incoming }) {
+  const sourceRebuildState = nextSourceRebuildState(existing, incoming);
+  const values = {};
+  const fieldSources = {};
+  const relations = {};
+
+  for (const key of DAILY_FACT_CONTENT_KEYS) {
+    const selection = chooseRebuildField(
+      sourceRebuildState.candidatesBySource.form[key],
+      sourceRebuildState.candidatesBySource.chat[key],
+    );
+    values[key] = selection.value;
+    fieldSources[key] = selection.source;
+    relations[key] = selection.relation;
+  }
+
+  const result = buildResolution({
+    values,
+    fieldSources,
+    relations,
+    observedSources: sourceRebuildState.observedSources,
+    existingFactStatus: existing?.factStatus,
+    incomingMatchingStatus: incoming.matchingStatus,
+    preservesConflict: false,
+  });
+
+  // In-memory rebuild state only: contains raw report text and MUST NEVER be
+  // persisted. Task 3 serializes fieldSources, never this non-enumerable state.
+  Object.defineProperty(result, SOURCE_REBUILD_STATE, {
+    value: sourceRebuildState,
+    enumerable: false,
+  });
+  return result;
+}
+
+function nextSourceRebuildState(existing, incoming) {
+  const previous = existing?.[SOURCE_REBUILD_STATE];
+  const candidatesBySource = {
+    form: { ...(previous?.candidatesBySource.form || {}) },
+    chat: { ...(previous?.candidatesBySource.chat || {}) },
+  };
+  const sourceCandidates = candidatesBySource[incoming.source];
+
+  if (!sourceCandidates) {
+    throw new Error(`Unsupported daily fact source: ${incoming.source}`);
+  }
+
+  for (const key of DAILY_FACT_CONTENT_KEYS) {
+    const value = incoming.values?.[key];
+    if (!normalizeText(value)) continue;
+
+    const candidate = rebuildFieldCandidate(incoming, value);
+    const current = sourceCandidates[key];
+    if (!current || compareSameSourceCandidates(candidate, current) > 0) {
+      sourceCandidates[key] = candidate;
+    }
+  }
+
+  return {
+    candidatesBySource,
+    observedSources: joinSources([
+      ...splitSources(previous?.observedSources),
+      incoming.source,
+    ]),
+  };
+}
+
+function rebuildFieldCandidate(incoming, value) {
+  return {
+    value: normalizeValue(value),
+    source: incoming.source,
+    sourceTime: Number(incoming.sourceTime) || 0,
+    fingerprint: fingerprint(value),
+  };
+}
+
+function compareSameSourceCandidates(left, right) {
+  if (left.sourceTime !== right.sourceTime) return left.sourceTime - right.sourceTime;
+  const fingerprintOrder = compareStableText(left.fingerprint, right.fingerprint);
+  if (fingerprintOrder !== 0) return fingerprintOrder;
+  return compareStableText(left.value, right.value);
+}
+
+function compareStableText(left, right) {
+  if (left === right) return 0;
+  return left > right ? 1 : -1;
+}
+
+function chooseRebuildField(form, chat) {
+  if (!form && !chat) {
+    return { value: '', source: emptyProvenance(), relation: 'missing' };
+  }
+  if (!form || !chat) {
+    const winner = form || chat;
+    return {
+      value: winner.value,
+      source: fieldProvenance(winner),
+      relation: 'complement',
+    };
+  }
+
+  const relation = form.fingerprint === chat.fingerprint ? 'same' : 'conflict';
+  const winner = chooseCrossSourceCandidate(form, chat);
+  return {
+    value: winner.value,
+    source: fieldProvenance(winner),
+    relation,
+  };
+}
+
+function chooseCrossSourceCandidate(form, chat) {
+  if (form.sourceTime === chat.sourceTime) return form;
+  return form.sourceTime > chat.sourceTime ? form : chat;
+}
+
+function fieldProvenance(candidate) {
+  return {
+    source: candidate.source,
+    sourceTime: candidate.sourceTime,
+    fingerprint: candidate.fingerprint,
+  };
+}
+
+function buildResolution({
+  values,
+  fieldSources,
+  relations,
+  observedSources,
+  existingFactStatus,
+  incomingMatchingStatus,
+  preservesConflict,
+}) {
   const effectiveSources = joinSources(
     DAILY_FACT_CONTENT_KEYS
       .filter(key => normalizeText(values[key]))
@@ -64,12 +216,10 @@ export function resolveDailyFactFields({
       .filter(key => normalizeText(values[key]))
       .map(key => Number(fieldSources[key]?.sourceTime) || 0),
   );
-  const preservesConflict = mode === DAILY_FACT_RESOLUTION_MODES.PERSISTED_INCREMENTAL
-    && existing?.conflictStatus === '已自动处理';
   const hasConflict = preservesConflict || Object.values(relations).includes('conflict');
   const mergeStatus = deriveMergeStatus(observedSources, relations, hasConflict);
   const conflictStatus = hasConflict ? '已自动处理' : '无冲突';
-  const factStatus = deriveFactStatus(existing?.factStatus, incoming.matchingStatus);
+  const factStatus = deriveFactStatus(existingFactStatus, incomingMatchingStatus);
 
   return {
     values,
@@ -99,18 +249,18 @@ function chooseField(existingValue, existingSource, incomingValue, incoming) {
   }
 
   if (fingerprint(existingValue) === fingerprint(incomingValue)) {
-    return shouldChooseIncoming(existingSource, incoming, incomingValue)
+    return shouldChooseIncoming(existingValue, existingSource, incoming, incomingValue)
       ? { value: normalizeValue(incomingValue), source: provenance(incoming, incomingValue), relation: 'same' }
       : { value: normalizeValue(existingValue), source: existingSource, relation: 'same' };
   }
 
   const relation = existingSource?.source === incoming.source ? 'revision' : 'conflict';
-  return shouldChooseIncoming(existingSource, incoming, incomingValue)
+  return shouldChooseIncoming(existingValue, existingSource, incoming, incomingValue)
     ? { value: normalizeValue(incomingValue), source: provenance(incoming, incomingValue), relation }
     : { value: normalizeValue(existingValue), source: existingSource, relation };
 }
 
-function shouldChooseIncoming(existingSource, incoming, incomingValue) {
+function shouldChooseIncoming(existingValue, existingSource, incoming, incomingValue) {
   const existingTime = Number(existingSource?.sourceTime) || 0;
   const incomingTime = Number(incoming.sourceTime) || 0;
   if (incomingTime !== existingTime) return incomingTime > existingTime;
@@ -118,18 +268,17 @@ function shouldChooseIncoming(existingSource, incoming, incomingValue) {
   const existingSourceName = existingSource?.source || '';
   if (incoming.source !== existingSourceName) return incoming.source === 'form';
 
-  // Same-source equal timestamps are uncommon, but a stable hash tie-breaker
-  // makes replaying candidates independent of their arrival order as well.
-  return fingerprint(incomingValue).localeCompare(existingSource?.fingerprint || '') >= 0;
+  const fingerprintOrder = compareStableText(
+    fingerprint(incomingValue),
+    existingSource?.fingerprint || fingerprint(existingValue),
+  );
+  if (fingerprintOrder !== 0) return fingerprintOrder > 0;
+  return compareStableText(normalizeValue(incomingValue), normalizeValue(existingValue)) > 0;
 }
 
 function existingProvenance(source, existing, value) {
   if (!normalizeText(value)) {
-    return {
-      source: '',
-      sourceTime: 0,
-      fingerprint: fingerprint(''),
-    };
+    return emptyProvenance();
   }
   if (source?.source) return source;
   const fallbackSource = splitSources(existing?.effectiveSources || existing?.effectiveSource || existing?.source)[0] || '';
@@ -137,6 +286,14 @@ function existingProvenance(source, existing, value) {
     source: fallbackSource,
     sourceTime: Number(existing?.sourceTime) || 0,
     fingerprint: fingerprint(value),
+  };
+}
+
+function emptyProvenance() {
+  return {
+    source: '',
+    sourceTime: 0,
+    fingerprint: fingerprint(''),
   };
 }
 

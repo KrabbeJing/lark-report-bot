@@ -94,15 +94,20 @@ test('sparse cross-source ties keep complete field provenance stable without inv
 });
 
 test('later blank from the same source preserves an existing non-empty field', () => {
-  const result = resolveInOrder([
-    candidate('form', 1000, { tomorrowPlanItems: '保留的计划' }),
-    candidate('form', 2000, { tomorrowPlanItems: '' }),
-  ]);
+  for (const mode of [
+    DAILY_FACT_RESOLUTION_MODES.PERSISTED_INCREMENTAL,
+    DAILY_FACT_RESOLUTION_MODES.SOURCE_REBUILD,
+  ]) {
+    const result = resolveInOrder([
+      candidate('form', 1000, { tomorrowPlanItems: '保留的计划' }),
+      candidate('form', 2000, { tomorrowPlanItems: '' }),
+    ], mode);
 
-  assert.equal(result.values.tomorrowPlanItems, '保留的计划');
-  assert.equal(result.fieldSources.tomorrowPlanItems.source, 'form');
-  assert.equal(result.fieldSources.tomorrowPlanItems.sourceTime, 1000);
-  assert.equal(result.mergeStatus, '单来源');
+    assert.equal(result.values.tomorrowPlanItems, '保留的计划');
+    assert.equal(result.fieldSources.tomorrowPlanItems.source, 'form');
+    assert.equal(result.fieldSources.tomorrowPlanItems.sourceTime, 1000);
+    assert.equal(result.mergeStatus, '单来源');
+  }
 });
 
 test('later same-source revision stays single-source without a conflict', () => {
@@ -152,6 +157,66 @@ test('source rebuild converges revised candidates independently of arrival order
   assert.equal(forward.fieldSources.workItems.source, 'form');
   assert.equal(forward.fieldSources.workItems.sourceTime, 3000);
   assert.equal(forward.mergeStatus, '重复已合并');
+  assert.equal(forward.conflictStatus, '无冲突');
+  assert.equal(forward.autoResolutionNote, '');
+});
+
+test('source rebuild is stable across all revisions permutations', () => {
+  const candidates = [
+    candidate('form', 1000, { workItems: 'old-form' }),
+    candidate('form', 3000, { workItems: 'final' }),
+    candidate('chat', 2000, { workItems: 'old-chat' }),
+    candidate('chat', 4000, { workItems: 'final' }),
+  ];
+  const results = permutations(candidates).map(order => (
+    resolveInOrder(order, DAILY_FACT_RESOLUTION_MODES.SOURCE_REBUILD)
+  ));
+  const expected = comparableResolution(results[0]);
+
+  assert.equal(results.length, 24);
+  for (const result of results) {
+    assert.deepEqual(comparableResolution(result), expected);
+    assert.deepEqual(result.values, {
+      workItems: 'final',
+      tomorrowPlanItems: '',
+      riskItems: '',
+    });
+    assert.equal(result.fieldSources.workItems.source, 'chat');
+    assert.equal(result.fieldSources.workItems.sourceTime, 4000);
+    assert.equal(result.mergeStatus, '重复已合并');
+    assert.equal(result.conflictStatus, '无冲突');
+    assert.equal(result.autoResolutionNote, '');
+  }
+});
+
+test('same-source equal-time normalized equivalents use a stable raw-text tie-breaker', () => {
+  const candidates = [
+    candidate('chat', 2000, { workItems: '  1. same\n' }),
+    candidate('chat', 2000, { workItems: '1、same' }),
+  ];
+  const forward = resolveInOrder(candidates, DAILY_FACT_RESOLUTION_MODES.SOURCE_REBUILD);
+  const reverse = resolveInOrder([...candidates].reverse(), DAILY_FACT_RESOLUTION_MODES.SOURCE_REBUILD);
+
+  assert.deepEqual(reverse.values, forward.values);
+  assert.deepEqual(reverse.fieldSources, forward.fieldSources);
+  assert.equal(forward.values.workItems, '1、same');
+  assert.equal(forward.mergeStatus, '单来源');
+  assert.equal(forward.conflictStatus, '无冲突');
+  assert.equal(forward.autoResolutionNote, '');
+});
+
+test('persisted incremental normalized equivalents use the same stable raw-text tie-breaker', () => {
+  const candidates = [
+    candidate('chat', 2000, { workItems: '  1. same\n' }),
+    candidate('chat', 2000, { workItems: '1、same' }),
+  ];
+  const forward = resolveInOrder(candidates);
+  const reverse = resolveInOrder([...candidates].reverse());
+
+  assert.deepEqual(reverse.values, forward.values);
+  assert.deepEqual(reverse.fieldSources, forward.fieldSources);
+  assert.equal(forward.values.workItems, '1、same');
+  assert.equal(forward.mergeStatus, '单来源');
   assert.equal(forward.conflictStatus, '无冲突');
   assert.equal(forward.autoResolutionNote, '');
 });
@@ -234,6 +299,24 @@ function resolveInOrder(candidates, mode) {
     (existing, incoming) => resolveDailyFactFields({ existing, incoming, mode }),
     null,
   );
+}
+
+function comparableResolution(result) {
+  return {
+    values: result.values,
+    fieldSources: result.fieldSources,
+    mergeStatus: result.mergeStatus,
+    conflictStatus: result.conflictStatus,
+    autoResolutionNote: result.autoResolutionNote,
+  };
+}
+
+function permutations(items) {
+  if (items.length <= 1) return [items];
+  return items.flatMap((item, index) => (
+    permutations(items.filter((_, candidateIndex) => candidateIndex !== index))
+      .map(rest => [item, ...rest])
+  ));
 }
 
 function candidate(source, sourceTime, values = {}, matchingStatus = '已匹配') {
