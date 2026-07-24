@@ -3347,6 +3347,76 @@ test('does not weak-bridge two unmatched reporters with the same name and date',
   );
 });
 
+test('keeps unmatched same-title chat rows separate by sender before weak bridging', async () => {
+  const group = normalizeConfig({
+    groups: [{
+      dailyTable: { appToken: 'bas', tableId: 'tbl_source' },
+      chatDailyRawTable: { appToken: 'bas', tableId: 'tbl_chat_raw' },
+      dailyFactTable: {
+        appToken: 'bas',
+        tableId: 'tbl_fact',
+        fieldTypes: { reportDate: 'date', sourceTime: 'datetime' },
+      },
+    }],
+  }).groups[0];
+  const creates = [];
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async ({ path }) => {
+          if (path.table_id === 'tbl_source') return { data: { items: [] } };
+          if (path.table_id === 'tbl_chat_raw') {
+            return {
+              data: {
+                items: [1, 2].map(index => ({
+                  record_id: `rec_chat_${index}`,
+                  fields: {
+                    消息ID: `om_chat_${index}`,
+                    发送人OpenID: `ou_sender_${index}`,
+                    标题姓名: '同名成员',
+                    拆分日期列表: '2026-07-01',
+                    解析后工作总结: `成员${index}正文`,
+                    消息时间: 1783690000000 + index,
+                    原始记录状态: '主版本',
+                  },
+                })),
+              },
+            };
+          }
+          return { data: { items: [] } };
+        },
+        create: async payload => {
+          creates.push(payload);
+          return {
+            data: {
+              record: {
+                record_id: `rec_fact_${creates.length}`,
+                fields: payload.data.fields,
+              },
+            },
+          };
+        },
+      },
+    },
+  });
+  service.findTeamContactForReport = async () => null;
+
+  const result = await service.syncDailyFactRecordsForGroup(group, {
+    startDate: '2026-07-01',
+    endDate: '2026-07-01',
+  });
+
+  assert.equal(result.created, 2);
+  assert.equal(result.sourceCounts.chatFacts, 2);
+  assert.deepEqual(
+    new Set(creates.map(payload => payload.data.fields['事实唯一键'])),
+    new Set([
+      'open_id:ou_sender_1:2026-07-01',
+      'open_id:ou_sender_2:2026-07-01',
+    ]),
+  );
+});
+
 test('does not weak-bridge two matched members with the same name and date', async () => {
   const { service, group, creates } = buildWeakAliasCollisionFixture({
     contactMode: 'matched',
@@ -3408,6 +3478,130 @@ test('keeps same-name existing facts separate and writes every claimed record', 
       'open_id:ou_sender_2:2026-07-01',
     ]),
   );
+});
+
+test('reports conflicting strong targets without updating or claiming either fact', async () => {
+  const group = normalizeConfig({
+    groups: [{
+      dailyTable: { appToken: 'bas', tableId: 'tbl_source' },
+      chatDailyRawTable: { appToken: 'bas', tableId: 'tbl_chat_raw' },
+      dailyFactTable: {
+        appToken: 'bas',
+        tableId: 'tbl_fact',
+        fieldTypes: { reportDate: 'date', sourceTime: 'datetime' },
+      },
+    }],
+  }).groups[0];
+  const updates = [];
+  const creates = [];
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async ({ path }) => {
+          if (path.table_id === 'tbl_source') {
+            return {
+              data: {
+                items: [{
+                  record_id: 'rec_form',
+                  last_modified_time: 1783699200000,
+                  fields: {
+                    日报日期: Date.UTC(2026, 6, 1),
+                    日报提交人: [{ id: 'ou_sender', name: '成员' }],
+                    今日工作总结: '新正文',
+                  },
+                }],
+              },
+            };
+          }
+          if (path.table_id === 'tbl_chat_raw') return { data: { items: [] } };
+          if (path.table_id === 'tbl_fact') {
+            return {
+              data: {
+                items: [
+                  {
+                    record_id: 'rec_fact_by_key',
+                    fields: {
+                      事实唯一键: 'open_id:ou_member_new:2026-07-01',
+                      日报日期: Date.UTC(2026, 6, 1),
+                      日报提交人姓名: '成员',
+                      成员OpenID: 'ou_member_new',
+                      今日工作总结: '新身份原事实',
+                      日报来源: 'form',
+                      有效来源: 'form',
+                      来源记录ID: 'rec_other',
+                      来源组合: 'form:rec_other',
+                      来源时间: 1783680000000,
+                      事实记录状态: '有效',
+                      匹配状态: '已匹配',
+                    },
+                  },
+                  {
+                    record_id: 'rec_fact_by_source',
+                    fields: {
+                      事实唯一键: 'open_id:ou_member_old:2026-07-01',
+                      日报日期: Date.UTC(2026, 6, 1),
+                      日报提交人姓名: '成员',
+                      成员OpenID: 'ou_member_old',
+                      今日工作总结: '旧身份原事实',
+                      日报来源: 'form',
+                      有效来源: 'form',
+                      来源记录ID: 'rec_form',
+                      来源组合: 'form:rec_form',
+                      来源时间: 1783680000000,
+                      事实记录状态: '有效',
+                      匹配状态: '已匹配',
+                    },
+                  },
+                ],
+              },
+            };
+          }
+          return { data: { items: [] } };
+        },
+        create: async payload => {
+          creates.push(payload);
+          return { data: { record: { record_id: 'rec_created', fields: payload.data.fields } } };
+        },
+        update: async payload => {
+          updates.push(payload);
+          return {
+            data: {
+              record: {
+                record_id: payload.path.record_id,
+                fields: payload.data.fields,
+              },
+            },
+          };
+        },
+      },
+    },
+  });
+  service.findTeamContactForReport = async () => ({
+    teamName: '渠道创新建设',
+    teamMember: '成员',
+    teamMemberId: 'ou_member_new',
+    matchingStatus: '已匹配',
+    matchMethod: 'OpenID',
+  });
+
+  const result = await service.syncDailyFactRecordsForGroup(group, {
+    startDate: '2026-07-01',
+    endDate: '2026-07-01',
+  });
+
+  assert.equal(result.created, 0);
+  assert.equal(result.updated, 0);
+  assert.equal(result.unchanged, 0);
+  assert.equal(result.conflicts, 1);
+  assert.equal(creates.length, 0);
+  assert.equal(updates.length, 0);
+  assert.deepEqual(result.errors, [{
+    source: 'reconciliation',
+    code: 'strong_target_conflict',
+    candidateSource: 'form',
+    reportDate: '2026-07-01',
+    message: 'Fact key and source identity resolve to different fact records',
+  }]);
 });
 
 function buildWeakAliasCollisionFixture({

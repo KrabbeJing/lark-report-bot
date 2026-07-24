@@ -311,6 +311,7 @@ export class BitableService {
     const rebuildGroups = new Map();
     const weakGroupsByReporterDate = new Map();
     const claimedTargetRecordIds = new Set();
+    const blockedTargetRecordIds = new Set();
     const sourceCounts = {
       form: formRecords.length,
       chatRaw: chatRawRecords.length,
@@ -366,7 +367,7 @@ export class BitableService {
           sourceTime: normalizeSourceTimestamp(formRecord.last_modified_time || formRecord.created_time),
           syncedAt: formatDateTime(now, timezone),
         };
-        collectDailyFactRebuildCandidate({
+        const collection = collectDailyFactRebuildCandidate({
           rebuildGroups,
           targetByFactKey,
           targetBySourceIdentity,
@@ -374,6 +375,14 @@ export class BitableService {
           weakGroupsByReporterDate,
           input,
         });
+        if (collection?.conflict) {
+          for (const record of collection.conflict.records) {
+            if (record?.record_id) blockedTargetRecordIds.add(record.record_id);
+          }
+          conflicts += 1;
+          errors.push(buildStrongTargetConflictError(input));
+          continue;
+        }
         sourceCounts.formFacts += 1;
       } catch (err) {
         errors.push({
@@ -447,7 +456,7 @@ export class BitableService {
             contact,
             syncedAt: formatDateTime(now, timezone),
           };
-          collectDailyFactRebuildCandidate({
+          const collection = collectDailyFactRebuildCandidate({
             rebuildGroups,
             targetByFactKey,
             targetBySourceIdentity,
@@ -455,6 +464,14 @@ export class BitableService {
             weakGroupsByReporterDate,
             input,
           });
+          if (collection?.conflict) {
+            for (const record of collection.conflict.records) {
+              if (record?.record_id) blockedTargetRecordIds.add(record.record_id);
+            }
+            conflicts += 1;
+            errors.push(buildStrongTargetConflictError(input));
+            continue;
+          }
           sourceCounts.chatFacts += 1;
         } catch (err) {
           errors.push({
@@ -516,6 +533,7 @@ export class BitableService {
 
     for (const existingRecord of targetRecords) {
       if (claimedTargetRecordIds.has(existingRecord.record_id)) continue;
+      if (blockedTargetRecordIds.has(existingRecord.record_id)) continue;
       const targetDate = normalizeDateFieldValue(
         existingRecord.fields?.[group.dailyFactTable.fields.reportDate],
       );
@@ -1073,11 +1091,16 @@ async function selectLatestChatEntries(
     const dates = raw.reportDates.length ? raw.reportDates : [raw.reportDate].filter(Boolean);
     for (const reportDate of dates) {
       if (!reportDate || reportDate < startDate || reportDate > endDate) continue;
-      const identity = buildFactKey({
-        openId: contact?.teamMemberId || (raw.reporterName ? '' : raw.senderOpenId),
-        name: contact?.teamMember || raw.reporterName,
-        reportDate,
-      });
+      const identity = contact?.teamMemberId
+        ? buildFactKey({
+          openId: contact.teamMemberId,
+          name: contact.teamMember || raw.reporterName,
+          reportDate,
+        })
+        : `unmatched:${raw.senderOpenId || ''}:${buildReporterDateIdentity(
+          raw.reporterName,
+          reportDate,
+        )}`;
       keepLatestSourceCandidate(selected, identity, {
         id: buildChatEntryId(record.record_id, reportDate),
         sourceTime: normalizeSourceTimestamp(raw.messageTime),
@@ -1132,8 +1155,20 @@ function collectDailyFactRebuildCandidate({
   input,
 }) {
   const reporterDateAlias = buildReporterDateIdentity(input.reporterName, input.reportDate);
-  const existingRecord = targetByFactKey.get(input.factKey)
-    || targetBySourceIdentity.get(buildFactSourceIdentity(input));
+  const factKeyRecord = targetByFactKey.get(input.factKey);
+  const sourceIdentityRecord = targetBySourceIdentity.get(buildFactSourceIdentity(input));
+  if (
+    factKeyRecord?.record_id
+    && sourceIdentityRecord?.record_id
+    && factKeyRecord.record_id !== sourceIdentityRecord.record_id
+  ) {
+    return {
+      conflict: {
+        records: [factKeyRecord, sourceIdentityRecord],
+      },
+    };
+  }
+  const existingRecord = factKeyRecord || sourceIdentityRecord;
   const aliases = [
     existingRecord?.record_id ? `record:${existingRecord.record_id}` : '',
     input.factKey ? `fact:${input.factKey}` : '',
@@ -1167,6 +1202,17 @@ function collectDailyFactRebuildCandidate({
     weakGroups.add(current);
     weakGroupsByReporterDate.set(reporterDateAlias, weakGroups);
   }
+  return { group: current };
+}
+
+function buildStrongTargetConflictError(input) {
+  return {
+    source: 'reconciliation',
+    code: 'strong_target_conflict',
+    candidateSource: input.source,
+    reportDate: input.reportDate,
+    message: 'Fact key and source identity resolve to different fact records',
+  };
 }
 
 function bridgeUnambiguousReporterDateGroups({
