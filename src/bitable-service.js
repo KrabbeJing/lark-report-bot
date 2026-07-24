@@ -495,6 +495,7 @@ export class BitableService {
     }
 
     for (const rebuildGroup of new Set(rebuildGroups.values())) {
+      if (blockedTargetRecordIds.has(rebuildGroup.existingRecord?.record_id)) continue;
       try {
         const existingRecord = rebuildGroup.existingRecord;
         const existingState = existingRecord

@@ -3481,6 +3481,27 @@ test('keeps same-name existing facts separate and writes every claimed record', 
 });
 
 test('reports conflicting strong targets without updating or claiming either fact', async () => {
+  const fixture = buildStrongTargetConflictFixture(['rec_conflict']);
+  const result = await runStrongTargetConflictFixture(fixture);
+
+  assertStrongTargetConflictResult(fixture, result);
+});
+
+test('blocks a valid rebuild collected before a conflicting strong candidate', async () => {
+  const fixture = buildStrongTargetConflictFixture(['rec_safe', 'rec_conflict']);
+  const result = await runStrongTargetConflictFixture(fixture);
+
+  assertStrongTargetConflictResult(fixture, result);
+});
+
+test('blocks a valid rebuild collected after a conflicting strong candidate', async () => {
+  const fixture = buildStrongTargetConflictFixture(['rec_conflict', 'rec_safe']);
+  const result = await runStrongTargetConflictFixture(fixture);
+
+  assertStrongTargetConflictResult(fixture, result);
+});
+
+function buildStrongTargetConflictFixture(sourceOrder) {
   const group = normalizeConfig({
     groups: [{
       dailyTable: { appToken: 'bas', tableId: 'tbl_source' },
@@ -3501,15 +3522,15 @@ test('reports conflicting strong targets without updating or claiming either fac
           if (path.table_id === 'tbl_source') {
             return {
               data: {
-                items: [{
-                  record_id: 'rec_form',
-                  last_modified_time: 1783699200000,
+                items: sourceOrder.map((recordId, index) => ({
+                  record_id: recordId,
+                  last_modified_time: 1783699200000 + index,
                   fields: {
                     日报日期: Date.UTC(2026, 6, 1),
-                    日报提交人: [{ id: 'ou_sender', name: '成员' }],
-                    今日工作总结: '新正文',
+                    日报提交人: [{ id: `ou_sender_${recordId}`, name: '成员' }],
+                    今日工作总结: recordId === 'rec_safe' ? '合法候选正文' : '冲突候选正文',
                   },
-                }],
+                })),
               },
             };
           }
@@ -3528,8 +3549,8 @@ test('reports conflicting strong targets without updating or claiming either fac
                       今日工作总结: '新身份原事实',
                       日报来源: 'form',
                       有效来源: 'form',
-                      来源记录ID: 'rec_other',
-                      来源组合: 'form:rec_other',
+                      来源记录ID: 'rec_safe',
+                      来源组合: 'form:rec_safe',
                       来源时间: 1783680000000,
                       事实记录状态: '有效',
                       匹配状态: '已匹配',
@@ -3545,8 +3566,8 @@ test('reports conflicting strong targets without updating or claiming either fac
                       今日工作总结: '旧身份原事实',
                       日报来源: 'form',
                       有效来源: 'form',
-                      来源记录ID: 'rec_form',
-                      来源组合: 'form:rec_form',
+                      来源记录ID: 'rec_conflict',
+                      来源组合: 'form:rec_conflict',
                       来源时间: 1783680000000,
                       事实记录状态: '有效',
                       匹配状态: '已匹配',
@@ -3583,12 +3604,17 @@ test('reports conflicting strong targets without updating or claiming either fac
     matchingStatus: '已匹配',
     matchMethod: 'OpenID',
   });
+  return { service, group, creates, updates };
+}
 
-  const result = await service.syncDailyFactRecordsForGroup(group, {
+function runStrongTargetConflictFixture({ service, group }) {
+  return service.syncDailyFactRecordsForGroup(group, {
     startDate: '2026-07-01',
     endDate: '2026-07-01',
   });
+}
 
+function assertStrongTargetConflictResult({ creates, updates }, result) {
   assert.equal(result.created, 0);
   assert.equal(result.updated, 0);
   assert.equal(result.unchanged, 0);
@@ -3602,7 +3628,7 @@ test('reports conflicting strong targets without updating or claiming either fac
     reportDate: '2026-07-01',
     message: 'Fact key and source identity resolve to different fact records',
   }]);
-});
+}
 
 function buildWeakAliasCollisionFixture({
   contactMode,
