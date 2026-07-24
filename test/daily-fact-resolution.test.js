@@ -405,6 +405,54 @@ test('legacy form+chat facts without snapshots use ambiguous provenance without 
   assert.equal(result.fieldSources.tomorrowPlanItems.ambiguous, true);
 });
 
+test('legacy ambiguous selected body stays ambiguous through two older source updates', () => {
+  const legacy = {
+    values: {
+      workItems: 'legacy-selected',
+      tomorrowPlanItems: '',
+      riskItems: '',
+    },
+    source: 'form+chat',
+    effectiveSource: 'form+chat',
+    observedSources: 'form+chat',
+    sourceTime: 5000,
+    mergeStatus: '重复已合并',
+    conflictStatus: '无冲突',
+    factStatus: '有效',
+    autoResolutionNote: '',
+  };
+  const afterForm = resolveDailyFactFields({
+    existing: jsonRoundtrip(legacy),
+    incoming: candidate('form', 4000, { workItems: 'older-form' }),
+  });
+  const afterChat = resolveDailyFactFields({
+    existing: jsonRoundtrip(afterForm),
+    incoming: candidate('chat', 4500, { workItems: 'older-chat' }),
+  });
+
+  assert.equal(afterChat.values.workItems, 'legacy-selected');
+  assert.equal(afterChat.fieldSources.workItems.source, '');
+  assert.equal(afterChat.fieldSources.workItems.sourceTime, 5000);
+  assert.equal(afterChat.fieldSources.workItems.ambiguous, true);
+  assert.equal(afterChat.fieldSources.workItems.relation, 'ambiguous');
+  assert.deepEqual(afterChat.fieldSources.workItems.sources, {
+    form: {
+      sourceTime: 4000,
+      fingerprint: afterForm.fieldSources.workItems.sources.form.fingerprint,
+    },
+    chat: {
+      sourceTime: 4500,
+      fingerprint: afterChat.fieldSources.workItems.sources.chat.fingerprint,
+    },
+  });
+  assert.equal(afterChat.effectiveSources, 'form+chat');
+  assert.equal(afterChat.observedSources, 'form+chat');
+  assert.equal(afterChat.mergeStatus, '重复已合并');
+  assert.equal(afterChat.conflictStatus, '无冲突');
+  assert.equal(afterChat.autoResolutionNote, '');
+  assert.ok(!afterChat.autoResolutionNote.includes('未知来源'));
+});
+
 test('partial persisted provenance normalizes sourceTime and stale selected fingerprints', () => {
   const baseline = resolveDailyFactFields({
     incoming: candidate('chat', 2000, { workItems: '群聊总结' }),
@@ -432,6 +480,56 @@ test('partial persisted provenance normalizes sourceTime and stale selected fing
     result.fieldSources.workItems.sources.chat.fingerprint,
     baseline.fieldSources.workItems.fingerprint,
   );
+});
+
+test('partial snapshot prefers selected-source field time over aggregate sourceTime', () => {
+  const persisted = resolveInOrder([
+    candidate('form', 1000, { workItems: 'old-form' }),
+    candidate('chat', 5000, { tomorrowPlanItems: 'chat-plan' }),
+  ]);
+  const partial = jsonRoundtrip(persisted);
+  delete partial.fieldSources.workItems.sourceTime;
+
+  const result = resolveDailyFactFields({
+    existing: jsonRoundtrip(partial),
+    incoming: candidate('form', 1500, { workItems: 'new-form' }),
+  });
+
+  assert.equal(partial.sourceTime, 5000);
+  assert.equal(partial.fieldSources.workItems.sources.form.sourceTime, 1000);
+  assert.equal(result.values.workItems, 'new-form');
+  assert.equal(result.values.tomorrowPlanItems, 'chat-plan');
+  assert.equal(result.fieldSources.workItems.source, 'form');
+  assert.equal(result.fieldSources.workItems.sourceTime, 1500);
+  assert.equal(result.fieldSources.workItems.sources.form.sourceTime, 1500);
+  assert.equal(result.mergeStatus, '互补已合并');
+  assert.equal(result.conflictStatus, '无冲突');
+});
+
+test('field source metadata repairs stale or missing observedSources after JSON roundtrip', () => {
+  const conflicted = resolveInOrder([
+    candidate('form', 1000, { workItems: 'form-work' }),
+    candidate('chat', 2000, { workItems: 'chat-work' }),
+  ]);
+
+  for (const observedSources of ['chat', undefined]) {
+    const persisted = jsonRoundtrip(conflicted);
+    if (observedSources === undefined) {
+      delete persisted.observedSources;
+    } else {
+      persisted.observedSources = observedSources;
+    }
+    const result = resolveDailyFactFields({
+      existing: jsonRoundtrip(persisted),
+      incoming: candidate('chat', 3000),
+    });
+
+    assert.deepEqual(Object.keys(result.fieldSources.workItems.sources), ['form', 'chat']);
+    assert.equal(result.observedSources, 'form+chat');
+    assert.equal(result.mergeStatus, '按字段取最新');
+    assert.equal(result.conflictStatus, '已自动处理');
+    assert.equal(result.autoResolutionNote, conflicted.autoResolutionNote);
+  }
 });
 
 test('source rebuild output is plain JSON and never contains candidate body text', () => {

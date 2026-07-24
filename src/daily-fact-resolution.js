@@ -44,8 +44,11 @@ export function resolveDailyFactFields({
     values,
     fieldSources,
     observedSources: joinSources([
-      ...splitSources(existing?.observedSources || existing?.source),
+      ...splitSources(existing?.observedSources),
+      ...splitSources(existing?.source),
       incoming.source,
+      ...DAILY_FACT_CONTENT_KEYS
+        .flatMap(key => Object.keys(fieldSources[key].sources)),
     ]),
     existing,
     matchingStatuses: [incoming.matchingStatus],
@@ -228,7 +231,11 @@ function normalizeExistingField(value, snapshot, existing) {
   }
 
   const selectedSource = normalizeSource(snapshot?.source);
-  const selectedTime = Number(snapshot?.sourceTime ?? existing?.sourceTime) || 0;
+  const selectedTime = Number(
+    snapshot?.sourceTime
+      ?? snapshot?.sources?.[selectedSource]?.sourceTime
+      ?? existing?.sourceTime,
+  ) || 0;
   const selectedFingerprint = fingerprint(normalizedValue);
   const sources = normalizeSourceMetadata(snapshot?.sources);
   let ambiguous = Boolean(snapshot?.ambiguous);
@@ -302,8 +309,7 @@ function applyIncomingField(field, incomingValue, incoming) {
     selected = incomingCandidate;
   }
 
-  const ambiguous = Boolean(field.source.ambiguous)
-    && Object.keys(sources).length < 2;
+  const ambiguous = Boolean(field.source.ambiguous);
   const conflict = field.source.relation === 'conflict';
   return {
     value: selected.value,
