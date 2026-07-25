@@ -22,7 +22,7 @@ export function routeWeeklyFacts({
       return {
         fact,
         memberResolution,
-        memberKeys: canonicalMemberKeys(fact, memberResolution),
+        memberKeys: memberResolution.aliasKeys,
       };
     });
   const blockedMemberKeys = new Set(resolvedFacts
@@ -177,45 +177,133 @@ function matchesTopics(text, rule) {
 }
 
 function findMemberMappings(fact, mappings) {
+  const components = buildMappingIdentityComponents(mappings);
   const memberOpenId = normalized(fact.memberOpenId);
   if (memberOpenId) {
-    const openIdMappings = mappings.filter(mapping => normalized(mapping.memberOpenId) === memberOpenId);
-    const contactRecordIds = new Set(openIdMappings.flatMap(mapping => toTextArray(mapping.contactRecordIds)));
-    const openIdMappingSet = new Set(openIdMappings);
-    const expandedMappings = contactRecordIds.size
-      ? mappings.filter(mapping => (
-        openIdMappingSet.has(mapping) || hasSharedContact(mapping, contactRecordIds)
-      ))
-      : openIdMappings;
-    return { mappings: expandedMappings };
+    const matchingComponents = components.filter(component => component.openIds.includes(memberOpenId));
+    if (matchingComponents.length > 1) return emptyResolution('ambiguous_member_open_id');
+    return matchingComponents[0] || emptyResolution();
   }
 
   const memberName = normalized(fact.memberName) || normalized(fact.reporterName);
-  if (!memberName) return { mappings: [] };
-  const nameMappings = mappings.filter(mapping => normalized(mapping.memberName) === memberName);
-  const canonicalMembers = new Set(nameMappings.map(canonicalMemberIdentity));
-  if (canonicalMembers.size > 1) return { mappings: [], diagnosticCode: 'ambiguous_member_name' };
-  return { mappings: nameMappings };
+  if (!memberName) return emptyResolution();
+  const matchingComponents = components.filter(component => (
+    component.mappings.some(mapping => normalized(mapping.memberName) === memberName)
+  ));
+  if (matchingComponents.length > 1) return emptyResolution('ambiguous_member_name');
+  return matchingComponents[0] || emptyResolution();
 }
 
-function hasSharedContact(mapping, contactRecordIds) {
-  return toTextArray(mapping.contactRecordIds).some(contactRecordId => contactRecordIds.has(contactRecordId));
+function emptyResolution(diagnosticCode = '') {
+  return { mappings: [], aliasKeys: [], ...(diagnosticCode ? { diagnosticCode } : {}) };
 }
 
-function canonicalMemberIdentity(mapping) {
-  const contactRecordIds = [...new Set(toTextArray(mapping.contactRecordIds))].sort();
-  if (contactRecordIds.length) return `contact:${contactRecordIds.join('|')}`;
-  const memberOpenId = normalized(mapping.memberOpenId);
-  if (memberOpenId) return `openId:${memberOpenId}`;
-  return `name:${normalized(mapping.memberName)}`;
+function buildMappingIdentityComponents(mappings) {
+  const nodes = mappings.map((mapping, index) => ({
+    mapping,
+    index,
+    contactRecordIds: [...new Set(toTextArray(mapping.contactRecordIds))],
+    memberOpenId: normalized(mapping.memberOpenId),
+    memberName: normalized(mapping.memberName),
+  }));
+  const parents = nodes.map((_, index) => index);
+  const find = index => {
+    if (parents[index] !== index) parents[index] = find(parents[index]);
+    return parents[index];
+  };
+  const connect = (left, right) => {
+    const leftRoot = find(left);
+    const rightRoot = find(right);
+    if (leftRoot !== rightRoot) parents[rightRoot] = leftRoot;
+  };
+
+  connectMatchingNodes(nodes, node => node.contactRecordIds, connect);
+  const scopedOpenIds = connectOpenIdNodes(nodes, find, connect);
+
+  const components = new Map();
+  for (const node of nodes) {
+    const root = find(node.index);
+    if (!components.has(root)) components.set(root, { nodes: [] });
+    const component = components.get(root);
+    component.nodes.push(node);
+  }
+  return [...components.values()].map(component => ({
+    mappings: component.nodes.map(node => node.mapping),
+    openIds: [...new Set(component.nodes.map(node => node.memberOpenId).filter(Boolean))].sort(),
+    aliasKeys: componentAliasKeys(component.nodes, scopedOpenIds),
+  }));
 }
 
-function canonicalMemberKeys(fact, memberResolution) {
-  const keys = new Set();
-  const memberOpenId = normalized(fact.memberOpenId);
-  if (memberOpenId) keys.add(`openId:${memberOpenId}`);
-  for (const mapping of memberResolution.mappings) keys.add(canonicalMemberIdentity(mapping));
-  return [...keys].sort();
+function connectMatchingNodes(nodes, aliasesFor, connect, shouldConnect = () => true) {
+  const indexesByAlias = new Map();
+  for (const node of nodes) {
+    for (const alias of aliasesFor(node)) {
+      if (!indexesByAlias.has(alias)) indexesByAlias.set(alias, []);
+      indexesByAlias.get(alias).push(node.index);
+    }
+  }
+  for (const indexes of indexesByAlias.values()) {
+    if (indexes.length < 2 || !shouldConnect(indexes)) continue;
+    for (const index of indexes.slice(1)) connect(indexes[0], index);
+  }
+}
+
+function connectOpenIdNodes(nodes, find, connect) {
+  const indexesByOpenId = new Map();
+  for (const node of nodes) {
+    if (!node.memberOpenId) continue;
+    if (!indexesByOpenId.has(node.memberOpenId)) indexesByOpenId.set(node.memberOpenId, []);
+    indexesByOpenId.get(node.memberOpenId).push(node.index);
+  }
+
+  const scopedOpenIds = new Set();
+  for (const [memberOpenId, indexes] of indexesByOpenId) {
+    const explicitRoots = new Map();
+    for (const index of indexes) {
+      if (!nodes[index].contactRecordIds.length) continue;
+      const root = find(index);
+      if (!explicitRoots.has(root)) explicitRoots.set(root, index);
+    }
+    const contactlessIndexes = indexes.filter(index => !nodes[index].contactRecordIds.length);
+    if (explicitRoots.size <= 1) {
+      for (const index of indexes.slice(1)) connect(indexes[0], index);
+      continue;
+    }
+
+    scopedOpenIds.add(memberOpenId);
+    for (const index of contactlessIndexes) {
+      const memberName = nodes[index].memberName;
+      if (!memberName) continue;
+      const matchingRoots = [...explicitRoots.entries()].filter(([root]) => (
+        nodes.some(node => (
+          node.contactRecordIds.length > 0
+          && find(node.index) === root
+          && node.memberName === memberName
+        ))
+      ));
+      if (matchingRoots.length === 1) connect(index, matchingRoots[0][1]);
+    }
+  }
+  return scopedOpenIds;
+}
+
+function componentAliasKeys(nodes, scopedOpenIds) {
+  const contactAliases = [...new Set(nodes.flatMap(node => (
+    node.contactRecordIds.map(contactRecordId => `contact:${contactRecordId}`)
+  )))].sort();
+  const aliases = new Set(contactAliases);
+  const contactScope = contactAliases.join('|');
+  for (const node of nodes) {
+    if (node.memberOpenId) {
+      const openIdAlias = scopedOpenIds.has(node.memberOpenId)
+        ? `openId:${node.memberOpenId}|${contactScope || `mapping:${node.mapping.recordId || node.index}`}`
+        : `openId:${node.memberOpenId}`;
+      aliases.add(openIdAlias);
+    } else if (!node.contactRecordIds.length && node.memberName) {
+      aliases.add(`name:${node.memberName}`);
+    }
+  }
+  return [...aliases].sort();
 }
 
 function isRoutineMeetingWithoutOutcome(text) {

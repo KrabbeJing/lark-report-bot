@@ -244,6 +244,138 @@ test('propagates a period mapping pause from an OpenID fact to a same-contact na
   ]);
 });
 
+test('propagates a period mapping pause from a name-resolved duplicate to a same-contact OpenID fact', () => {
+  const facts = [
+    fact({
+      recordId: 'rec_monday_name',
+      reportDate: '2026-07-20',
+      memberOpenId: '',
+      memberName: '张三',
+      workItems: ['周一完成收单接口联调'],
+    }),
+    fact({
+      recordId: 'rec_tuesday_open_id',
+      reportDate: '2026-07-21',
+      memberOpenId: 'ou_a',
+      memberName: '张三',
+      workItems: ['周二完成收单接口联调'],
+    }),
+  ];
+  const input = {
+    mappings: [
+      mapping({
+        recordId: 'rec_mapping_monday_contact',
+        contactRecordIds: ['rec_contact_a'],
+        memberName: '张三',
+        effectiveFrom: '2026-07-20',
+        effectiveTo: '2026-07-20',
+        module3Target: '',
+      }),
+      mapping({
+        recordId: 'rec_mapping_monday_lookup_empty',
+        contactRecordIds: [],
+        memberOpenId: 'ou_a',
+        memberName: '张三',
+        effectiveFrom: '2026-07-20',
+        effectiveTo: '2026-07-20',
+        module3Target: '',
+      }),
+      mapping({
+        recordId: 'rec_mapping_tuesday_contact',
+        contactRecordIds: ['rec_contact_a'],
+        memberName: '张三',
+        effectiveFrom: '2026-07-21',
+        effectiveTo: '2026-07-23',
+        module3Target: '',
+      }),
+    ],
+    rules: [rule('模块二', '收单项目组', ['收单'])],
+    cellMap,
+    period,
+  };
+
+  const forward = routeWeeklyFacts({ ...input, facts });
+  const reversed = routeWeeklyFacts({ ...input, facts: [...facts].reverse() });
+
+  assert.deepEqual(forward, reversed);
+  assert.deepEqual(forward.buckets, []);
+  assert.deepEqual(forward.evidence, {});
+  assert.deepEqual(diagnosticCodes(forward), ['duplicate_active_mapping', 'duplicate_active_mapping']);
+  assert.deepEqual(forward.diagnostics.map(item => item.evidenceId), [
+    'rec_monday_name:current:workItems:0',
+    'rec_tuesday_open_id:current:workItems:0',
+  ]);
+});
+
+test('keeps distinct-contact mappings with a shared test OpenID separate when names disambiguate', () => {
+  const result = routeWeeklyFacts({
+    facts: [
+      fact({ recordId: 'rec_member_a', memberOpenId: '', memberName: '甲', reporterName: '甲', workItems: ['甲完成收单接口联调'] }),
+      fact({ recordId: 'rec_member_b', memberOpenId: '', memberName: '乙', reporterName: '乙', workItems: ['乙完成收单接口联调'] }),
+    ],
+    mappings: [
+      mapping({ recordId: 'rec_mapping_a', contactRecordIds: ['rec_contact_a'], memberOpenId: 'ou_test', memberName: '甲', module3Target: '' }),
+      mapping({ recordId: 'rec_mapping_b', contactRecordIds: ['rec_contact_b'], memberOpenId: 'ou_test', memberName: '乙', module3Target: '' }),
+    ],
+    rules: [rule('模块二', '收单项目组', ['收单'])],
+    cellMap,
+    period,
+  });
+
+  assert.deepEqual(texts(result, '收单项目组'), ['甲完成收单接口联调', '乙完成收单接口联调']);
+  assert.deepEqual(result.diagnostics, []);
+  assert.deepEqual(Object.keys(result.evidence), [
+    'rec_member_a:current:workItems:0',
+    'rec_member_b:current:workItems:0',
+  ]);
+});
+
+test('connects a shared-OpenID contactless mapping only to its uniquely named contact component', () => {
+  const result = routeWeeklyFacts({
+    facts: [
+      fact({ recordId: 'rec_member_a', memberOpenId: '', memberName: '甲', reporterName: '甲', workItems: ['甲完成收单接口联调'] }),
+      fact({ recordId: 'rec_member_b', memberOpenId: '', memberName: '乙', reporterName: '乙', workItems: ['乙完成收单接口联调'] }),
+    ],
+    mappings: [
+      mapping({ recordId: 'rec_mapping_a', contactRecordIds: ['rec_contact_a'], memberOpenId: 'ou_test', memberName: '甲', module3Target: '' }),
+      mapping({ recordId: 'rec_mapping_b', contactRecordIds: ['rec_contact_b'], memberOpenId: 'ou_test', memberName: '乙', module3Target: '' }),
+      mapping({ recordId: 'rec_mapping_contactless_a', contactRecordIds: [], memberOpenId: 'ou_test', memberName: '甲', module3Target: '' }),
+    ],
+    rules: [rule('模块二', '收单项目组', ['收单'])],
+    cellMap,
+    period,
+  });
+
+  assert.deepEqual(texts(result, '收单项目组'), ['乙完成收单接口联调']);
+  assert.deepEqual(diagnosticCodes(result), ['duplicate_active_mapping']);
+  assert.deepEqual(result.diagnostics.map(item => item.factRecordId), ['rec_member_a']);
+  assert.deepEqual(Object.keys(result.evidence), ['rec_member_b:current:workItems:0']);
+});
+
+test('does not let an ambiguously named contactless mapping bridge explicit-contact OpenID components', () => {
+  const result = routeWeeklyFacts({
+    facts: [
+      fact({ recordId: 'rec_member_a', memberOpenId: '', memberName: '甲', reporterName: '甲', workItems: ['甲完成收单接口联调'] }),
+      fact({ recordId: 'rec_member_b', memberOpenId: '', memberName: '乙', reporterName: '乙', workItems: ['乙完成收单接口联调'] }),
+    ],
+    mappings: [
+      mapping({ recordId: 'rec_mapping_a', contactRecordIds: ['rec_contact_a'], memberOpenId: 'ou_test', memberName: '甲', module3Target: '' }),
+      mapping({ recordId: 'rec_mapping_b', contactRecordIds: ['rec_contact_b'], memberOpenId: 'ou_test', memberName: '乙', module3Target: '' }),
+      mapping({ recordId: 'rec_mapping_contactless_unknown', contactRecordIds: [], memberOpenId: 'ou_test', memberName: '丙', module3Target: '' }),
+    ],
+    rules: [rule('模块二', '收单项目组', ['收单'])],
+    cellMap,
+    period,
+  });
+
+  assert.deepEqual(texts(result, '收单项目组'), ['甲完成收单接口联调', '乙完成收单接口联调']);
+  assert.deepEqual(result.diagnostics, []);
+  assert.deepEqual(Object.keys(result.evidence), [
+    'rec_member_a:current:workItems:0',
+    'rec_member_b:current:workItems:0',
+  ]);
+});
+
 test('pauses an OpenID fact when an active mapping with the same contact has an empty lookup OpenID', () => {
   const result = routeWeeklyFacts({
     facts: [fact({ workItems: ['完成收单接口联调', '完成云缴费对账'] })],
@@ -418,7 +550,7 @@ test('does not fall back to a name mapping when the fact has an OpenID', () => {
   assert.deepEqual(diagnosticCodes(result), ['unmapped_member']);
 });
 
-test('does not merge same-name mappings when both OpenIDs are absent', () => {
+test('does not merge same-name mappings without strong identifiers', () => {
   const result = routeWeeklyFacts({
     facts: [fact({ memberOpenId: '', memberName: '李四', reporterName: '李四' })],
     mappings: [
@@ -431,7 +563,7 @@ test('does not merge same-name mappings when both OpenIDs are absent', () => {
   });
 
   assert.deepEqual(result.buckets, []);
-  assert.deepEqual(diagnosticCodes(result), ['duplicate_active_mapping']);
+  assert.deepEqual(diagnosticCodes(result), ['ambiguous_member_name']);
 });
 
 test('skips a topic-free item and a routine meeting without an outcome', () => {
