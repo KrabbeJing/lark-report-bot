@@ -1,4 +1,5 @@
 import { tableIsConfigured } from './config.js';
+import { DEFAULT_TIMEZONE, formatDateTime, formatYmd } from './date-utils.js';
 
 function raw(record, table, key) {
   return record?.fields?.[table?.fields?.[key]];
@@ -21,6 +22,29 @@ function people(value) {
     .filter(item => item.openId);
 }
 
+function baseTimestamp(value) {
+  if (Array.isArray(value)) return baseTimestamp(value[0]);
+  if (value && typeof value === 'object') {
+    return baseTimestamp(value.timestamp ?? value.date ?? value.value ?? value.text ?? '');
+  }
+  const normalized = String(value ?? '').trim();
+  if (!/^\d{10,13}$/.test(normalized)) return null;
+  const numeric = Number(normalized);
+  const milliseconds = numeric < 100000000000 ? numeric * 1000 : numeric;
+  const date = new Date(milliseconds);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function dateText(value) {
+  const timestamp = baseTimestamp(value);
+  return timestamp ? formatYmd(timestamp, DEFAULT_TIMEZONE) : text(value);
+}
+
+function dateTimeText(value) {
+  const timestamp = baseTimestamp(value);
+  return timestamp ? formatDateTime(timestamp, DEFAULT_TIMEZONE) : text(value);
+}
+
 export function normalizeWeeklySourceMapping(record, table) {
   return {
     recordId: record.record_id,
@@ -29,8 +53,8 @@ export function normalizeWeeklySourceMapping(record, table) {
     memberOpenId: text(raw(record, table, 'memberOpenId')),
     module2Targets: texts(raw(record, table, 'module2Targets')),
     module3Target: text(raw(record, table, 'module3Target')),
-    effectiveFrom: text(raw(record, table, 'effectiveFrom')),
-    effectiveTo: text(raw(record, table, 'effectiveTo')),
+    effectiveFrom: dateText(raw(record, table, 'effectiveFrom')),
+    effectiveTo: dateText(raw(record, table, 'effectiveTo')),
     enabled: Boolean(raw(record, table, 'enabled')),
   };
 }
@@ -58,7 +82,7 @@ export function normalizeWeeklyStyleExample(record, table) {
     contentType: text(raw(record, table, 'contentType')),
     weekKey: text(raw(record, table, 'weekKey')),
     finalText: text(raw(record, table, 'finalText')),
-    reviewedAt: text(raw(record, table, 'reviewedAt')),
+    reviewedAt: dateTimeText(raw(record, table, 'reviewedAt')),
     highQuality: Boolean(raw(record, table, 'highQuality')),
     enabled: Boolean(raw(record, table, 'enabled')),
   };
@@ -91,10 +115,14 @@ function findMappingConflicts(mappings, period) {
   for (let date = period.start; date <= period.end; date = nextYmd(date)) {
     const counts = new Map();
     for (const mapping of mappings.filter(item => isMappingActive(item, { start: date, end: date }))) {
-      const key = mapping.memberOpenId || mapping.memberName;
-      counts.set(key, (counts.get(key) || 0) + 1);
+      const contactRecordIds = [...new Set(mapping.contactRecordIds)].sort();
+      const keys = contactRecordIds.length
+        ? contactRecordIds
+        : [mapping.memberOpenId || mapping.memberName].filter(Boolean);
+      for (const key of keys) counts.set(key, (counts.get(key) || 0) + 1);
     }
-    for (const [memberKey, count] of counts) {
+    for (const memberKey of [...counts.keys()].sort()) {
+      const count = counts.get(memberKey);
       if (count > 1) conflicts.add(`duplicate_active_mapping:${date}:${memberKey}`);
     }
   }

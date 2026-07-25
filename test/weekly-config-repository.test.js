@@ -86,6 +86,29 @@ test('normalizes mappings with linked contacts, lookup arrays, multi-target modu
   });
 });
 
+test('normalizes Base millisecond mapping dates in Asia Shanghai while retaining YYYY-MM-DD strings', () => {
+  const tableConfig = createGroup().weeklySourceMappingTable;
+  const numericMapping = normalizeWeeklySourceMapping(record('rec_numeric_dates', {
+    成员: ['rec_member'],
+    成员真实姓名: ['王小明'],
+    成员OpenID: ['ou_member_1'],
+    模块二可归集板块: [],
+    模块三归属板块: [],
+    生效日期: 1784476800000,
+    失效日期: 1784822400000,
+    是否启用: true,
+  }), tableConfig);
+  const textMapping = normalizeWeeklySourceMapping(record('rec_text_dates', {
+    生效日期: '2026-07-20',
+    失效日期: '2026-07-24',
+  }), tableConfig);
+
+  assert.equal(numericMapping.effectiveFrom, '2026-07-20');
+  assert.equal(numericMapping.effectiveTo, '2026-07-24');
+  assert.equal(textMapping.effectiveFrom, '2026-07-20');
+  assert.equal(textMapping.effectiveTo, '2026-07-24');
+});
+
 test('normalizes multiple weekly owners to public people objects', () => {
   const rule = normalizeWeeklySectionRule(record('rec_rule', {
     模块: '模块二',
@@ -121,7 +144,7 @@ test('normalizes style examples without exposing Base records', () => {
     内容类型: '进展',
     样例周次: '2026-W30',
     最终样例正文: '已完成推进。',
-    审核时间: '2026-07-24',
+    审核时间: 1784881800000,
     纳入优质样例: true,
     是否启用: true,
   }), createGroup().weeklyStyleExampleTable);
@@ -133,7 +156,7 @@ test('normalizes style examples without exposing Base records', () => {
     contentType: '进展',
     weekKey: '2026-W30',
     finalText: '已完成推进。',
-    reviewedAt: '2026-07-24',
+    reviewedAt: '2026/07/24 16:30:00',
     highQuality: true,
     enabled: true,
   });
@@ -146,16 +169,19 @@ test('loads configured tables in parallel and filters inactive, out-of-period, d
     listRecords: async (sourceTable, operation, options) => {
       calls.push({ sourceTable, operation, options });
       if (sourceTable === group.weeklySourceMappingTable) return [
-        record('rec_active', { 成员: ['contact_1'], 成员真实姓名: '甲', 成员OpenID: 'ou_1', 模块二可归集板块: ['项目A'], 模块三归属板块: '', 生效日期: '2026-07-20', 失效日期: '2026-07-24', 是否启用: true }),
-        record('rec_expired', { 成员: ['contact_2'], 成员真实姓名: '乙', 成员OpenID: 'ou_2', 模块二可归集板块: ['项目B'], 模块三归属板块: '', 生效日期: '2026-07-01', 失效日期: '2026-07-19', 是否启用: true }),
-        record('rec_disabled', { 成员: ['contact_3'], 成员真实姓名: '丙', 成员OpenID: 'ou_3', 模块二可归集板块: ['项目C'], 模块三归属板块: '', 生效日期: '', 失效日期: '', 是否启用: false }),
+        record('rec_closed_boundaries', { 成员: ['rec_member_1'], 成员真实姓名: '甲', 成员OpenID: 'ou_1', 模块二可归集板块: ['项目A'], 模块三归属板块: '', 生效日期: 1784476800000, 失效日期: 1784822400000, 是否启用: true }),
+        record('rec_start_boundary', { 成员: ['rec_member_2'], 成员真实姓名: '乙', 成员OpenID: 'ou_2', 模块二可归集板块: ['项目B'], 模块三归属板块: '', 生效日期: 1784822400000, 失效日期: '', 是否启用: true }),
+        record('rec_end_boundary', { 成员: ['rec_member_3'], 成员真实姓名: '丙', 成员OpenID: 'ou_3', 模块二可归集板块: ['项目C'], 模块三归属板块: '', 生效日期: '', 失效日期: 1784476800000, 是否启用: true }),
+        record('rec_future_open', { 成员: ['rec_member_4'], 成员真实姓名: '丁', 成员OpenID: 'ou_4', 模块二可归集板块: ['项目D'], 模块三归属板块: '', 生效日期: 1785513600000, 失效日期: '', 是否启用: true }),
+        record('rec_expired', { 成员: ['rec_member_5'], 成员真实姓名: '戊', 成员OpenID: 'ou_5', 模块二可归集板块: ['项目E'], 模块三归属板块: '', 生效日期: '', 失效日期: 1784390400000, 是否启用: true }),
+        record('rec_disabled', { 成员: ['rec_member_6'], 成员真实姓名: '己', 成员OpenID: 'ou_6', 模块二可归集板块: ['项目F'], 模块三归属板块: '', 生效日期: '', 失效日期: '', 是否启用: false }),
       ];
       if (sourceTable === group.weeklySectionRuleTable) return [
         record('rec_rule_enabled', { 模块: '模块二', 周报板块: '项目A', 内容类型: '进展', 包含主题: [], 排除主题: [], 周报负责人: [], 负责人提醒: false, 排序: 1, 是否启用: true }),
         record('rec_rule_disabled', { 模块: '模块二', 周报板块: '项目B', 内容类型: '进展', 包含主题: [], 排除主题: [], 周报负责人: [], 负责人提醒: false, 排序: 2, 是否启用: false }),
       ];
       if (sourceTable === group.weeklyStyleExampleTable) return [
-        record('rec_style_accepted', { 模块: '模块二', 周报板块: '项目A', 内容类型: '进展', 样例周次: '2026-W30', 最终样例正文: '优质样例', 审核时间: '2026-07-24', 纳入优质样例: true, 是否启用: true }),
+        record('rec_style_accepted', { 模块: '模块二', 周报板块: '项目A', 内容类型: '进展', 样例周次: '2026-W30', 最终样例正文: '优质样例', 审核时间: 1784881800000, 纳入优质样例: true, 是否启用: true }),
         record('rec_style_unreviewed', { 模块: '模块二', 周报板块: '项目A', 内容类型: '进展', 样例周次: '2026-W30', 最终样例正文: '未审核', 审核时间: '', 纳入优质样例: true, 是否启用: true }),
         record('rec_style_low_quality', { 模块: '模块二', 周报板块: '项目A', 内容类型: '进展', 样例周次: '2026-W30', 最终样例正文: '低质量', 审核时间: '2026-07-24', 纳入优质样例: false, 是否启用: true }),
       ];
@@ -169,7 +195,9 @@ test('loads configured tables in parallel and filters inactive, out-of-period, d
     'weeklyConfig.mappings', 'weeklyConfig.rules', 'weeklyConfig.styles', 'weeklyConfig.metrics',
   ]);
   assert.ok(calls.every(call => call.options.includeView === false));
-  assert.deepEqual(result.mappings.map(item => item.recordId), ['rec_active']);
+  assert.deepEqual(result.mappings.map(item => item.recordId), [
+    'rec_closed_boundaries', 'rec_start_boundary', 'rec_end_boundary',
+  ]);
   assert.deepEqual(result.rules.map(item => item.recordId), ['rec_rule_enabled']);
   assert.deepEqual(result.styleExamples.map(item => item.recordId), ['rec_style_accepted']);
   assert.deepEqual(result.metricOwners.map(item => item.recordId), ['rec_metric']);
@@ -180,8 +208,8 @@ test('returns a duplicate active mapping warning instead of selecting a record',
   const bitable = {
     listRecords: async sourceTable => sourceTable === group.weeklySourceMappingTable
       ? [
-        record('rec_first', { 成员: [], 成员真实姓名: '甲', 成员OpenID: 'ou_duplicate', 模块二可归集板块: [], 模块三归属板块: '', 生效日期: '', 失效日期: '', 是否启用: true }),
-        record('rec_second', { 成员: [], 成员真实姓名: '甲', 成员OpenID: 'ou_duplicate', 模块二可归集板块: [], 模块三归属板块: '', 生效日期: '', 失效日期: '', 是否启用: true }),
+        record('rec_first', { 成员: ['rec_member'], 成员真实姓名: '甲', 成员OpenID: 'ou_duplicate', 模块二可归集板块: [], 模块三归属板块: '', 生效日期: '', 失效日期: '', 是否启用: true }),
+        record('rec_second', { 成员: ['rec_member'], 成员真实姓名: '甲', 成员OpenID: [], 模块二可归集板块: [], 模块三归属板块: '', 生效日期: '', 失效日期: '', 是否启用: true }),
       ]
       : [],
   };
@@ -189,7 +217,26 @@ test('returns a duplicate active mapping warning instead of selecting a record',
   const result = await loadWeeklyConfiguration({ group, bitable, period: { start: '2026-07-20', end: '2026-07-20' } });
 
   assert.equal(result.mappings.length, 2);
-  assert.deepEqual(result.warnings, ['duplicate_active_mapping:2026-07-20:ou_duplicate']);
+  assert.deepEqual(result.warnings, ['duplicate_active_mapping:2026-07-20:rec_member']);
+});
+
+test('uses every sorted unique linked contact ID for deterministic duplicate warnings', async () => {
+  const group = createGroup();
+  const bitable = {
+    listRecords: async sourceTable => sourceTable === group.weeklySourceMappingTable
+      ? [
+        record('rec_first', { 成员: ['rec_member_b', 'rec_member_a', 'rec_member_a'], 成员真实姓名: '甲', 成员OpenID: 'ou_first', 模块二可归集板块: [], 模块三归属板块: '', 生效日期: '', 失效日期: '', 是否启用: true }),
+        record('rec_second', { 成员: ['rec_member_a', 'rec_member_b'], 成员真实姓名: '乙', 成员OpenID: 'ou_second', 模块二可归集板块: [], 模块三归属板块: '', 生效日期: '', 失效日期: '', 是否启用: true }),
+      ]
+      : [],
+  };
+
+  const result = await loadWeeklyConfiguration({ group, bitable, period: { start: '2026-07-20', end: '2026-07-20' } });
+
+  assert.deepEqual(result.warnings, [
+    'duplicate_active_mapping:2026-07-20:rec_member_a',
+    'duplicate_active_mapping:2026-07-20:rec_member_b',
+  ]);
 });
 
 test('safely skips every unconfigured weekly configuration table without list calls or sensitive warnings', async () => {
