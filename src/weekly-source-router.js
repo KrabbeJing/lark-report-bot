@@ -1,12 +1,14 @@
 const VALID_FACT_STATUS = '有效';
 const MODULE_TWO = 'module2';
 const MODULE_THREE = 'module3';
-const MEETING_WORDS = /会议|例会|项目会|评审会|周会|协调会|座谈会|碰头会|沟通会?|讨论会?|汇报会?/;
-const MEETING_BOUNDARY_WORDS = /会议|例会|项目会|评审会|周会|协调会|座谈会|碰头会|沟通会|讨论会|汇报会/;
+const EXPLICIT_MEETING_WORDS = /会议|例会|项目会|评审会|周会|协调会|座谈会|碰头会|沟通会|讨论会|汇报会/;
+const BARE_PROCESS_MEETINGS = /沟通|讨论|汇报/;
+const MEETING_ACTION = /(?:参加|召开|组织|出席|列席|主持)[^\s，。；;:：、.]{1,12}?(?:会议|会)(?=$|[\s，。；;:：、.])/;
 const COMPLETION_MARKERS = ['已', '已经', '成功', '最终', '会后'];
-const OUTCOME_NEGATIONS = /尚未|未能|没有|未/;
-const OUTCOME_INTENT_MARKERS = /议题|讨论|沟通|汇报|协调|研究|交流|拟|计划|待|需要|需|是否|准备/;
-const OUTCOME_CONNECTORS = ['并', '最终', '后'];
+const STRONG_INTENT_OR_NEGATION = /尚未|未能|没有|未|议题|计划|拟|准备|是否|待|需要|需/;
+const PROCESS_MARKERS = /讨论|沟通|协调|研究|交流|汇报/;
+const OUTCOME_CONNECTORS = ['并', '后', '最终', '已', '已经', '成功', '会后'];
+const CLAUSE_DELIMITERS = ['。', '；', ';', '\n'];
 const MEETING_OUTCOME_PATTERNS = [
   /形成(?:结论|方案|报告|成果|共识)/,
   /输出(?:成果|报告|方案)/,
@@ -361,75 +363,83 @@ function componentAliasKeys(nodes, scopedOpenIds) {
 }
 
 function isRoutineMeetingWithoutOutcome(text) {
-  const meetingIndex = text.search(MEETING_WORDS);
-  return meetingIndex >= 0 && !hasMeetingOutcome(text, meetingIndex);
+  const meeting = findMeeting(text);
+  return Boolean(meeting) && !hasMeetingOutcome(text, meeting);
 }
 
-function hasMeetingOutcome(text, meetingIndex) {
+function findMeeting(text) {
+  const meetings = [
+    ...findMatches(text, EXPLICIT_MEETING_WORDS).map(match => ({ ...match, isProcess: false })),
+    ...findMatches(text, BARE_PROCESS_MEETINGS).map(match => ({ ...match, isProcess: true })),
+    ...findMatches(text, MEETING_ACTION).map(match => ({ ...match, isProcess: false })),
+  ];
+  return meetings.sort((left, right) => (
+    left.index - right.index || right.length - left.length
+  ))[0] || null;
+}
+
+function hasMeetingOutcome(text, meeting) {
   return MEETING_OUTCOME_PATTERNS
-    .flatMap(pattern => matchIndexes(text, pattern))
-    .some(outcomeIndex => isSupportedMeetingOutcome(text, meetingIndex, outcomeIndex));
+    .flatMap(pattern => findMatches(text, pattern))
+    .some(outcome => isSupportedMeetingOutcome(text, meeting, outcome));
 }
 
-function isSupportedMeetingOutcome(text, meetingIndex, outcomeIndex) {
-  const context = outcomeContext(text, outcomeIndex);
-  if (OUTCOME_NEGATIONS.test(context)) return false;
-  if (OUTCOME_INTENT_MARKERS.test(context) && !hasOutcomeConnector(context)) return false;
-  return outcomeIndex > meetingIndex || hasExplicitCompletionMarker(text, outcomeIndex);
+function isSupportedMeetingOutcome(text, meeting, outcome) {
+  const clause = meetingClause(text, meeting, outcome);
+  if (STRONG_INTENT_OR_NEGATION.test(clause)) return false;
+  const meetingEnd = meeting.index + meeting.length;
+  if (outcome.index < meetingEnd) return hasAdjacentCompletionMarker(text, outcome);
+
+  const processContext = text.slice(meeting.isProcess ? meeting.index : meetingEnd, outcome.index);
+  if (PROCESS_MARKERS.test(processContext) && !hasOutcomeConnector(processContext)) return false;
+  return true;
 }
 
-function outcomeContext(text, outcomeIndex) {
-  const beforeOutcome = text.slice(0, outcomeIndex);
-  const boundary = Math.max(
-    findLatestMatchEnd(beforeOutcome, MEETING_BOUNDARY_WORDS),
-    findLatestPunctuationEnd(beforeOutcome),
-  );
-  return beforeOutcome.slice(boundary);
+function meetingClause(text, meeting, outcome) {
+  const startIndex = Math.min(meeting.index, outcome.index);
+  const endIndex = Math.max(meeting.index + meeting.length, outcome.index + outcome.length);
+  const start = findClauseStart(text, startIndex);
+  const end = findClauseEnd(text, endIndex);
+  return text.slice(start, end);
 }
 
-function findLatestMatchEnd(text, pattern) {
-  let latestEnd = 0;
-  let startIndex = 0;
-  while (startIndex < text.length) {
-    const match = text.slice(startIndex).match(pattern);
-    if (!match) break;
-    latestEnd = startIndex + match.index + match[0].length;
-    startIndex = latestEnd;
-  }
-  return latestEnd;
+function findClauseStart(text, index) {
+  return Math.max(...CLAUSE_DELIMITERS.map(delimiter => text.lastIndexOf(delimiter, index - 1))) + 1;
 }
 
-function findLatestPunctuationEnd(text) {
-  const punctuationIndex = Math.max(...['，', '。', '；', ';', '：', ':']
-    .map(punctuation => text.lastIndexOf(punctuation)));
-  return punctuationIndex + 1;
+function findClauseEnd(text, index) {
+  const endings = CLAUSE_DELIMITERS
+    .map(delimiter => text.indexOf(delimiter, index))
+    .filter(end => end >= 0);
+  return endings.length ? Math.min(...endings) : text.length;
 }
 
 function hasOutcomeConnector(context) {
   return OUTCOME_CONNECTORS.some(connector => context.endsWith(connector));
 }
 
-function matchIndexes(text, pattern) {
-  const indexes = [];
+function findMatches(text, pattern) {
+  const matches = [];
   let startIndex = 0;
   while (startIndex < text.length) {
-    const relativeIndex = text.slice(startIndex).search(pattern);
-    if (relativeIndex < 0) break;
-    const index = startIndex + relativeIndex;
-    indexes.push(index);
-    startIndex = index + 1;
+    const match = text.slice(startIndex).match(pattern);
+    if (!match) break;
+    const index = startIndex + match.index;
+    const length = match[0].length;
+    matches.push({ index, length });
+    startIndex = index + Math.max(length, 1);
   }
-  return indexes;
+  return matches;
 }
 
-function hasCompletionMarkerBefore(text, outcomeIndex) {
-  const beforeOutcome = text.slice(0, outcomeIndex);
+function hasCompletionMarkerBefore(text, outcome) {
+  const beforeOutcome = text.slice(0, outcome.index);
   return COMPLETION_MARKERS.some(marker => beforeOutcome.endsWith(marker));
 }
 
-function hasExplicitCompletionMarker(text, outcomeIndex) {
-  return hasCompletionMarkerBefore(text, outcomeIndex)
-    || COMPLETION_MARKERS.some(marker => text.startsWith(marker, outcomeIndex));
+function hasAdjacentCompletionMarker(text, outcome) {
+  return hasCompletionMarkerBefore(text, outcome)
+    || COMPLETION_MARKERS.some(marker => text.startsWith(marker, outcome.index));
 }
 
 function moduleKey(value) {

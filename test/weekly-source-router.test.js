@@ -722,6 +722,43 @@ test('requires a connector after local process markers', () => {
   ]);
 });
 
+test('rejects strong intent throughout a meeting-related clause', () => {
+  const result = routeWeeklyFacts({
+    facts: [fact({ workItems: [
+      '收单会议议题：确认方案',
+      '收单会议计划：提交材料',
+      '收单项目会讨论，确认方案',
+      '收单会议协调：制定方案',
+      '收单会议计划讨论并确认方案',
+      '收单会议议题为沟通并确认方案',
+      '收单会议确认方案议题',
+      '参加收单专题会',
+      '参加收单研讨会',
+      '参加收单启动会',
+    ] })],
+    mappings: [mapping({ module3Target: '' })],
+    rules: [rule('模块二', '收单项目组', ['收单'])],
+    cellMap,
+    period,
+  });
+
+  assert.deepEqual(result.buckets, []);
+  assert.deepEqual(diagnosticCodes(result), Array(10).fill('routine_meeting_without_result'));
+});
+
+test('does not classify social activities as meetings', () => {
+  const result = routeWeeklyFacts({
+    facts: [fact({ workItems: ['参加社会活动'] })],
+    mappings: [mapping({ module3Target: '' })],
+    rules: [rule('模块二', '收单项目组', ['收单'])],
+    cellMap,
+    period,
+  });
+
+  assert.deepEqual(result.buckets, []);
+  assert.deepEqual(diagnosticCodes(result), ['no_topic_match']);
+});
+
 test('allows routine meetings only when they state an observable outcome', () => {
   const result = routeWeeklyFacts({
     facts: [fact({ workItems: [
