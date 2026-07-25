@@ -128,6 +128,76 @@ test('pauses every work item when one member has multiple active mappings', () =
   ]);
 });
 
+test('uses only mappings active on the fact date when ownership changed during the period', () => {
+  const result = routeWeeklyFacts({
+    facts: [fact({ reportDate: '2026-07-20' })],
+    mappings: [
+      mapping({ recordId: 'rec_mapping_old', effectiveFrom: '2026-07-17', effectiveTo: '2026-07-19', module3Target: '' }),
+      mapping({ recordId: 'rec_mapping_current', effectiveFrom: '2026-07-20', effectiveTo: '2026-07-23', module3Target: '' }),
+    ],
+    rules: [rule('模块二', '收单项目组', ['收单'])],
+    cellMap,
+    period,
+  });
+
+  assert.deepEqual(texts(result, '收单项目组'), ['完成收单接口联调']);
+  assert.deepEqual(result.diagnostics, []);
+});
+
+test('pauses an OpenID fact when an active mapping with the same contact has an empty lookup OpenID', () => {
+  const result = routeWeeklyFacts({
+    facts: [fact({ workItems: ['完成收单接口联调', '完成云缴费对账'] })],
+    mappings: [
+      mapping({
+        recordId: 'rec_mapping_open_id',
+        contactRecordIds: ['rec_contact_a'],
+        module2Targets: ['收单项目组'],
+        module3Target: '',
+      }),
+      mapping({
+        recordId: 'rec_mapping_lookup_empty',
+        memberOpenId: '',
+        contactRecordIds: ['rec_contact_a'],
+        module2Targets: [],
+        module3Target: '对公客群经营及场景建设',
+      }),
+    ],
+    rules: [
+      rule('模块二', '收单项目组', ['收单']),
+      rule('模块三', '对公客群经营及场景建设', ['云缴费']),
+    ],
+    cellMap,
+    period,
+  });
+
+  assert.deepEqual(result.buckets, []);
+  assert.deepEqual(diagnosticCodes(result), ['duplicate_active_mapping', 'duplicate_active_mapping']);
+});
+
+test('keeps same-OpenID mappings that lack contacts when expanding shared-contact mappings', () => {
+  const result = routeWeeklyFacts({
+    facts: [fact({ workItems: ['完成收单接口联调'] })],
+    mappings: [
+      mapping({
+        recordId: 'rec_mapping_contact',
+        contactRecordIds: ['rec_contact_a'],
+        module3Target: '',
+      }),
+      mapping({
+        recordId: 'rec_mapping_contact_empty',
+        contactRecordIds: [],
+        module3Target: '',
+      }),
+    ],
+    rules: [rule('模块二', '收单项目组', ['收单'])],
+    cellMap,
+    period,
+  });
+
+  assert.deepEqual(result.buckets, []);
+  assert.deepEqual(diagnosticCodes(result), ['duplicate_active_mapping']);
+});
+
 test('skips one item when multiple authorized module II targets match', () => {
   const result = routeWeeklyFacts({
     facts: [fact({ workItems: ['完成公共接口联调'] })],
@@ -194,6 +264,34 @@ test('matches a unique name only when both fact and mapping lack an OpenID', () 
   assert.deepEqual(texts(result, '收单项目组'), ['完成收单接口联调']);
 });
 
+test('matches a missing fact OpenID to one canonical name mapping with a populated mapping OpenID', () => {
+  const result = routeWeeklyFacts({
+    facts: [fact({ memberOpenId: '', memberName: '李四', reporterName: '李四' })],
+    mappings: [mapping({ memberOpenId: 'ou_li', memberName: '李四', module3Target: '' })],
+    rules: [rule('模块二', '收单项目组', ['收单'])],
+    cellMap,
+    period,
+  });
+
+  assert.deepEqual(texts(result, '收单项目组'), ['完成收单接口联调']);
+});
+
+test('diagnoses a missing fact OpenID when same-name mappings are different canonical members', () => {
+  const result = routeWeeklyFacts({
+    facts: [fact({ memberOpenId: '', memberName: '李四', reporterName: '李四' })],
+    mappings: [
+      mapping({ recordId: 'rec_mapping_li', memberOpenId: 'ou_li', memberName: '李四', module3Target: '' }),
+      mapping({ recordId: 'rec_mapping_wang', memberOpenId: 'ou_wang', memberName: '李四', module3Target: '' }),
+    ],
+    rules: [rule('模块二', '收单项目组', ['收单'])],
+    cellMap,
+    period,
+  });
+
+  assert.deepEqual(result.buckets, []);
+  assert.deepEqual(diagnosticCodes(result), ['ambiguous_member_name']);
+});
+
 test('does not match an empty-OpenID mapping with a different member name', () => {
   const result = routeWeeklyFacts({
     facts: [fact({ memberOpenId: '', memberName: '李四', reporterName: '李四' })],
@@ -247,6 +345,41 @@ test('skips a topic-free item and a routine meeting without an outcome', () => {
 
   assert.deepEqual(result.buckets, []);
   assert.deepEqual(diagnosticCodes(result), ['no_topic_match', 'routine_meeting_without_result']);
+});
+
+test('does not treat completion of a routine meeting as a work outcome', () => {
+  const result = routeWeeklyFacts({
+    facts: [fact({ workItems: ['完成收单项目例会'] })],
+    mappings: [mapping({ module3Target: '' })],
+    rules: [rule('模块二', '收单项目组', ['收单'])],
+    cellMap,
+    period,
+  });
+
+  assert.deepEqual(result.buckets, []);
+  assert.deepEqual(diagnosticCodes(result), ['routine_meeting_without_result']);
+});
+
+test('allows routine meetings only when they state an observable outcome', () => {
+  const result = routeWeeklyFacts({
+    facts: [fact({ workItems: [
+      '收单例会形成结论',
+      '收单例会确认方案',
+      '收单例会输出成果',
+      '收单例会评审通过',
+    ] })],
+    mappings: [mapping({ module3Target: '' })],
+    rules: [rule('模块二', '收单项目组', ['收单'])],
+    cellMap,
+    period,
+  });
+
+  assert.deepEqual(texts(result, '收单项目组'), [
+    '收单例会形成结论',
+    '收单例会确认方案',
+    '收单例会输出成果',
+    '收单例会评审通过',
+  ]);
 });
 
 test('uses only valid in-period facts and only current work items', () => {

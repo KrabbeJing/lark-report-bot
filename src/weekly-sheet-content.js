@@ -20,7 +20,7 @@ export function buildWeeklySheetValues({
   initializeCurrentCells(values, cellMap);
 
   for (const bucket of buckets) {
-    setBucketCurrentValues(values, bucket);
+    setBucketCurrentValues(values, bucket, cellMap);
   }
 
   return {
@@ -55,8 +55,8 @@ function initializeCurrentCells(values, cellMap) {
   }
 }
 
-function setBucketCurrentValues(values, bucket) {
-  const cells = toCellArray(bucket?.targets?.current);
+function setBucketCurrentValues(values, bucket, cellMap) {
+  const cells = resolveBucketCurrentCells(bucket, cellMap);
   const items = bucket?.sources?.current || [];
   if (!cells.length) return;
   if (cells.length === 1) {
@@ -67,6 +67,18 @@ function setBucketCurrentValues(values, bucket) {
   for (const [index, cell] of cells.entries()) {
     setCell(values, cell, items[index] ? formatSingleItem(items[index]) : DEFAULT_EMPTY_VALUE);
   }
+}
+
+function resolveBucketCurrentCells(bucket, cellMap) {
+  const entries = bucket?.module === 'module2'
+    ? cellMap.agileProjects
+    : bucket?.module === 'module3'
+      ? cellMap.management
+      : null;
+  const target = String(bucket?.target || '').trim();
+  if (!entries || !target) return [];
+  const spec = Object.entries(entries).find(([name]) => String(name).trim() === target)?.[1];
+  return toCellArray(spec?.current);
 }
 
 function setCell(values, cell, value) {

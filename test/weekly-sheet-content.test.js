@@ -79,6 +79,47 @@ test('does not infer a current or next route from report agile group, project, a
   assert.deepEqual(result.buckets, []);
 });
 
+test('derives output cells from the semantic module and target instead of routing cell coordinates', () => {
+  const result = buildWeeklySheetValues({
+    cellMap,
+    routing: {
+      buckets: [
+        {
+          module: 'module2',
+          target: '收单项目组',
+          targets: { current: ['Z999'] },
+          sources: { current: [{ member: '甲', text: '合法目标事项' }] },
+        },
+        {
+          module: 'module3',
+          target: '对公客群经营及场景建设',
+          targets: { current: ['C26'] },
+          sources: { current: [{ member: '乙', text: '模块三事项' }] },
+        },
+        {
+          module: 'module2',
+          target: '未知项目组',
+          targets: { current: ['C26'] },
+          sources: { current: [{ member: '丙', text: '未知目标事项' }] },
+        },
+        {
+          module: 'module3',
+          target: '收单项目组',
+          targets: { current: ['C26'] },
+          sources: { current: [{ member: '丁', text: '模块不匹配事项' }] },
+        },
+      ],
+    },
+  });
+
+  assert.equal(result.values.C26, '1. 甲：合法目标事项');
+  assert.equal(result.values.C45, '乙：模块三事项');
+  assert.equal(result.values.C46, '');
+  assert.equal(result.values.C47, '');
+  assert.equal(result.values.Z999, undefined);
+  assert.doesNotMatch(JSON.stringify(result.values), /未知目标事项|模块不匹配事项/);
+});
+
 test('exposes only the report period and semantic current cells', () => {
   assert.deepEqual(getWeeklySheetExpectedCells(cellMap), ['B2', 'C26', 'C45', 'C46', 'C47']);
 });

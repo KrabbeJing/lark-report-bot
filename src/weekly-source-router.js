@@ -16,14 +16,15 @@ export function routeWeeklyFacts({
 
   for (const fact of facts) {
     if (!isEligibleFact(fact, period)) continue;
-    const memberMappings = findMemberMappings(fact, mappings);
+    const activeMappings = mappings.filter(mapping => isMappingActiveOn(mapping, fact.reportDate));
+    const memberResolution = findMemberMappings(fact, activeMappings);
 
     for (const [itemIndex, rawText] of toTextArray(fact.workItems).entries()) {
       const source = toSource(fact, rawText, itemIndex);
       if (!source.text) continue;
       const diagnostic = routeItem({
         source,
-        memberMappings,
+        memberResolution,
         rules,
         targetSpecs,
         bucketsByKey,
@@ -40,7 +41,9 @@ export function routeWeeklyFacts({
   };
 }
 
-function routeItem({ source, memberMappings, rules, targetSpecs, bucketsByKey, evidence }) {
+function routeItem({ source, memberResolution, rules, targetSpecs, bucketsByKey, evidence }) {
+  if (memberResolution.diagnosticCode) return diagnostic(source, memberResolution.diagnosticCode);
+  const { mappings: memberMappings } = memberResolution;
   if (!memberMappings.length) return diagnostic(source, 'unmapped_member');
   if (memberMappings.length > 1) return diagnostic(source, 'duplicate_active_mapping');
   if (isRoutineMeetingWithoutOutcome(source.text)) {
@@ -127,6 +130,15 @@ function isEligibleFact(fact, period) {
     && reportDate <= normalized(period.end);
 }
 
+function isMappingActiveOn(mapping, reportDate) {
+  const date = normalized(reportDate);
+  const effectiveFrom = normalized(mapping.effectiveFrom);
+  const effectiveTo = normalized(mapping.effectiveTo);
+  return Boolean(date)
+    && (!effectiveFrom || effectiveFrom <= date)
+    && (!effectiveTo || effectiveTo >= date);
+}
+
 function toSource(fact, text, itemIndex) {
   const factRecordId = normalized(fact.recordId);
   return {
@@ -154,19 +166,40 @@ function matchesTopics(text, rule) {
 function findMemberMappings(fact, mappings) {
   const memberOpenId = normalized(fact.memberOpenId);
   if (memberOpenId) {
-    return mappings.filter(mapping => normalized(mapping.memberOpenId) === memberOpenId);
+    const openIdMappings = mappings.filter(mapping => normalized(mapping.memberOpenId) === memberOpenId);
+    const contactRecordIds = new Set(openIdMappings.flatMap(mapping => toTextArray(mapping.contactRecordIds)));
+    const openIdMappingSet = new Set(openIdMappings);
+    const expandedMappings = contactRecordIds.size
+      ? mappings.filter(mapping => (
+        openIdMappingSet.has(mapping) || hasSharedContact(mapping, contactRecordIds)
+      ))
+      : openIdMappings;
+    return { mappings: expandedMappings };
   }
 
   const memberName = normalized(fact.memberName) || normalized(fact.reporterName);
-  if (!memberName) return [];
-  return mappings.filter(mapping => (
-    !normalized(mapping.memberOpenId) && normalized(mapping.memberName) === memberName
-  ));
+  if (!memberName) return { mappings: [] };
+  const nameMappings = mappings.filter(mapping => normalized(mapping.memberName) === memberName);
+  const canonicalMembers = new Set(nameMappings.map(canonicalMemberIdentity));
+  if (canonicalMembers.size > 1) return { mappings: [], diagnosticCode: 'ambiguous_member_name' };
+  return { mappings: nameMappings };
+}
+
+function hasSharedContact(mapping, contactRecordIds) {
+  return toTextArray(mapping.contactRecordIds).some(contactRecordId => contactRecordIds.has(contactRecordId));
+}
+
+function canonicalMemberIdentity(mapping) {
+  const contactRecordIds = [...new Set(toTextArray(mapping.contactRecordIds))].sort();
+  if (contactRecordIds.length) return `contact:${contactRecordIds.join('|')}`;
+  const memberOpenId = normalized(mapping.memberOpenId);
+  if (memberOpenId) return `openId:${memberOpenId}`;
+  return `name:${normalized(mapping.memberName)}`;
 }
 
 function isRoutineMeetingWithoutOutcome(text) {
   const meeting = /(会议|例会|沟通|讨论|汇报)/.test(text);
-  const outcome = /(完成|形成|输出|解决|上线|发布|通过|确认|落地|交付|提交|签署|制定|达成|发现)/.test(text);
+  const outcome = /(形成结论|形成方案|确认方案|输出成果|输出报告|评审通过|解决问题|上线|发布|落地|交付|提交|签署|制定|达成)/.test(text);
   return meeting && !outcome;
 }
 
