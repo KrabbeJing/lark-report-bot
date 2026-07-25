@@ -13,12 +13,15 @@ export function routeWeeklyFacts({
   const bucketsByKey = new Map();
   const evidence = {};
   const diagnostics = [];
+  const periodComponents = buildMappingIdentityComponents(
+    mappings.filter(mapping => isMappingRelevantToPeriod(mapping, period)),
+  );
   const resolvedFacts = facts
     .filter(fact => isEligibleFact(fact, period))
     .sort(compareFacts)
     .map(fact => {
-      const activeMappings = mappings.filter(mapping => isMappingActiveOn(mapping, fact.reportDate));
-      const memberResolution = findMemberMappings(fact, activeMappings);
+      const activeComponents = activeComponentViews(periodComponents, fact.reportDate);
+      const memberResolution = findMemberMappings(fact, activeComponents);
       return {
         fact,
         memberResolution,
@@ -152,6 +155,16 @@ function isMappingActiveOn(mapping, reportDate) {
     && (!effectiveTo || effectiveTo >= date);
 }
 
+function isMappingRelevantToPeriod(mapping, period) {
+  const periodStart = normalized(period.start);
+  const periodEnd = normalized(period.end);
+  const effectiveFrom = normalized(mapping.effectiveFrom);
+  const effectiveTo = normalized(mapping.effectiveTo);
+  return Boolean(periodStart && periodEnd)
+    && (!effectiveTo || effectiveTo >= periodStart)
+    && (!effectiveFrom || effectiveFrom <= periodEnd);
+}
+
 function toSource(fact, text, itemIndex) {
   const factRecordId = normalized(fact.recordId);
   return {
@@ -176,12 +189,18 @@ function matchesTopics(text, rule) {
   return toTopicArray(rule.includeTopics).some(topic => includesNormalized(text, topic));
 }
 
-function findMemberMappings(fact, mappings) {
-  const components = buildMappingIdentityComponents(mappings);
+function findMemberMappings(fact, components) {
   const memberOpenId = normalized(fact.memberOpenId);
   if (memberOpenId) {
-    const matchingComponents = components.filter(component => component.openIds.includes(memberOpenId));
-    if (matchingComponents.length > 1) return emptyResolution('ambiguous_member_open_id');
+    const matchingComponents = components.filter(component => component.activeOpenIds.includes(memberOpenId));
+    if (matchingComponents.length > 1) {
+      const memberName = normalized(fact.memberName) || normalized(fact.reporterName);
+      const nameMatches = matchingComponents.filter(component => (
+        memberName && component.mappings.some(mapping => normalized(mapping.memberName) === memberName)
+      ));
+      if (nameMatches.length === 1) return nameMatches[0];
+      return emptyResolution('ambiguous_member_open_id');
+    }
     return matchingComponents[0] || emptyResolution();
   }
 
@@ -192,6 +211,22 @@ function findMemberMappings(fact, mappings) {
   ));
   if (matchingComponents.length > 1) return emptyResolution('ambiguous_member_name');
   return matchingComponents[0] || emptyResolution();
+}
+
+function activeComponentViews(components, reportDate) {
+  return components
+    .map(component => {
+      const mappings = component.mappings.filter(mapping => isMappingActiveOn(mapping, reportDate));
+      return {
+        ...component,
+        mappings,
+        activeOpenIds: [...new Set(mappings
+          .map(mapping => normalized(mapping.memberOpenId))
+          .filter(Boolean))]
+          .sort(),
+      };
+    })
+    .filter(component => component.mappings.length);
 }
 
 function emptyResolution(diagnosticCode = '') {

@@ -632,6 +632,111 @@ test('uses only valid in-period facts and only current work items', () => {
   assert.deepEqual(result.diagnostics, []);
 });
 
+test('keeps a scoped identity component stable after its explicit contact rows expire', () => {
+  const facts = [
+    fact({
+      recordId: 'rec_monday_name',
+      reportDate: '2026-07-20',
+      memberOpenId: '',
+      memberName: '甲',
+      reporterName: '甲',
+      workItems: ['周一完成收单接口联调'],
+    }),
+    fact({
+      recordId: 'rec_tuesday_open_id',
+      reportDate: '2026-07-21',
+      memberOpenId: 'ou_test',
+      memberName: '甲',
+      reporterName: '甲',
+      workItems: ['周二完成收单接口联调'],
+    }),
+  ];
+  const input = {
+    mappings: [
+      mapping({
+        recordId: 'rec_mapping_a',
+        contactRecordIds: ['rec_contact_a'],
+        memberOpenId: 'ou_test',
+        memberName: '甲',
+        effectiveFrom: '2026-07-20',
+        effectiveTo: '2026-07-20',
+        module3Target: '',
+      }),
+      mapping({
+        recordId: 'rec_mapping_b',
+        contactRecordIds: ['rec_contact_b'],
+        memberOpenId: 'ou_test',
+        memberName: '乙',
+        effectiveFrom: '2026-07-20',
+        effectiveTo: '2026-07-20',
+        module3Target: '',
+      }),
+      mapping({
+        recordId: 'rec_mapping_a_contactless',
+        contactRecordIds: [],
+        memberOpenId: 'ou_test',
+        memberName: '甲',
+        effectiveFrom: '2026-07-20',
+        effectiveTo: '2026-07-23',
+        module3Target: '',
+      }),
+    ],
+    rules: [rule('模块二', '收单项目组', ['收单'])],
+    cellMap,
+    period,
+  };
+
+  const forward = routeWeeklyFacts({ ...input, facts });
+  const reversed = routeWeeklyFacts({ ...input, facts: [...facts].reverse() });
+
+  assert.deepEqual(forward, reversed);
+  assert.deepEqual(forward.buckets, []);
+  assert.deepEqual(forward.evidence, {});
+  assert.deepEqual(forward.diagnostics.map(item => [item.evidenceId, item.code]), [
+    ['rec_monday_name:current:workItems:0', 'duplicate_active_mapping'],
+    ['rec_tuesday_open_id:current:workItems:0', 'duplicate_active_mapping'],
+  ]);
+});
+
+test('counts duplicate mappings from the fact date, not every row in a stable component', () => {
+  const result = routeWeeklyFacts({
+    facts: [
+      fact({
+        recordId: 'rec_historic',
+        reportDate: '2026-07-20',
+        workItems: ['历史收单接口联调'],
+      }),
+      fact({
+        recordId: 'rec_current',
+        reportDate: '2026-07-21',
+        workItems: ['当前收单接口联调'],
+      }),
+    ],
+    mappings: [
+      mapping({
+        recordId: 'rec_mapping_historic',
+        contactRecordIds: ['rec_contact_a'],
+        effectiveFrom: '2026-07-20',
+        effectiveTo: '2026-07-20',
+        module3Target: '',
+      }),
+      mapping({
+        recordId: 'rec_mapping_current',
+        contactRecordIds: ['rec_contact_a'],
+        effectiveFrom: '2026-07-21',
+        effectiveTo: '2026-07-23',
+        module3Target: '',
+      }),
+    ],
+    rules: [rule('模块二', '收单项目组', ['收单'])],
+    cellMap,
+    period,
+  });
+
+  assert.deepEqual(texts(result, '收单项目组'), ['历史收单接口联调', '当前收单接口联调']);
+  assert.deepEqual(result.diagnostics, []);
+});
+
 test('returns empty routing naturally when facts are empty', () => {
   assert.deepEqual(routeWeeklyFacts({ facts: [], mappings: [], rules: [], cellMap, period }), {
     buckets: [],
