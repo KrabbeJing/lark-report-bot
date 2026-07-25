@@ -5,21 +5,41 @@ import { OpenAICompatibleProvider } from '../src/ai-providers.js';
 function previewInput() {
   return {
     group: { project: '数字金融部' },
-    reports: [{
+    target: {
+      module: 'module2',
+      target: '收单项目组',
+      contentType: '本周重点事项说明',
+      cells: ['D30'],
+    },
+    evidence: [{
       evidenceId: 'rec_1:current:workItems:0',
       factRecordId: 'rec_1',
-      category: 'current',
-      sourceField: 'workItems',
-      itemIndex: 0,
+      date: '2026-07-13',
+      text: '完成收单联调',
+    }],
+    styleExamples: [
+      { module: 'module2', target: '收单项目组', contentType: '本周重点事项说明', finalText: '完成接口联调并进入试运行。' },
+      { module: 'module2', target: '收单项目组', contentType: '本周重点事项说明', finalText: '完成交易链路验证。' },
+      { module: 'module2', target: '收单项目组', contentType: '本周重点事项说明', finalText: '完成阶段性功能交付。' },
+    ],
+    reports: [{
       reportDate: '2026-07-13',
       reporterName: '张三',
+      project: '历史收单项目',
+      agileGroup: '收单项目组',
       workItems: ['完成收单联调'],
       tomorrowPlanItems: [],
       riskItems: [],
     }],
     weekStart: '2026-07-13',
     weekEnd: '2026-07-17',
-    cellMap: { reportPeriod: 'B2' },
+    cellMap: {
+      reportPeriod: 'B2',
+      agileProjects: {
+        收单项目组: { current: 'D30', next: 'D31' },
+      },
+      management: {},
+    },
   };
 }
 
@@ -129,7 +149,7 @@ test('plain weekly report summary does not request JSON mode', async () => {
   assert.equal(Object.hasOwn(body, 'response_format'), false);
 });
 
-test('strict preview prompt describes targets and sends compact evidence items', async () => {
+test('strict preview prompt is target-scoped, style-guided, current-only, and anonymous by default', async () => {
   const originalFetch = globalThis.fetch;
   let prompt = '';
   globalThis.fetch = async (_url, request) => {
@@ -141,33 +161,25 @@ test('strict preview prompt describes targets and sends compact evidence items',
   };
 
   try {
-    await configuredProvider().generateWeeklySheetPreview({
-      ...previewInput(),
-      cellMap: {
-        agileProjects: {
-          收单项目组: { current: 'D30', next: 'D31' },
-        },
-      },
-    });
+    await configuredProvider().generateWeeklySheetPreview(previewInput());
   } finally {
     globalThis.fetch = originalFetch;
   }
 
   assert.match(prompt, /模块二\/收单项目组\/本周重点事项说明 -> D30/);
-  assert.match(prompt, /模块二\/收单项目组\/下周工作计划 -> D31/);
-  assert.match(prompt, /单元格含义/);
+  assert.match(prompt, /完成接口联调并进入试运行/);
+  assert.match(prompt, /完成交易链路验证/);
+  assert.match(prompt, /完成阶段性功能交付/);
   assert.match(prompt, /"evidenceId":\s*"rec_1:current:workItems:0"/);
   assert.match(prompt, /"date":\s*"2026-07-13"/);
-  assert.match(prompt, /"member":\s*"张三"/);
-  assert.match(prompt, /"category":\s*"current"/);
-  assert.match(prompt, /"kind":\s*"workItems"/);
   assert.match(prompt, /"text":\s*"完成收单联调"/);
-  assert.match(prompt, /evidenceId 可作为 evidenceIds/);
+  assert.match(prompt, /只总结本周期事实/);
+  assert.match(prompt, /不得生成下周计划/);
+  assert.match(prompt, /不得添加来源中不存在的项目、数字、日期、状态或责任人/);
+  assert.match(prompt, /历史样例只用于风格，不是事实/);
+  assert.match(prompt, /没有足够证据时返回空数组/);
   assert.doesNotMatch(prompt, /factRecordId/);
-  assert.doesNotMatch(prompt, /itemIndex/);
-  assert.doesNotMatch(prompt, /"workItems"\s*:/);
-  assert.doesNotMatch(prompt, /"tomorrowPlanItems"\s*:/);
-  assert.doesNotMatch(prompt, /"riskItems"\s*:/);
+  assert.doesNotMatch(prompt, /张三|tomorrowPlanItems|riskItems|下周工作计划|D31/);
 });
 
 test('strict preview rejects HTTP failures without leaking key or response body', async () => {
@@ -238,7 +250,7 @@ test('strict preview converts AbortError into the same safe timeout error', asyn
   }
 });
 
-test('legacy weekly summaries fall back to templates on timeout and AbortError', async () => {
+test('legacy weekly summaries do not restore broad weekly sheet routing on timeout', async () => {
   const originalFetch = globalThis.fetch;
   const input = {
     group: { project: '数字金融部', chatId: 'oc_test' },
@@ -272,7 +284,8 @@ test('legacy weekly summaries fall back to templates on timeout and AbortError',
     assert.equal(summary.reportCount, 1);
     assert.match(summary.summaryText, /完成收单联调/);
     assert.equal(sheet.values.B2, '2026.07.13-2026.07.17');
-    assert.match(sheet.values.D30, /完成收单联调/);
+    assert.equal(sheet.values.D30, '');
+    assert.equal(sheet.values.D31, undefined);
     assert.equal(summary.provider, undefined);
     assert.equal(sheet.provider, undefined);
   } finally {
@@ -326,15 +339,21 @@ test('strict preview converts a response body AbortError into a safe timeout err
 
 test('strict preview rejects empty and invalid JSON responses', async () => {
   const originalFetch = globalThis.fetch;
-  const contents = ['', 'not JSON'];
+  const contents = [
+    '',
+    'not JSON',
+    '```json\n{"cells":{}}\n```',
+    'prefix {"cells":{}} suffix',
+  ];
   globalThis.fetch = async () => ({
     ok: true,
     json: async () => ({ choices: [{ message: { content: contents.shift() } }] }),
   });
 
   try {
-    await assert.rejects(configuredProvider().generateWeeklySheetPreview(previewInput()), /invalid JSON/);
-    await assert.rejects(configuredProvider().generateWeeklySheetPreview(previewInput()), /invalid JSON/);
+    for (let index = 0; index < 4; index += 1) {
+      await assert.rejects(configuredProvider().generateWeeklySheetPreview(previewInput()), /invalid JSON/);
+    }
   } finally {
     globalThis.fetch = originalFetch;
   }

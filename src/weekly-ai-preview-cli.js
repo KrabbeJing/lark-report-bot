@@ -76,7 +76,26 @@ function sanitizePreviewResult(result) {
     warnings: Array.isArray(result.warnings)
       ? result.warnings.map(sanitizeWarning)
       : result.warnings,
+    diagnostics: sanitizeDiagnostic(result.diagnostics),
+    groups: Array.isArray(result.groups)
+      ? result.groups.map(group => ({
+        ...group,
+        warnings: Array.isArray(group?.warnings)
+          ? group.warnings.map(sanitizeWarning)
+          : group?.warnings,
+        diagnostics: sanitizeDiagnostic(group?.diagnostics),
+      }))
+      : result.groups,
   };
+}
+
+function sanitizeDiagnostic(value) {
+  if (typeof value === 'string') return sanitizeWarning(value);
+  if (Array.isArray(value)) return value.map(sanitizeDiagnostic);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [key, sanitizeDiagnostic(item)]),
+  );
 }
 
 function sanitizeWarning(value) {

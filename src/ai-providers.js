@@ -131,7 +131,7 @@ export class OpenAICompatibleProvider {
     let res;
     try {
       res = await this.requestChatCompletion({
-        system: '你是企业周报助手。只能使用提供的事实事项，只输出合法 JSON。',
+        system: '你是企业周报助手。只能使用当前目标的本周期事实，只输出严格 JSON，不显示成员姓名。',
         user: buildWeeklyPreviewPrompt(input),
         jsonMode: true,
       });
@@ -158,7 +158,7 @@ export class OpenAICompatibleProvider {
     if (typeof content !== 'string') {
       throw new Error('AI preview returned invalid JSON');
     }
-    const parsed = parseJsonObject(content.trim());
+    const parsed = parseStrictJsonObject(content);
     if (!parsed || !parsed.cells || typeof parsed.cells !== 'object' || Array.isArray(parsed.cells)) {
       throw new Error('AI preview returned invalid JSON');
     }
@@ -257,30 +257,53 @@ function buildWeeklySheetPrompt(input, fallbackValues) {
 }
 
 function buildWeeklyPreviewPrompt(input) {
-  const cells = getWeeklySheetExpectedCells(input.cellMap);
-  const targetDescriptions = describeWeeklySheetTargets(input.cellMap);
-  const reports = input.reports.map(report => ({
-    evidenceId: report.evidenceId,
-    date: report.reportDate,
-    member: report.reporterName,
-    category: report.category,
-    kind: report.sourceField,
-    text: report[report.sourceField]?.[0] ?? '',
+  const target = input.target || {};
+  const cells = toCellArray(target.cells);
+  const evidence = (input.evidence || []).map(item => ({
+    evidenceId: item.evidenceId,
+    date: item.date,
+    text: item.text,
+  }));
+  const styleExamples = (input.styleExamples || []).map(item => ({
+    module: item.module,
+    target: item.target,
+    contentType: item.contentType,
+    finalText: item.finalText,
   }));
   const exampleCells = Object.fromEntries(cells.map(cell => [cell, [{ text: '', evidenceIds: [] }]]));
   return [
     `周期：${input.weekStart} 至 ${input.weekEnd}`,
+    `目标：${describePreviewTarget(target)} -> ${cells.join(', ')}`,
     `可填写的单元格：${cells.join(', ')}`,
     '',
-    '单元格含义：',
-    ...targetDescriptions,
+    '当前目标的本周期事实（仅这些 evidenceId 可作为 evidenceIds）：',
+    JSON.stringify(evidence, null, 2),
     '',
-    '日报事实（每项的 evidenceId 可作为 evidenceIds）：',
-    JSON.stringify(reports),
+    '当前目标的最终历史样例：',
+    JSON.stringify(styleExamples, null, 2),
     '',
     `请只输出 JSON，格式为：${JSON.stringify({ cells: exampleCells })}。`,
-    '每个 cells 单元格值必须是数组；数组每项包含 text 字符串和 evidenceIds 字符串数组。只可引用提供的 evidenceId，不得编造事实。',
+    '每个 cells 单元格值必须是数组；数组每项只包含 text 字符串和 evidenceIds 字符串数组。',
+    '只总结本周期事实。',
+    '不得生成下周计划。',
+    '不得添加来源中不存在的项目、数字、日期、状态或责任人。',
+    '不得输出风险、姓名或日报覆盖率。',
+    '历史样例只用于风格，不是事实。',
+    '没有足够证据时返回空数组。',
+    '每条输出必须引用至少一个当前目标事实的 evidenceId。',
+    target.module === 'module3'
+      ? '模块三最多使用三个当前单元格，每个单元格最多一条。'
+      : '模块二使用当前目标单元格，可在数组中输出多条。',
   ].join('\n');
+}
+
+function describePreviewTarget(target) {
+  const moduleLabel = target.module === 'module2'
+    ? '模块二'
+    : target.module === 'module3'
+      ? '模块三'
+      : String(target.module || '');
+  return `${moduleLabel}/${target.target || ''}/${target.contentType || ''}`;
 }
 
 function describeWeeklySheetTargets(cellMap = {}) {
@@ -298,6 +321,13 @@ function describeWeeklySheetTargets(cellMap = {}) {
 
 function toCellList(value) {
   return (Array.isArray(value) ? value : [value]).filter(Boolean).join(', ');
+}
+
+function toCellArray(value) {
+  return (Array.isArray(value) ? value : [value])
+    .filter(Boolean)
+    .map(item => String(item).trim())
+    .filter(Boolean);
 }
 
 function sanitizeCellValues(values, cellMap) {
@@ -340,6 +370,16 @@ function parseJsonObject(content) {
   if (!match) return null;
   try {
     return JSON.parse(match[0]);
+  } catch {
+    return null;
+  }
+}
+
+function parseStrictJsonObject(content) {
+  if (typeof content !== 'string' || !content.trim()) return null;
+  try {
+    const parsed = JSON.parse(content);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
   } catch {
     return null;
   }
