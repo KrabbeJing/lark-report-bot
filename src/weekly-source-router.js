@@ -1,8 +1,12 @@
 const VALID_FACT_STATUS = '有效';
 const MODULE_TWO = 'module2';
 const MODULE_THREE = 'module3';
-const MEETING_WORDS = /会议|例会|项目会|沟通会?|讨论会?|汇报会?/;
+const MEETING_WORDS = /会议|例会|项目会|评审会|周会|协调会|座谈会|碰头会|沟通会?|讨论会?|汇报会?/;
+const MEETING_BOUNDARY_WORDS = /会议|例会|项目会|评审会|周会|协调会|座谈会|碰头会|沟通会|讨论会|汇报会/;
 const COMPLETION_MARKERS = ['已', '已经', '成功', '最终', '会后'];
+const OUTCOME_NEGATIONS = /尚未|未能|没有|未/;
+const OUTCOME_INTENT_MARKERS = /议题|讨论|沟通|汇报|协调|研究|交流|拟|计划|待|需要|需|是否|准备/;
+const OUTCOME_CONNECTORS = ['并', '最终', '后'];
 const MEETING_OUTCOME_PATTERNS = [
   /形成(?:结论|方案|报告|成果|共识)/,
   /输出(?:成果|报告|方案)/,
@@ -364,9 +368,45 @@ function isRoutineMeetingWithoutOutcome(text) {
 function hasMeetingOutcome(text, meetingIndex) {
   return MEETING_OUTCOME_PATTERNS
     .flatMap(pattern => matchIndexes(text, pattern))
-    .some(outcomeIndex => (
-      outcomeIndex > meetingIndex || hasCompletionMarkerBefore(text, outcomeIndex)
-    ));
+    .some(outcomeIndex => isSupportedMeetingOutcome(text, meetingIndex, outcomeIndex));
+}
+
+function isSupportedMeetingOutcome(text, meetingIndex, outcomeIndex) {
+  const context = outcomeContext(text, outcomeIndex);
+  if (OUTCOME_NEGATIONS.test(context)) return false;
+  if (OUTCOME_INTENT_MARKERS.test(context) && !hasOutcomeConnector(context)) return false;
+  return outcomeIndex > meetingIndex || hasExplicitCompletionMarker(text, outcomeIndex);
+}
+
+function outcomeContext(text, outcomeIndex) {
+  const beforeOutcome = text.slice(0, outcomeIndex);
+  const boundary = Math.max(
+    findLatestMatchEnd(beforeOutcome, MEETING_BOUNDARY_WORDS),
+    findLatestPunctuationEnd(beforeOutcome),
+  );
+  return beforeOutcome.slice(boundary);
+}
+
+function findLatestMatchEnd(text, pattern) {
+  let latestEnd = 0;
+  let startIndex = 0;
+  while (startIndex < text.length) {
+    const match = text.slice(startIndex).match(pattern);
+    if (!match) break;
+    latestEnd = startIndex + match.index + match[0].length;
+    startIndex = latestEnd;
+  }
+  return latestEnd;
+}
+
+function findLatestPunctuationEnd(text) {
+  const punctuationIndex = Math.max(...['，', '。', '；', ';', '：', ':']
+    .map(punctuation => text.lastIndexOf(punctuation)));
+  return punctuationIndex + 1;
+}
+
+function hasOutcomeConnector(context) {
+  return OUTCOME_CONNECTORS.some(connector => context.endsWith(connector));
 }
 
 function matchIndexes(text, pattern) {
@@ -385,6 +425,11 @@ function matchIndexes(text, pattern) {
 function hasCompletionMarkerBefore(text, outcomeIndex) {
   const beforeOutcome = text.slice(0, outcomeIndex);
   return COMPLETION_MARKERS.some(marker => beforeOutcome.endsWith(marker));
+}
+
+function hasExplicitCompletionMarker(text, outcomeIndex) {
+  return hasCompletionMarkerBefore(text, outcomeIndex)
+    || COMPLETION_MARKERS.some(marker => text.startsWith(marker, outcomeIndex));
 }
 
 function moduleKey(value) {
