@@ -592,6 +592,22 @@ test('does not treat completion of a routine meeting as a work outcome', () => {
   assert.deepEqual(diagnosticCodes(result), ['routine_meeting_without_result']);
 });
 
+test('does not treat meeting subjects as completed outcomes', () => {
+  const result = routeWeeklyFacts({
+    facts: [fact({ workItems: ['参加收单上线方案讨论会', '参加发布计划沟通会'] })],
+    mappings: [mapping({ module3Target: '' })],
+    rules: [rule('模块二', '收单项目组', ['收单', '发布'])],
+    cellMap,
+    period,
+  });
+
+  assert.deepEqual(result.buckets, []);
+  assert.deepEqual(diagnosticCodes(result), [
+    'routine_meeting_without_result',
+    'routine_meeting_without_result',
+  ]);
+});
+
 test('allows routine meetings only when they state an observable outcome', () => {
   const result = routeWeeklyFacts({
     facts: [fact({ workItems: [
@@ -599,6 +615,8 @@ test('allows routine meetings only when they state an observable outcome', () =>
       '收单例会确认方案',
       '收单例会输出成果',
       '收单例会评审通过',
+      '收单讨论会确认上线方案',
+      '收单项目会后已上线',
     ] })],
     mappings: [mapping({ module3Target: '' })],
     rules: [rule('模块二', '收单项目组', ['收单'])],
@@ -611,6 +629,8 @@ test('allows routine meetings only when they state an observable outcome', () =>
     '收单例会确认方案',
     '收单例会输出成果',
     '收单例会评审通过',
+    '收单讨论会确认上线方案',
+    '收单项目会后已上线',
   ]);
 });
 

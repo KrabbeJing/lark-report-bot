@@ -343,7 +343,7 @@ function componentAliasKeys(nodes, scopedOpenIds) {
 
 function isRoutineMeetingWithoutOutcome(text) {
   const meeting = /(会议|例会|沟通|讨论|汇报)/.test(text);
-  const outcome = /(形成结论|形成方案|确认方案|输出成果|输出报告|评审通过|解决问题|上线|发布|落地|交付|提交|签署|制定|达成)/.test(text);
+  const outcome = /(形成(?:结论|方案|报告|成果|共识)|输出(?:成果|报告|方案)|解决问题|(?:确认|明确|确定)[^，。；;]*?(?:方案|结论)|评审通过|达成(?:一致|共识)|签署协议|提交(?:成果|报告|材料)|制定(?:方案|计划)|(?:已|成功)(?:上线|发布|落地|交付)|(?:上线|发布|落地|交付)(?:完成|成功))/.test(text);
   return meeting && !outcome;
 }
 
