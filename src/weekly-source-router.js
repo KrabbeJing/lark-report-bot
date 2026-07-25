@@ -1,6 +1,21 @@
 const VALID_FACT_STATUS = '有效';
 const MODULE_TWO = 'module2';
 const MODULE_THREE = 'module3';
+const MEETING_WORDS = /会议|例会|项目会|沟通会?|讨论会?|汇报会?/;
+const COMPLETION_MARKERS = ['已', '已经', '成功', '最终', '会后'];
+const MEETING_OUTCOME_PATTERNS = [
+  /形成(?:结论|方案|报告|成果|共识)/,
+  /输出(?:成果|报告|方案)/,
+  /解决问题/,
+  /(?:确认|明确|确定)[^，。；;]*?(?:方案|结论)/,
+  /签署协议/,
+  /提交(?:成果|报告|材料)/,
+  /制定(?:方案|计划)/,
+  /达成(?:一致|共识)/,
+  /评审通过/,
+  /(?:已|已经|成功|最终|会后)(?:上线|发布|落地|交付)/,
+  /(?:上线|发布|落地|交付)(?:完成|成功)/,
+];
 
 export function routeWeeklyFacts({
   facts = [],
@@ -342,9 +357,34 @@ function componentAliasKeys(nodes, scopedOpenIds) {
 }
 
 function isRoutineMeetingWithoutOutcome(text) {
-  const meeting = /(会议|例会|沟通|讨论|汇报)/.test(text);
-  const outcome = /(形成(?:结论|方案|报告|成果|共识)|输出(?:成果|报告|方案)|解决问题|(?:确认|明确|确定)[^，。；;]*?(?:方案|结论)|评审通过|达成(?:一致|共识)|签署协议|提交(?:成果|报告|材料)|制定(?:方案|计划)|(?:已|成功)(?:上线|发布|落地|交付)|(?:上线|发布|落地|交付)(?:完成|成功))/.test(text);
-  return meeting && !outcome;
+  const meetingIndex = text.search(MEETING_WORDS);
+  return meetingIndex >= 0 && !hasMeetingOutcome(text, meetingIndex);
+}
+
+function hasMeetingOutcome(text, meetingIndex) {
+  return MEETING_OUTCOME_PATTERNS
+    .flatMap(pattern => matchIndexes(text, pattern))
+    .some(outcomeIndex => (
+      outcomeIndex > meetingIndex || hasCompletionMarkerBefore(text, outcomeIndex)
+    ));
+}
+
+function matchIndexes(text, pattern) {
+  const indexes = [];
+  let startIndex = 0;
+  while (startIndex < text.length) {
+    const relativeIndex = text.slice(startIndex).search(pattern);
+    if (relativeIndex < 0) break;
+    const index = startIndex + relativeIndex;
+    indexes.push(index);
+    startIndex = index + 1;
+  }
+  return indexes;
+}
+
+function hasCompletionMarkerBefore(text, outcomeIndex) {
+  const beforeOutcome = text.slice(0, outcomeIndex);
+  return COMPLETION_MARKERS.some(marker => beforeOutcome.endsWith(marker));
 }
 
 function moduleKey(value) {

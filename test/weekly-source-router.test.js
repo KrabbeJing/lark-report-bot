@@ -608,6 +608,62 @@ test('does not treat meeting subjects as completed outcomes', () => {
   ]);
 });
 
+test('does not treat pre-meeting action phrases as completed outcomes', () => {
+  const result = routeWeeklyFacts({
+    facts: [fact({ workItems: [
+      '参加收单确认方案沟通会',
+      '参加收单签署协议讨论会',
+      '参加收单提交材料沟通会',
+      '参加收单制定方案讨论会',
+    ] })],
+    mappings: [mapping({ module3Target: '' })],
+    rules: [rule('模块二', '收单项目组', ['收单'])],
+    cellMap,
+    period,
+  });
+
+  assert.deepEqual(result.buckets, []);
+  assert.deepEqual(diagnosticCodes(result), [
+    'routine_meeting_without_result',
+    'routine_meeting_without_result',
+    'routine_meeting_without_result',
+    'routine_meeting_without_result',
+  ]);
+});
+
+test('requires a completion marker to be adjacent to a pre-meeting outcome', () => {
+  const rejected = routeWeeklyFacts({
+    facts: [fact({ workItems: [
+      '已参加收单确认方案沟通会',
+      '已经参加收单提交材料讨论会',
+    ] })],
+    mappings: [mapping({ module3Target: '' })],
+    rules: [rule('模块二', '收单项目组', ['收单'])],
+    cellMap,
+    period,
+  });
+  const accepted = routeWeeklyFacts({
+    facts: [fact({ workItems: [
+      '收单已确认方案后参加沟通会',
+      '收单成功签署协议后召开讨论会',
+    ] })],
+    mappings: [mapping({ module3Target: '' })],
+    rules: [rule('模块二', '收单项目组', ['收单'])],
+    cellMap,
+    period,
+  });
+
+  assert.deepEqual(rejected.buckets, []);
+  assert.deepEqual(diagnosticCodes(rejected), [
+    'routine_meeting_without_result',
+    'routine_meeting_without_result',
+  ]);
+  assert.deepEqual(texts(accepted, '收单项目组'), [
+    '收单已确认方案后参加沟通会',
+    '收单成功签署协议后召开讨论会',
+  ]);
+});
+
 test('allows routine meetings only when they state an observable outcome', () => {
   const result = routeWeeklyFacts({
     facts: [fact({ workItems: [
@@ -617,6 +673,10 @@ test('allows routine meetings only when they state an observable outcome', () =>
       '收单例会评审通过',
       '收单讨论会确认上线方案',
       '收单项目会后已上线',
+      '收单沟通会确认方案',
+      '收单讨论会签署协议',
+      '收单沟通会提交材料',
+      '收单讨论会制定方案',
     ] })],
     mappings: [mapping({ module3Target: '' })],
     rules: [rule('模块二', '收单项目组', ['收单'])],
@@ -631,6 +691,10 @@ test('allows routine meetings only when they state an observable outcome', () =>
     '收单例会评审通过',
     '收单讨论会确认上线方案',
     '收单项目会后已上线',
+    '收单沟通会确认方案',
+    '收单讨论会签署协议',
+    '收单沟通会提交材料',
+    '收单讨论会制定方案',
   ]);
 });
 
