@@ -3,9 +3,13 @@ const MODULE_TWO = 'module2';
 const MODULE_THREE = 'module3';
 const EXPLICIT_MEETING_WORDS = /会议|例会|项目会|评审会|周会|协调会|座谈会|碰头会|沟通会|讨论会|汇报会/;
 const BARE_PROCESS_MEETINGS = /沟通|讨论|汇报/;
-const MEETING_ACTION = /(?:参加|召开|组织|出席|列席|主持)[^\s，。；;:：、.]{1,12}?(?:会议|会)(?=$|[\s，。；;:：、.]|议题|计划|拟|准备|是否|待|需要|需|尚未|未能|没有|未|确认|提交|制定|形成|讨论|沟通|协调|研究|交流|汇报|围绕|开展)/;
+const MEETING_ACTIONS = /参加|召开|组织|出席|列席|主持/;
+const MEETING_CANDIDATE = /会议|会/;
+const ACTION_MEETING_MAX_LENGTH = 20;
+const ACTION_MEETING_DELIMITERS = ['，', '。', '；', ';', '：', ':', '、', '\n'];
+const NON_MEETING_WORDS = ['社会', '工会', '协会', '学会', '机会', '体会', '优惠', '不会', '将会', '都会', '可能会', '委员会'];
 const COMPLETION_MARKERS = ['已', '已经', '成功', '最终', '会后'];
-const STRONG_INTENT_OR_NEGATION = /尚未|未能|没有|未|议题|计划|拟|准备|是否|待|需要|需/;
+const STRONG_INTENT_OR_NEGATION = /尚未|未能|没有|未|议题|计划|拟|准备|是否|待|需要|需|针对|关于|重点|就/;
 const PROCESS_MARKERS = /讨论|沟通|协调|研究|交流|汇报|围绕|开展/;
 const OUTCOME_CONNECTORS = ['并', '后', '最终', '已', '已经', '成功', '会后'];
 const CLAUSE_DELIMITERS = ['。', '；', ';', '\n'];
@@ -368,14 +372,58 @@ function isRoutineMeetingWithoutOutcome(text) {
 }
 
 function findMeeting(text) {
+  const actionMeeting = findActionMeeting(text);
   const meetings = [
-    ...findMatches(text, EXPLICIT_MEETING_WORDS).map(match => ({ ...match, isProcess: false })),
-    ...findMatches(text, BARE_PROCESS_MEETINGS).map(match => ({ ...match, isProcess: true })),
-    ...findMatches(text, MEETING_ACTION).map(match => ({ ...match, isProcess: false })),
+    ...findMatches(text, EXPLICIT_MEETING_WORDS)
+      .filter(match => !isNonMeetingCandidate(text, match))
+      .map(match => ({ ...match, isProcess: false })),
+    ...findMatches(text, BARE_PROCESS_MEETINGS)
+      .filter(match => !isProcessAfterNonMeetingWord(text, match))
+      .map(match => ({ ...match, isProcess: true })),
+    ...(actionMeeting ? [actionMeeting] : []),
   ];
   return meetings.sort((left, right) => (
     left.index - right.index || right.length - left.length
   ))[0] || null;
+}
+
+function findActionMeeting(text) {
+  for (const action of findMatches(text, MEETING_ACTIONS)) {
+    const actionEnd = action.index + action.length;
+    const searchEnd = actionMeetingSearchEnd(text, actionEnd);
+    const candidates = findMatches(text.slice(actionEnd, searchEnd), MEETING_CANDIDATE);
+    for (const candidate of candidates) {
+      const meeting = { index: actionEnd + candidate.index, length: candidate.length, isProcess: false };
+      if (!isNonMeetingCandidate(text, meeting)) return meeting;
+    }
+  }
+  return null;
+}
+
+function actionMeetingSearchEnd(text, actionEnd) {
+  const delimiterIndexes = ACTION_MEETING_DELIMITERS
+    .map(delimiter => text.indexOf(delimiter, actionEnd))
+    .filter(index => index >= 0);
+  const clauseEnd = delimiterIndexes.length ? Math.min(...delimiterIndexes) : text.length;
+  return Math.min(clauseEnd, actionEnd + ACTION_MEETING_MAX_LENGTH);
+}
+
+function isNonMeetingCandidate(text, meeting) {
+  return NON_MEETING_WORDS.some(word => {
+    const wordIndex = text.lastIndexOf(word, meeting.index);
+    return wordIndex >= 0 && meeting.index < wordIndex + word.length;
+  });
+}
+
+function isProcessAfterNonMeetingWord(text, process) {
+  return findMatches(text, MEETING_ACTIONS).some(action => {
+    const actionEnd = action.index + action.length;
+    if (process.index < actionEnd || process.index >= actionMeetingSearchEnd(text, actionEnd)) return false;
+    return NON_MEETING_WORDS.some(word => {
+      const wordIndex = text.lastIndexOf(word, process.index);
+      return wordIndex >= actionEnd && wordIndex + word.length <= process.index;
+    });
+  });
 }
 
 function hasMeetingOutcome(text, meeting) {

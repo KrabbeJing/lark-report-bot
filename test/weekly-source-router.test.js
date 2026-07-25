@@ -781,6 +781,38 @@ test('rejects generalized meeting names and trailing process context', () => {
   assert.deepEqual(diagnosticCodes(result), Array(8).fill('routine_meeting_without_result'));
 });
 
+test('finds action-led meetings beyond non-meeting words and ordinary body text', () => {
+  const meetings = routeWeeklyFacts({
+    facts: [fact({ workItems: [
+      '参加收单专题会针对确认方案',
+      '参加收单研讨会就提交材料交换意见',
+      '主持收单启动会关于制定方案',
+      '组织收单复盘会重点确认方案',
+      '参加工会会议讨论收单方案',
+    ] })],
+    mappings: [mapping({ module3Target: '' })],
+    rules: [rule('模块二', '收单项目组', ['收单'])],
+    cellMap,
+    period,
+  });
+  const social = routeWeeklyFacts({
+    facts: [fact({ workItems: [
+      '参加社会交流活动',
+      '组织社会沟通活动',
+      '参加社会议题调研',
+    ] })],
+    mappings: [mapping({ module3Target: '' })],
+    rules: [rule('模块二', '收单项目组', ['收单'])],
+    cellMap,
+    period,
+  });
+
+  assert.deepEqual(meetings.buckets, []);
+  assert.deepEqual(diagnosticCodes(meetings), Array(5).fill('routine_meeting_without_result'));
+  assert.deepEqual(social.buckets, []);
+  assert.deepEqual(diagnosticCodes(social), Array(3).fill('no_topic_match'));
+});
+
 test('allows routine meetings only when they state an observable outcome', () => {
   const result = routeWeeklyFacts({
     facts: [fact({ workItems: [
