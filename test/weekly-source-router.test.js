@@ -144,6 +144,106 @@ test('uses only mappings active on the fact date when ownership changed during t
   assert.deepEqual(result.diagnostics, []);
 });
 
+test('pauses a canonical member for the whole period after one fact date has duplicate mappings', () => {
+  const facts = [
+    fact({
+      recordId: 'rec_monday',
+      reportDate: '2026-07-20',
+      workItems: ['周一完成收单接口联调'],
+    }),
+    fact({
+      recordId: 'rec_tuesday',
+      reportDate: '2026-07-21',
+      workItems: ['周二完成收单接口联调'],
+    }),
+  ];
+  const input = {
+    mappings: [
+      mapping({ recordId: 'rec_mapping_monday', effectiveFrom: '2026-07-20', effectiveTo: '2026-07-20', module3Target: '' }),
+      mapping({ recordId: 'rec_mapping_current', effectiveFrom: '2026-07-20', effectiveTo: '2026-07-23', module3Target: '' }),
+    ],
+    rules: [rule('模块二', '收单项目组', ['收单'])],
+    cellMap,
+    period,
+  };
+
+  const forward = routeWeeklyFacts({ ...input, facts });
+  const reversed = routeWeeklyFacts({ ...input, facts: [...facts].reverse() });
+
+  assert.deepEqual(forward, reversed);
+  assert.deepEqual(forward.buckets, []);
+  assert.deepEqual(forward.evidence, {});
+  assert.deepEqual(diagnosticCodes(forward), ['duplicate_active_mapping', 'duplicate_active_mapping']);
+  assert.deepEqual(forward.diagnostics.map(item => item.evidenceId), [
+    'rec_monday:current:workItems:0',
+    'rec_tuesday:current:workItems:0',
+  ]);
+});
+
+test('propagates a period mapping pause from an OpenID fact to a same-contact name-resolved fact', () => {
+  const facts = [
+    fact({
+      recordId: 'rec_monday_open_id',
+      reportDate: '2026-07-20',
+      memberOpenId: 'ou_a',
+      memberName: '张三',
+      workItems: ['周一完成收单接口联调'],
+    }),
+    fact({
+      recordId: 'rec_tuesday_name',
+      reportDate: '2026-07-21',
+      memberOpenId: '',
+      memberName: '张三',
+      workItems: ['周二完成收单接口联调'],
+    }),
+  ];
+  const input = {
+    mappings: [
+      mapping({
+        recordId: 'rec_mapping_monday_a',
+        contactRecordIds: ['rec_contact_a'],
+        memberName: '张三',
+        effectiveFrom: '2026-07-20',
+        effectiveTo: '2026-07-20',
+        module3Target: '',
+      }),
+      mapping({
+        recordId: 'rec_mapping_monday_b',
+        contactRecordIds: ['rec_contact_a'],
+        memberOpenId: '',
+        memberName: '张三',
+        effectiveFrom: '2026-07-20',
+        effectiveTo: '2026-07-20',
+        module3Target: '',
+      }),
+      mapping({
+        recordId: 'rec_mapping_tuesday',
+        contactRecordIds: ['rec_contact_a'],
+        memberOpenId: 'ou_a',
+        memberName: '张三',
+        effectiveFrom: '2026-07-21',
+        effectiveTo: '2026-07-23',
+        module3Target: '',
+      }),
+    ],
+    rules: [rule('模块二', '收单项目组', ['收单'])],
+    cellMap,
+    period,
+  };
+
+  const forward = routeWeeklyFacts({ ...input, facts });
+  const reversed = routeWeeklyFacts({ ...input, facts: [...facts].reverse() });
+
+  assert.deepEqual(forward, reversed);
+  assert.deepEqual(forward.buckets, []);
+  assert.deepEqual(forward.evidence, {});
+  assert.deepEqual(diagnosticCodes(forward), ['duplicate_active_mapping', 'duplicate_active_mapping']);
+  assert.deepEqual(forward.diagnostics.map(item => item.evidenceId), [
+    'rec_monday_open_id:current:workItems:0',
+    'rec_tuesday_name:current:workItems:0',
+  ]);
+});
+
 test('pauses an OpenID fact when an active mapping with the same contact has an empty lookup OpenID', () => {
   const result = routeWeeklyFacts({
     facts: [fact({ workItems: ['完成收单接口联调', '完成云缴费对账'] })],

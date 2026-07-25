@@ -13,12 +13,23 @@ export function routeWeeklyFacts({
   const bucketsByKey = new Map();
   const evidence = {};
   const diagnostics = [];
+  const resolvedFacts = facts
+    .filter(fact => isEligibleFact(fact, period))
+    .sort(compareFacts)
+    .map(fact => {
+      const activeMappings = mappings.filter(mapping => isMappingActiveOn(mapping, fact.reportDate));
+      const memberResolution = findMemberMappings(fact, activeMappings);
+      return {
+        fact,
+        memberResolution,
+        memberKeys: canonicalMemberKeys(fact, memberResolution),
+      };
+    });
+  const blockedMemberKeys = new Set(resolvedFacts
+    .filter(({ memberResolution, memberKeys }) => memberKeys.length && memberResolution.mappings.length > 1)
+    .flatMap(({ memberKeys }) => memberKeys));
 
-  for (const fact of facts) {
-    if (!isEligibleFact(fact, period)) continue;
-    const activeMappings = mappings.filter(mapping => isMappingActiveOn(mapping, fact.reportDate));
-    const memberResolution = findMemberMappings(fact, activeMappings);
-
+  for (const { fact, memberResolution, memberKeys } of resolvedFacts) {
     for (const [itemIndex, rawText] of toTextArray(fact.workItems).entries()) {
       const source = toSource(fact, rawText, itemIndex);
       if (!source.text) continue;
@@ -29,6 +40,7 @@ export function routeWeeklyFacts({
         targetSpecs,
         bucketsByKey,
         evidence,
+        blocked: memberKeys.some(memberKey => blockedMemberKeys.has(memberKey)),
       });
       if (diagnostic) diagnostics.push(diagnostic);
     }
@@ -41,7 +53,8 @@ export function routeWeeklyFacts({
   };
 }
 
-function routeItem({ source, memberResolution, rules, targetSpecs, bucketsByKey, evidence }) {
+function routeItem({ source, memberResolution, rules, targetSpecs, bucketsByKey, evidence, blocked }) {
+  if (blocked) return diagnostic(source, 'duplicate_active_mapping');
   if (memberResolution.diagnosticCode) return diagnostic(source, memberResolution.diagnosticCode);
   const { mappings: memberMappings } = memberResolution;
   if (!memberMappings.length) return diagnostic(source, 'unmapped_member');
@@ -197,6 +210,14 @@ function canonicalMemberIdentity(mapping) {
   return `name:${normalized(mapping.memberName)}`;
 }
 
+function canonicalMemberKeys(fact, memberResolution) {
+  const keys = new Set();
+  const memberOpenId = normalized(fact.memberOpenId);
+  if (memberOpenId) keys.add(`openId:${memberOpenId}`);
+  for (const mapping of memberResolution.mappings) keys.add(canonicalMemberIdentity(mapping));
+  return [...keys].sort();
+}
+
 function isRoutineMeetingWithoutOutcome(text) {
   const meeting = /(会议|例会|沟通|讨论|汇报)/.test(text);
   const outcome = /(形成结论|形成方案|确认方案|输出成果|输出报告|评审通过|解决问题|上线|发布|落地|交付|提交|签署|制定|达成)/.test(text);
@@ -212,6 +233,13 @@ function moduleKey(value) {
 
 function compareBuckets(left, right) {
   return left.module.localeCompare(right.module) || left.target.localeCompare(right.target, 'zh-Hans-CN');
+}
+
+function compareFacts(left, right) {
+  return normalized(left.reportDate).localeCompare(normalized(right.reportDate))
+    || normalized(left.recordId).localeCompare(normalized(right.recordId))
+    || normalized(left.memberOpenId).localeCompare(normalized(right.memberOpenId))
+    || normalized(left.memberName || left.reporterName).localeCompare(normalized(right.memberName || right.reporterName));
 }
 
 function toTextArray(value) {
