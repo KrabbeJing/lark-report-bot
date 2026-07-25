@@ -3,10 +3,10 @@ const MODULE_TWO = 'module2';
 const MODULE_THREE = 'module3';
 const EXPLICIT_MEETING_WORDS = /会议|例会|项目会|评审会|周会|协调会|座谈会|碰头会|沟通会|讨论会|汇报会/;
 const BARE_PROCESS_MEETINGS = /沟通|讨论|汇报/;
-const MEETING_ACTION = /(?:参加|召开|组织|出席|列席|主持)[^\s，。；;:：、.]{1,12}?(?:会议|会)(?=$|[\s，。；;:：、.])/;
+const MEETING_ACTION = /(?:参加|召开|组织|出席|列席|主持)[^\s，。；;:：、.]{1,12}?(?:会议|会)(?=$|[\s，。；;:：、.]|议题|计划|拟|准备|是否|待|需要|需|尚未|未能|没有|未|确认|提交|制定|形成|讨论|沟通|协调|研究|交流|汇报|围绕|开展)/;
 const COMPLETION_MARKERS = ['已', '已经', '成功', '最终', '会后'];
 const STRONG_INTENT_OR_NEGATION = /尚未|未能|没有|未|议题|计划|拟|准备|是否|待|需要|需/;
-const PROCESS_MARKERS = /讨论|沟通|协调|研究|交流|汇报/;
+const PROCESS_MARKERS = /讨论|沟通|协调|研究|交流|汇报|围绕|开展/;
 const OUTCOME_CONNECTORS = ['并', '后', '最终', '已', '已经', '成功', '会后'];
 const CLAUSE_DELIMITERS = ['。', '；', ';', '\n'];
 const MEETING_OUTCOME_PATTERNS = [
@@ -392,6 +392,8 @@ function isSupportedMeetingOutcome(text, meeting, outcome) {
 
   const processContext = text.slice(meeting.isProcess ? meeting.index : meetingEnd, outcome.index);
   if (PROCESS_MARKERS.test(processContext) && !hasOutcomeConnector(processContext)) return false;
+  const trailingContext = text.slice(outcome.index + outcome.length, findClauseEnd(text, outcome.index + outcome.length));
+  if (PROCESS_MARKERS.test(trailingContext)) return false;
   return true;
 }
 

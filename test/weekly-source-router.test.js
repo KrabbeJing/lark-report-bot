@@ -759,6 +759,28 @@ test('does not classify social activities as meetings', () => {
   assert.deepEqual(diagnosticCodes(result), ['no_topic_match']);
 });
 
+test('rejects generalized meeting names and trailing process context', () => {
+  const result = routeWeeklyFacts({
+    facts: [fact({ workItems: [
+      '参加收单专题会计划确认方案',
+      '参加收单研讨会拟提交材料',
+      '主持收单启动会尚未形成结论',
+      '组织收单复盘会是否制定方案',
+      '收单会议围绕确认方案开展讨论',
+      '收单会议确认方案讨论',
+      '收单会议提交材料沟通',
+      '收单会议制定方案交流',
+    ] })],
+    mappings: [mapping({ module3Target: '' })],
+    rules: [rule('模块二', '收单项目组', ['收单'])],
+    cellMap,
+    period,
+  });
+
+  assert.deepEqual(result.buckets, []);
+  assert.deepEqual(diagnosticCodes(result), Array(8).fill('routine_meeting_without_result'));
+});
+
 test('allows routine meetings only when they state an observable outcome', () => {
   const result = routeWeeklyFacts({
     facts: [fact({ workItems: [
@@ -775,6 +797,7 @@ test('allows routine meetings only when they state an observable outcome', () =>
       '收单例会讨论并确认方案',
       '收单讨论后形成结论',
       '收单协调会最终达成共识',
+      '收单会议围绕问题讨论，最终确认方案',
     ] })],
     mappings: [mapping({ module3Target: '' })],
     rules: [rule('模块二', '收单项目组', ['收单'])],
@@ -796,6 +819,7 @@ test('allows routine meetings only when they state an observable outcome', () =>
     '收单例会讨论并确认方案',
     '收单讨论后形成结论',
     '收单协调会最终达成共识',
+    '收单会议围绕问题讨论，最终确认方案',
   ]);
 });
 
