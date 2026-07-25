@@ -7,10 +7,11 @@ const MEETING_ACTIONS = /参加|召开|组织|出席|列席|主持/;
 const MEETING_CANDIDATE = /会议|会/;
 const ACTION_MEETING_MAX_LENGTH = 20;
 const ACTION_MEETING_DELIMITERS = ['，', '。', '；', ';', '：', ':', '、', '\n'];
-const NON_MEETING_WORDS = ['社会', '工会', '协会', '学会', '机会', '体会', '优惠', '不会', '将会', '都会', '可能会', '委员会'];
+const NON_MEETING_WORDS = ['社会', '工会', '协会', '学会', '机会', '体会', '优惠', '不会', '将会', '都会', '可能会', '委员会', '会计', '会员', '会籍', '会费', '会务', '会刊', '会展'];
+const NON_MEETING_PROCESS_BOUNDARIES = /后|并|[，。；;：:、\n]/;
 const COMPLETION_MARKERS = ['已', '已经', '成功', '最终', '会后'];
 const STRONG_INTENT_OR_NEGATION = /尚未|未能|没有|未|议题|计划|拟|准备|是否|待|需要|需|针对|关于|重点|就/;
-const PROCESS_MARKERS = /讨论|沟通|协调|研究|交流|汇报|围绕|开展/;
+const PROCESS_MARKERS = /讨论|沟通|协调|研究|交流|汇报|围绕|开展|评审|审议|测试|审核|审查|论证|研讨|验证|演示|演练|培训|学习|调研|分析|梳理|排查/;
 const OUTCOME_CONNECTORS = ['并', '后', '最终', '已', '已经', '成功', '会后'];
 const CLAUSE_DELIMITERS = ['。', '；', ';', '\n'];
 const MEETING_OUTCOME_PATTERNS = [
@@ -411,7 +412,9 @@ function actionMeetingSearchEnd(text, actionEnd) {
 function isNonMeetingCandidate(text, meeting) {
   return NON_MEETING_WORDS.some(word => {
     const wordIndex = text.lastIndexOf(word, meeting.index);
-    return wordIndex >= 0 && meeting.index < wordIndex + word.length;
+    return wordIndex >= 0
+      && meeting.index < wordIndex + word.length
+      && !(word === '会计' && text.startsWith('会计划', wordIndex));
   });
 }
 
@@ -421,7 +424,9 @@ function isProcessAfterNonMeetingWord(text, process) {
     if (process.index < actionEnd || process.index >= actionMeetingSearchEnd(text, actionEnd)) return false;
     return NON_MEETING_WORDS.some(word => {
       const wordIndex = text.lastIndexOf(word, process.index);
-      return wordIndex >= actionEnd && wordIndex + word.length <= process.index;
+      if (wordIndex < actionEnd || wordIndex + word.length > process.index) return false;
+      const between = text.slice(wordIndex + word.length, process.index);
+      return !NON_MEETING_PROCESS_BOUNDARIES.test(between);
     });
   });
 }

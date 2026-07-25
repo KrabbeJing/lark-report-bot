@@ -813,6 +813,54 @@ test('finds action-led meetings beyond non-meeting words and ordinary body text'
   assert.deepEqual(diagnosticCodes(social), Array(3).fill('no_topic_match'));
 });
 
+test('does not suppress independent processes after non-meeting words', () => {
+  const processes = routeWeeklyFacts({
+    facts: [fact({ workItems: [
+      '参加社会活动后讨论收单确认方案',
+      '参加工会活动后沟通收单提交材料',
+    ] })],
+    mappings: [mapping({ module3Target: '' })],
+    rules: [rule('模块二', '收单项目组', ['收单'])],
+    cellMap,
+    period,
+  });
+  const nonMeetings = routeWeeklyFacts({
+    facts: [fact({ workItems: [
+      '参加收单会计培训，完成科目配置',
+      '参加工会会员培训，完成收单科目配置',
+    ] })],
+    mappings: [mapping({ module3Target: '' })],
+    rules: [rule('模块二', '收单项目组', ['收单'])],
+    cellMap,
+    period,
+  });
+
+  assert.deepEqual(processes.buckets, []);
+  assert.deepEqual(diagnosticCodes(processes), Array(2).fill('routine_meeting_without_result'));
+  assert.deepEqual(texts(nonMeetings, '收单项目组'), [
+    '参加收单会计培训，完成科目配置',
+    '参加工会会员培训，完成收单科目配置',
+  ]);
+});
+
+test('rejects review and validation processes without a closed outcome', () => {
+  const result = routeWeeklyFacts({
+    facts: [fact({ workItems: [
+      '收单会议评审确认方案',
+      '收单会议审议提交材料',
+      '参加收单专题会对确认方案进行评审',
+      '收单会议测试确认方案',
+    ] })],
+    mappings: [mapping({ module3Target: '' })],
+    rules: [rule('模块二', '收单项目组', ['收单'])],
+    cellMap,
+    period,
+  });
+
+  assert.deepEqual(result.buckets, []);
+  assert.deepEqual(diagnosticCodes(result), Array(4).fill('routine_meeting_without_result'));
+});
+
 test('allows routine meetings only when they state an observable outcome', () => {
   const result = routeWeeklyFacts({
     facts: [fact({ workItems: [
@@ -830,6 +878,7 @@ test('allows routine meetings only when they state an observable outcome', () =>
       '收单讨论后形成结论',
       '收单协调会最终达成共识',
       '收单会议围绕问题讨论，最终确认方案',
+      '收单会议测试并确认方案',
     ] })],
     mappings: [mapping({ module3Target: '' })],
     rules: [rule('模块二', '收单项目组', ['收单'])],
@@ -852,6 +901,7 @@ test('allows routine meetings only when they state an observable outcome', () =>
     '收单讨论后形成结论',
     '收单协调会最终达成共识',
     '收单会议围绕问题讨论，最终确认方案',
+    '收单会议测试并确认方案',
   ]);
 });
 
