@@ -76,7 +76,7 @@ async function runPublish(context) {
   const publishErrors = [];
   const departmentKey = `weekly-${context.period.reportDate}-publish-department`;
   if (!dryRun && !isPosterSent(instance)) {
-    await call(services.poster, 'sendDepartment', {
+    const departmentResult = await call(services.poster, 'sendDepartment', {
       ...context,
       poster,
       instance,
@@ -86,6 +86,7 @@ async function runPublish(context) {
     await persist(context, instance, {
       posterStatus: '已发送',
       posterSentAt: context.now.getTime(),
+      posterImageKey: departmentResult?.imageKey || poster?.imageKey || '',
     });
   }
   if (!dryRun) {
