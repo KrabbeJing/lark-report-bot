@@ -266,6 +266,37 @@ function createBitable({
   };
 }
 
+async function runAgileValidationCase({
+  workItems,
+  output,
+  evidenceIds,
+  configuration = defaultConfiguration(),
+}) {
+  return runWeeklyAiPreview({
+    config: { groups: [createGroup()] },
+    bitable: createBitable({
+      facts: [report({
+        recordId: 'fact_agile',
+        memberOpenId: 'ou_1',
+        workItems,
+      })],
+      configuration,
+    }),
+    sheetWriter: { discoverTemplateTargets: async () => cellMap },
+    aiProvider: {
+      generateWeeklySheetPreview: async input => ({
+        cells: {
+          D30: [{
+            text: output,
+            evidenceIds: evidenceIds || input.evidence.map(item => item.evidenceId),
+          }],
+        },
+      }),
+    },
+    options,
+  });
+}
+
 test('parses required preview dates and rejects an inverted range', () => {
   assert.deepEqual(parseWeeklyAiPreviewArgs([
     '--start', '2026-07-13', '--end', '2026-07-17',
@@ -1043,4 +1074,279 @@ test('rejects numeric prefixes, new full dates, changed statuses, responsibility
       output,
     );
   }
+});
+
+test('matches protected statuses longest-first and rejects A10/B20 protected-value swaps', async () => {
+  const cases = [
+    {
+      workItems: ['收单接口未完成，核查1项'],
+      output: '收单接口完成，核查1项',
+    },
+    {
+      workItems: ['收单项目A完成10项，收单项目B完成20项'],
+      output: '收单项目A完成20项，收单项目B完成10项',
+    },
+  ];
+
+  for (const item of cases) {
+    const result = await runAgileValidationCase(item);
+    assert.deepEqual(result.cells.D30, [], item.output);
+    assert.match(
+      result.diagnostics.map(diagnostic => diagnostic.code).join('\n'),
+      /changed_protected_fact/,
+      item.output,
+    );
+  }
+});
+
+test('rejects protected values that are only satisfiable from a cross-evidence union', async () => {
+  const result = await runAgileValidationCase({
+    workItems: ['收单项目A完成10项', '收单项目B完成20项'],
+    output: '收单项目A完成10项并且收单项目B完成20项',
+  });
+
+  assert.deepEqual(result.cells.D30, []);
+  assert.match(
+    result.diagnostics.map(diagnostic => diagnostic.code).join('\n'),
+    /changed_protected_fact/,
+  );
+});
+
+test('requires responsibility expressions to occur verbatim in one cited evidence sentence', async () => {
+  const invalidOutputs = [
+    '王五负责推进收单联调',
+    '王五牵头推进收单联调',
+    '由王五推进收单联调',
+  ];
+  for (const output of invalidOutputs) {
+    const result = await runAgileValidationCase({
+      workItems: ['推进收单联调'],
+      output,
+    });
+    assert.deepEqual(result.cells.D30, [], output);
+    assert.match(
+      result.diagnostics.map(diagnostic => diagnostic.code).join('\n'),
+      /changed_protected_fact/,
+      output,
+    );
+  }
+
+  const valid = await runAgileValidationCase({
+    workItems: ['由于接口调整，王五负责推进收单联调'],
+    output: '由于接口调整，王五负责推进收单联调',
+  });
+  assert.deepEqual(valid.cells.D30, [{
+    text: '由于接口调整，王五负责推进收单联调',
+    evidenceIds: ['fact_agile:current:workItems:0'],
+  }]);
+
+  const verbatimSuffix = await runAgileValidationCase({
+    workItems: ['本周王五负责推进收单联调'],
+    output: '王五负责推进收单联调',
+  });
+  assert.deepEqual(verbatimSuffix.cells.D30, [{
+    text: '王五负责推进收单联调',
+    evidenceIds: ['fact_agile:current:workItems:0'],
+  }]);
+});
+
+test('rejects leading list markers without rewriting provider text', async () => {
+  for (const marker of ['1. ', '1、', '1) ', '１．', '１。', '（１）']) {
+    const output = `${marker}完成收单核查1项`;
+    const result = await runAgileValidationCase({
+      workItems: ['完成收单核查1项'],
+      output,
+    });
+    assert.deepEqual(result.cells.D30, [], marker);
+    assert.match(
+      result.diagnostics.map(diagnostic => diagnostic.code).join('\n'),
+      /leading_list_marker/,
+      marker,
+    );
+  }
+});
+
+test('redacts all known selected-group names from evidence and style input before provider call', async () => {
+  const configuration = defaultConfiguration();
+  configuration.styles = configuration.styles.map((style, index) => {
+    if (style.fields.模块 !== '模块二' || index > 4) return style;
+    const names = ['张三', '李四', '张三李四', '张三', '李四'];
+    return {
+      ...style,
+      fields: {
+        ...style.fields,
+        最终样例正文: `${names[index]}收单样例${index + 1}`,
+      },
+    };
+  });
+  const captured = [];
+  const result = await runWeeklyAiPreview({
+    config: { groups: [createGroup()] },
+    bitable: createBitable({
+      facts: [
+        report({
+          recordId: 'fact_agile',
+          memberOpenId: 'ou_1',
+          reporterName: '张三',
+          workItems: ['张三完成收单联调'],
+        }),
+        report({
+          recordId: 'fact_management',
+          memberOpenId: 'ou_2',
+          reporterName: '李四',
+          source: 'chat',
+          effectiveSource: 'chat',
+          workItems: ['李四完成渠道制度修订'],
+        }),
+      ],
+      configuration,
+    }),
+    sheetWriter: { discoverTemplateTargets: async () => cellMap },
+    aiProvider: {
+      generateWeeklySheetPreview: async input => {
+        captured.push(input);
+        return { cells: {} };
+      },
+    },
+    options,
+  });
+
+  const agileInput = captured.find(input => input.target.module === 'module2');
+  assert.ok(agileInput);
+  assert.doesNotMatch(JSON.stringify(agileInput), /张三|李四/);
+  assert.equal(agileInput.evidence[0].evidenceId, 'fact_agile:current:workItems:0');
+  assert.equal(agileInput.evidence[0].text, '完成收单联调');
+  assert.equal(agileInput.styleExamples.length, 5);
+  assert.deepEqual(result.cells.D30, []);
+});
+
+test('omits empty redacted styles and leaves target blank when fewer than three remain', async () => {
+  const configuration = defaultConfiguration();
+  configuration.styles = configuration.styles
+    .filter(style => style.fields.模块 !== '模块二')
+    .concat([
+      styleRecord('style_name_1', {
+        module: '模块二',
+        target: '收单项目组',
+        contentType: '本周重点事项说明',
+        finalText: '张三',
+      }),
+      styleRecord('style_name_2', {
+        module: '模块二',
+        target: '收单项目组',
+        contentType: '本周重点事项说明',
+        finalText: '李四',
+      }),
+      styleRecord('style_safe_1', {
+        module: '模块二',
+        target: '收单项目组',
+        contentType: '本周重点事项说明',
+        finalText: '完成收单样例',
+      }),
+      styleRecord('style_safe_2', {
+        module: '模块二',
+        target: '收单项目组',
+        contentType: '本周重点事项说明',
+        finalText: '完成联调样例',
+      }),
+    ]);
+  let providerCalls = 0;
+  const result = await runWeeklyAiPreview({
+    config: { groups: [createGroup()] },
+    bitable: createBitable({
+      facts: [
+        report({
+          recordId: 'fact_agile',
+          memberOpenId: 'ou_1',
+          reporterName: '张三',
+          workItems: ['完成收单联调'],
+        }),
+        report({
+          recordId: 'fact_management',
+          memberOpenId: 'ou_2',
+          reporterName: '李四',
+          source: 'chat',
+          effectiveSource: 'chat',
+          workItems: ['完成渠道制度修订'],
+        }),
+      ],
+      configuration,
+    }),
+    sheetWriter: { discoverTemplateTargets: async () => cellMap },
+    aiProvider: {
+      generateWeeklySheetPreview: async () => {
+        providerCalls += 1;
+        return { cells: {} };
+      },
+    },
+    options,
+  });
+
+  assert.equal(providerCalls, 1);
+  assert.deepEqual(result.cells.D30, []);
+  assert.match(
+    result.diagnostics
+      .filter(diagnostic => diagnostic.target === '收单项目组')
+      .map(diagnostic => diagnostic.code)
+      .join('\n'),
+    /insufficient_style_examples/,
+  );
+});
+
+test('keeps multi-group shared coordinates isolated and aggregates partial-failure diagnostics', async () => {
+  const firstGroup = { ...createGroup(), name: '第一组', project: '第一组' };
+  const secondGroup = { ...createGroup(), name: '第二组', project: '第二组' };
+  const result = await runWeeklyAiPreview({
+    config: { groups: [firstGroup, secondGroup] },
+    bitable: {
+      ...createBitable(),
+      listAllDailyReportsForRange: async group => [report({
+        recordId: group.name === '第一组' ? 'fact_first' : 'fact_second',
+        memberOpenId: 'ou_1',
+        reporterName: '张三',
+        workItems: [group.name === '第一组' ? '完成收单联调' : '完成收单核查'],
+      })],
+    },
+    sheetWriter: { discoverTemplateTargets: async () => cellMap },
+    aiProvider: {
+      name: 'openai-compatible',
+      model: 'review-model',
+      generateWeeklySheetPreview: async input => {
+        if (input.group.name === '第二组') throw new Error('AI preview request failed');
+        return {
+          provider: 'openai-compatible',
+          model: 'review-model',
+          cells: {
+            D30: [{
+              text: '完成收单联调',
+              evidenceIds: [input.evidence[0].evidenceId],
+            }],
+          },
+        };
+      },
+    },
+    options,
+  });
+
+  assert.deepEqual(result.cells, {});
+  assert.deepEqual(result.evidence, {});
+  assert.deepEqual(result.groups[0].cells.D30, [{
+    text: '完成收单联调',
+    evidenceIds: ['fact_first:current:workItems:0'],
+  }]);
+  assert.deepEqual(result.groups[1].cells.D30, []);
+  assert.equal(result.groups[0].provider, 'openai-compatible');
+  assert.equal(result.groups[0].model, 'review-model');
+  assert.equal(result.groups[1].provider, 'openai-compatible');
+  assert.equal(result.groups[1].model, 'review-model');
+  assert.ok(result.diagnostics.some(diagnostic => (
+    diagnostic.group?.name === '第二组'
+    && diagnostic.target === '收单项目组'
+    && diagnostic.code === 'provider_error'
+    && diagnostic.detail === 'request_failed'
+  )));
+  assert.match(
+    result.warnings.join('\n'),
+    /groups\[\]\.cells\/evidence\/warnings\/diagnostics\/provider\/model/,
+  );
 });

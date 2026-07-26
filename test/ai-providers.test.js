@@ -250,6 +250,26 @@ test('strict preview converts AbortError into the same safe timeout error', asyn
   }
 });
 
+test('strict preview converts transport rejection into a fixed safe request error', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    throw new Error('Authorization: Bearer secret-token; AI_API_KEY=private-key');
+  };
+
+  try {
+    await assert.rejects(
+      configuredProvider().generateWeeklySheetPreview(previewInput()),
+      error => {
+        assert.equal(error.message, 'AI preview request failed');
+        assert.doesNotMatch(error.message, /secret-token|private-key|Authorization|AI_API_KEY/);
+        return true;
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('legacy weekly summaries do not restore broad weekly sheet routing on timeout', async () => {
   const originalFetch = globalThis.fetch;
   const input = {

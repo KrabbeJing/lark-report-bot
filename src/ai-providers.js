@@ -137,7 +137,7 @@ export class OpenAICompatibleProvider {
       });
     } catch (error) {
       if (isAbortError(error)) throw new Error('AI preview request timed out');
-      throw error;
+      throw new Error('AI preview request failed');
     }
 
     if (!res.ok) {

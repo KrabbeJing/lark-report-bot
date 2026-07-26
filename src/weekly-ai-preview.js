@@ -26,6 +26,8 @@ const STATUS_TERMS = [
   '失败',
   '成功',
 ];
+const STATUS_TERMS_LONGEST_FIRST = [...STATUS_TERMS]
+  .sort((left, right) => right.length - left.length || left.localeCompare(right));
 
 export function parseWeeklyAiPreviewArgs(argv = []) {
   const values = { startDate: '', endDate: '', outputPath: '' };
@@ -112,6 +114,12 @@ export async function runWeeklyAiPreview({
 
   const singleGroup = groupResults.length === 1 ? groupResults[0] : null;
   const multipleGroups = groupResults.length > 1;
+  const multiGroupDiagnostics = multipleGroups
+    ? groupResults.flatMap(group => group.diagnostics.map(diagnostic => ({
+      ...diagnostic,
+      group: { name: group.name, project: group.project },
+    })))
+    : [];
   return {
     mode: 'read_only_preview',
     weekStart: normalizedOptions.startDate,
@@ -122,9 +130,9 @@ export async function runWeeklyAiPreview({
     cells: singleGroup?.cells || {},
     evidence: singleGroup?.evidence || {},
     warnings: singleGroup?.warnings || (multipleGroups
-      ? ['Multiple groups were previewed; use groups[].cells/evidence/warnings because top-level cells and evidence are empty.']
+      ? ['Multiple groups were previewed; use groups[].cells/evidence/warnings/diagnostics/provider/model because top-level cells and evidence are empty.']
       : []),
-    diagnostics: singleGroup?.diagnostics || [],
+    diagnostics: singleGroup?.diagnostics || multiGroupDiagnostics,
   };
 }
 
@@ -187,6 +195,7 @@ async function previewGroup({
   const diagnostics = [...routing.diagnostics];
   let provider = aiProvider?.name || '';
   let model = aiProvider?.model || '';
+  const knownNames = collectKnownNames(facts, routing);
 
   for (const bucket of routing.buckets) {
     const targetContext = buildTargetContext({
@@ -194,18 +203,28 @@ async function previewGroup({
       cellMap,
       rules: weeklyConfiguration.rules,
       styleExamples: weeklyConfiguration.styleExamples,
+      knownNames,
     });
     if (targetContext.diagnostic) {
       diagnostics.push(targetContext.diagnostic);
       continue;
     }
 
-    const targetEvidence = (bucket.sources?.current || []).map(source => ({
-      evidenceId: source.evidenceId,
-      date: source.date,
-      text: source.text,
-    }));
-    if (!targetEvidence.length) continue;
+    const targetEvidence = (bucket.sources?.current || [])
+      .map(source => ({
+        evidenceId: source.evidenceId,
+        date: source.date,
+        text: redactKnownNames(source.text, knownNames),
+      }))
+      .filter(source => normalized(source.text));
+    if (!targetEvidence.length) {
+      diagnostics.push({
+        module: bucket.module,
+        target: bucket.target,
+        code: 'empty_evidence_after_redaction',
+      });
+      continue;
+    }
 
     let modelResult;
     try {
@@ -233,6 +252,7 @@ async function previewGroup({
       bucket,
       target: targetContext.target,
       modelCells: modelResult?.cells,
+      knownNames,
     });
     diagnostics.push(...validated.diagnostics);
     Object.assign(cells, validated.cells);
@@ -248,6 +268,8 @@ async function previewGroup({
     evidence,
     warnings,
     diagnostics,
+    provider,
+    model,
   };
   return {
     provider,
@@ -268,7 +290,7 @@ function buildEmptyCurrentCells(cellMap, { startDate, endDate }) {
   return cells;
 }
 
-function buildTargetContext({ bucket, cellMap, rules, styleExamples }) {
+function buildTargetContext({ bucket, cellMap, rules, styleExamples, knownNames }) {
   const matchingRules = rules
     .filter(rule => moduleKey(rule.module) === bucket.module)
     .filter(rule => normalized(rule.target) === normalized(bucket.target))
@@ -293,14 +315,15 @@ function buildTargetContext({ bucket, cellMap, rules, styleExamples }) {
     .filter(example => normalized(example.target) === normalized(bucket.target))
     .filter(example => normalized(example.contentType) === contentType)
     .sort(compareStyleExamples)
-    .slice(0, MAX_STYLE_EXAMPLES)
     .map(example => ({
       module: bucket.module,
       target: bucket.target,
       contentType,
       weekKey: example.weekKey,
-      finalText: example.finalText,
-    }));
+      finalText: redactKnownNames(example.finalText, knownNames),
+    }))
+    .filter(example => normalized(example.finalText))
+    .slice(0, MAX_STYLE_EXAMPLES);
   if (exactStyles.length < MIN_STYLE_EXAMPLES) {
     return {
       diagnostic: {
@@ -341,7 +364,7 @@ function targetCurrentCells(bucket, cellMap) {
   return toCellArray(spec?.current);
 }
 
-function validateTargetResult({ bucket, target, modelCells }) {
+function validateTargetResult({ bucket, target, modelCells, knownNames = [] }) {
   const cells = {};
   const evidence = {};
   const diagnostics = [];
@@ -382,7 +405,7 @@ function validateTargetResult({ bucket, target, modelCells }) {
     const accepted = [];
     for (const entry of entries) {
       if (isExplicitEmptyEntry(entry)) continue;
-      const validated = validateEntry(entry, evidenceMap);
+      const validated = validateEntry(entry, evidenceMap, knownNames);
       if (validated.code) {
         diagnostics.push({ ...base, cell, code: validated.code });
         continue;
@@ -396,7 +419,7 @@ function validateTargetResult({ bucket, target, modelCells }) {
   return { cells, evidence, diagnostics };
 }
 
-function validateEntry(entry, evidenceMap) {
+function validateEntry(entry, evidenceMap, knownNames = []) {
   if (!entry || typeof entry !== 'object' || Array.isArray(entry)
     || typeof entry.text !== 'string'
     || !Array.isArray(entry.evidenceIds)
@@ -409,8 +432,12 @@ function validateEntry(entry, evidenceMap) {
   if (evidenceIds.some(id => !evidenceMap.has(id))) return { code: 'invalid_evidence' };
 
   const sources = evidenceIds.map(id => evidenceMap.get(id));
-  const memberNames = [...new Set(sources.map(source => normalized(source.member)).filter(Boolean))];
+  const memberNames = [...new Set([
+    ...knownNames,
+    ...sources.map(source => normalized(source.member)),
+  ].filter(Boolean))];
   if (memberNames.some(name => text.includes(name))) return { code: 'visible_member_name' };
+  if (hasLeadingListMarker(text)) return { code: 'leading_list_marker' };
   if (/下周|明日|明天/.test(text)) return { code: 'next_plan_content' };
   if (/风险|阻塞|覆盖率|缺报/.test(text)) return { code: 'forbidden_content' };
   if (!protectedFactsUnchanged(text, sources)) return { code: 'changed_protected_fact' };
@@ -419,17 +446,61 @@ function validateEntry(entry, evidenceMap) {
 }
 
 function protectedFactsUnchanged(text, sources) {
-  const sourceText = sources
-    .flatMap(source => [source.date, source.text])
-    .filter(Boolean)
-    .join('\n');
-  return tokensAreSourced(extractDateTokens(text), extractDateTokens(sourceText))
-    && tokensAreSourced(extractNumberTokens(text), extractNumberTokens(sourceText))
-    && tokensAreSourced(extractStatusTokens(text), extractStatusTokens(sourceText))
-    && tokensAreSourced(
-      extractResponsibilityTokens(text),
-      extractResponsibilityTokens(sourceText),
-    );
+  return splitSentences(text).every(outputSentence => {
+    const outputProfile = protectedProfile(outputSentence);
+    if (!hasProtectedValues(outputProfile)) return true;
+    return sources.some(source => sourceSupportsSentence(outputSentence, outputProfile, source));
+  });
+}
+
+function sourceSupportsSentence(outputSentence, outputProfile, source) {
+  const metadataDates = extractDateTokens(source.date);
+  return splitSentences(source.text).some(sourceSentence => {
+    const sourceProfile = protectedProfile(sourceSentence);
+    sourceProfile.dates.push(...metadataDates);
+    if (!profileTokensAreSourced(outputProfile, sourceProfile)) return false;
+
+    const sourceClauses = splitClauses(sourceSentence);
+    return splitClauses(outputSentence).every(outputClause => {
+      const clauseProfile = protectedProfile(outputClause);
+      if (!hasProtectedValues(clauseProfile)) return true;
+      return sourceClauses.some(sourceClause => (
+        clauseSupportsProtectedValues(outputClause, clauseProfile, sourceClause, metadataDates)
+      ));
+    });
+  });
+}
+
+function clauseSupportsProtectedValues(outputClause, outputProfile, sourceClause, metadataDates) {
+  const sourceProfile = protectedProfile(sourceClause);
+  sourceProfile.dates.push(...metadataDates);
+  if (!profileTokensAreSourced(outputProfile, sourceProfile)) return false;
+  if (outputProfile.responsibilities.some(token => !sourceClause.includes(token))) return false;
+
+  const outputContext = protectedContext(outputClause, outputProfile);
+  if (!outputContext) return true;
+  const sourceContext = protectedContext(sourceClause, sourceProfile);
+  return Boolean(sourceContext)
+    && (sourceContext.includes(outputContext) || outputContext.includes(sourceContext));
+}
+
+function protectedProfile(text) {
+  return {
+    dates: extractDateTokens(text),
+    numbers: extractNumberTokens(text),
+    statuses: extractStatusTokens(text),
+    responsibilities: extractResponsibilityTokens(text),
+  };
+}
+
+function hasProtectedValues(profile) {
+  return Object.values(profile).some(tokens => tokens.length);
+}
+
+function profileTokensAreSourced(output, source) {
+  return tokensAreSourced(output.dates, source.dates)
+    && tokensAreSourced(output.numbers, source.numbers)
+    && tokensAreSourced(output.statuses, source.statuses);
 }
 
 function tokensAreSourced(outputTokens, sourceTokens) {
@@ -448,11 +519,71 @@ function extractNumberTokens(text) {
 }
 
 function extractStatusTokens(text) {
-  return STATUS_TERMS.filter(term => String(text || '').includes(term));
+  const value = String(text || '');
+  const tokens = [];
+  for (let index = 0; index < value.length;) {
+    const match = STATUS_TERMS_LONGEST_FIRST.find(term => value.startsWith(term, index));
+    if (!match) {
+      index += 1;
+      continue;
+    }
+    tokens.push(match);
+    index += match.length;
+  }
+  return tokens;
 }
 
 function extractResponsibilityTokens(text) {
-  return String(text || '').match(/(?:责任人|负责人|由)[^，。；;\s]{1,12}/g) || [];
+  const value = String(text || '');
+  const tokens = [
+    ...(value.match(/(?:责任人|负责人)[:：]?[^，,。；;\s]{1,20}/gu) || []),
+    ...(value.match(/由(?!于)[^，,。；;\s]{1,20}/gu) || []),
+    ...(value.match(/[^，,。；;\s]{1,12}(?:负责|牵头)/gu) || []),
+  ];
+  return [...new Set(tokens)];
+}
+
+function protectedContext(text, profile) {
+  const tokens = Object.values(profile)
+    .flat()
+    .sort((left, right) => right.length - left.length);
+  let context = String(text || '');
+  for (const token of tokens) context = context.split(token).join('');
+  return context.replace(/[\s，,。；;：:、！？!?（）()\[\]【】]/gu, '');
+}
+
+function splitSentences(text) {
+  return String(text || '')
+    .split(/[。；;！？!?\n]+/u)
+    .map(normalized)
+    .filter(Boolean);
+}
+
+function splitClauses(text) {
+  return String(text || '')
+    .split(/[，,]+/u)
+    .map(normalized)
+    .filter(Boolean);
+}
+
+function hasLeadingListMarker(text) {
+  return /^\s*(?:[0-9０-９]+[.．。、)）]|[(（][0-9０-９]+[)）])\s*/u.test(String(text || ''));
+}
+
+function collectKnownNames(facts, routing) {
+  return [...new Set([
+    ...(facts || []).flatMap(fact => [fact?.reporterName, fact?.memberName]),
+    ...(routing?.buckets || []).flatMap(bucket => (
+      (bucket.sources?.current || []).map(source => source.member)
+    )),
+  ].map(normalized).filter(Boolean))]
+    .sort((left, right) => right.length - left.length || left.localeCompare(right));
+}
+
+function redactKnownNames(text, knownNames) {
+  let redacted = String(text || '');
+  for (const name of knownNames || []) redacted = redacted.split(name).join('');
+  return redacted.trim();
 }
 
 function isExplicitEmptyEntry(entry) {
