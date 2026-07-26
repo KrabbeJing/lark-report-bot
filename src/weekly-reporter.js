@@ -112,6 +112,7 @@ async function generateWeeklySheetForGroup({
     spreadsheetToken: sheet.spreadsheetToken,
   };
   const cellMap = weeklyInstance.targets;
+  const routing = buildLegacyWeeklyRouting(reports, cellMap);
   const sheetContent = typeof aiProvider.summarizeWeeklySheet === 'function'
     ? await aiProvider.summarizeWeeklySheet({
       group,
@@ -121,6 +122,7 @@ async function generateWeeklySheetForGroup({
       weekEnd,
       generatedAt: now,
       cellMap,
+      routing,
     })
     : buildWeeklySheetValues({
       group,
@@ -129,6 +131,7 @@ async function generateWeeklySheetForGroup({
       weekStart,
       weekEnd,
       cellMap,
+      routing,
     });
 
   const writeResult = await writer.writeCells(effectiveSheetConfig, sheet.sheetId, sheetContent.values);
@@ -170,6 +173,22 @@ async function generateWeeklySheetForGroup({
     writeResult,
     sheetUrl,
   };
+}
+
+function buildLegacyWeeklyRouting(reports, cellMap) {
+  const buckets = new Map();
+  for (const report of reports || []) {
+    const target = String(report.agileGroup || report.project || '').trim();
+    if (!target || !cellMap?.agileProjects?.[target]) continue;
+    if (!buckets.has(target)) {
+      buckets.set(target, { module: 'module2', target, sources: { current: [] } });
+    }
+    const bucket = buckets.get(target);
+    for (const text of report.workItems || []) {
+      bucket.sources.current.push({ text, member: report.reporterName || '' });
+    }
+  }
+  return { buckets: [...buckets.values()] };
 }
 
 async function prepareWeeklySheetForGroup({ group, bitable, sheetWriter, client, now, timezone }) {

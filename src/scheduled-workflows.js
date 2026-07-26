@@ -38,3 +38,14 @@ export async function runGroupedWorkflow({
   }
   return results;
 }
+
+export async function runGroupedWeeklyStage({ stage, groups, runStage, notifyFailure = async () => {}, logger = console }) {
+  return runGroupedWorkflow({
+    task: `weekly_${stage}`,
+    stage: `weekly_${stage}`,
+    groups,
+    operation: group => runStage({ stage, group }),
+    notifyFailure,
+    logger,
+  });
+}

@@ -6,6 +6,7 @@ import {
   shouldRunWeeklyInstanceCreation,
   shouldRunWeeklyPush,
   startWeeklyInstanceScheduler,
+  shouldRunWeeklyStage,
 } from '../src/scheduler.js';
 import { normalizeConfig } from '../src/config.js';
 
@@ -93,4 +94,14 @@ test('daily fact sync is disabled unless explicitly enabled', () => {
   const config = normalizeConfig({ dailyFactSync: { enabled: true, lookbackDays: 3 } });
   assert.equal(config.dailyFactSync.enabled, true);
   assert.equal(config.dailyFactSync.lookbackDays, 3);
+});
+
+test('weekly stage schedules default to disabled and exact Friday/Saturday times', () => {
+  const config = normalizeConfig({});
+  assert.deepEqual(config.weeklyDraft, { enabled: false, dayOfWeek: 5, time: '16:30', timezone: 'Asia/Shanghai' });
+  assert.deepEqual(config.weeklyOwnerReminder, { enabled: false, dayOfWeek: 5, time: '17:00', timezone: 'Asia/Shanghai' });
+  assert.deepEqual(config.weeklyRefresh, { enabled: false, dayOfWeek: 6, time: '09:30', timezone: 'Asia/Shanghai' });
+  assert.deepEqual(config.weeklyPush, { enabled: false, dayOfWeek: 6, time: '11:00', timezone: 'Asia/Shanghai' });
+  assert.equal(shouldRunWeeklyStage(new Date('2026-07-24T08:30:00Z'), config.weeklyDraft), true);
+  assert.equal(shouldRunWeeklyStage(new Date('2026-07-25T01:30:00Z'), config.weeklyRefresh), true);
 });

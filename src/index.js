@@ -15,14 +15,17 @@ import { handleMessageEvent } from './message-router.js';
 import {
   startDailyFactSyncScheduler,
   startDailySupervisorScheduler,
-  startWeeklyInstanceScheduler,
-  startWeeklyScheduler,
+  startWeeklyStageScheduler,
 } from './scheduler.js';
 import { runGroupedWorkflow } from './scheduled-workflows.js';
 import { SerialTaskQueue } from './serial-task-queue.js';
 import { ensureWeeklyInstanceForGroup } from './weekly-instance-service.js';
-import { generateWeeklyReportForGroup } from './weekly-reporter.js';
 import { WeeklySheetWriter } from './weekly-sheet-writer.js';
+import { runWeeklyWorkflowStage } from './weekly-workflow.js';
+import { loadWeeklyConfiguration } from './weekly-config-repository.js';
+import { routeWeeklyFacts } from './weekly-source-router.js';
+import { writeInitialWeeklyDraft, refreshWeeklyDraft } from './weekly-draft-service.js';
+import { notifyWeeklyOwners, notifyMissingCoreMetricOwners } from './weekly-owner-notifier.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = path.resolve(__dirname, '..', 'out');
@@ -99,43 +102,58 @@ const eventDispatcher = new lark.EventDispatcher({}).register({
   },
 });
 
-startWeeklyInstanceScheduler({
-  config,
-  onRun: now => runGroupedWorkflow({
-    task: '周报实例创建',
-    stage: 'ensure_weekly_instance',
-    groups: config.groups,
-    operation: group => ensureWeeklyInstanceForGroup({
-      group,
-      bitable,
-      sheetWriter,
-      now,
-      timezone: config.weeklyInstanceCreation?.timezone || config.timezone,
+const workflowServices = {
+  timezone: config.timezone,
+  instanceService: {
+    ensure: args => ensureWeeklyInstanceForGroup({ ...args, bitable, sheetWriter, timezone: config.timezone }),
+    load: args => ensureWeeklyInstanceForGroup({ ...args, bitable, sheetWriter, timezone: config.timezone }),
+  },
+  factSync: {
+    sync: ({ group, period, now }) => bitable.syncDailyFactRecordsForGroup(group, {
+      now, timezone: config.timezone, startDate: period.start, endDate: period.end,
     }),
-    notifyFailure,
-  }),
-});
+  },
+  configRepository: { load: ({ group, period }) => loadWeeklyConfiguration({ group, bitable, period }) },
+  sourceRouter: {
+    route: async ({ group, period, configuration }) => {
+      const facts = await bitable.listAllDailyReportsForRange(group, period.start, period.end);
+      const cellMap = await sheetWriter.discoverTemplateTargets(group.weeklySheet, group.weeklySheet?.templateSheetId, { aliasMap: group.weeklySheet?.entityAliases });
+      return routeWeeklyFacts({ facts, mappings: configuration.mappings, rules: configuration.rules, cellMap, period });
+    },
+  },
+  ai: {
+    generate: ({ group, period }) => aiProvider.generateWeeklySheetPreview({ group, target: {}, evidence: [], styleExamples: [], weekStart: period.start, weekEnd: period.end }),
+  },
+  draftService: {
+    writeInitial: args => writeInitialWeeklyDraft({ ...args, writer: sheetWriter, bitable }),
+    refresh: args => refreshWeeklyDraft({ ...args, writer: sheetWriter, bitable }),
+  },
+  bitable,
+  ownerNotifier: {
+    owners: args => notifyWeeklyOwners({ ...args, messenger, bitable }),
+    metrics: args => notifyMissingCoreMetricOwners({ ...args, writer: sheetWriter, messenger, bitable }),
+  },
+};
 
-startWeeklyScheduler({
-  config,
-  onRun: now => runGroupedWorkflow({
-    task: 'AI周报生成',
-    stage: 'generate_weekly',
-    groups: config.groups,
-    operation: group => generateWeeklyReportForGroup({
-      group,
-      bitable,
-      aiProvider,
-      messenger,
-      outDir: OUT_DIR,
-      timezone: config.timezone,
-      now,
-      delivery: 'send',
-      sheetWriter,
+for (const [scheduleKey, stage] of [
+  ['weeklyDraft', 'draft'],
+  ['weeklyOwnerReminder', 'notify'],
+  ['weeklyRefresh', 'refresh'],
+  ['weeklyPush', 'publish'],
+]) {
+  startWeeklyStageScheduler({
+    config,
+    scheduleKey,
+    stage,
+    onRun: now => runGroupedWorkflow({
+      task: `周报${stage}`,
+      stage: `weekly_${stage}`,
+      groups: config.groups,
+      operation: group => runWeeklyWorkflowStage({ stage, group, services: workflowServices, now }),
+      notifyFailure,
     }),
-    notifyFailure,
-  }),
-});
+  });
+}
 
 startDailySupervisorScheduler({
   config,

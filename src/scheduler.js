@@ -1,4 +1,4 @@
-import { formatYmd } from './date-utils.js';
+import { formatYmd, getIsoWeekInfo, getWeeklyReportRange } from './date-utils.js';
 import { formatOperationalError } from './operational-log.js';
 
 export function startWeeklyScheduler({ config, onRun, logger = console, intervalMs = 60_000 }) {
@@ -32,6 +32,29 @@ export function startWeeklyScheduler({ config, onRun, logger = console, interval
       clearInterval(timer);
     },
   };
+}
+
+export function startWeeklyStageScheduler({ config, scheduleKey, stage, onRun, logger = console, intervalMs = 60_000 }) {
+  const schedule = config[scheduleKey];
+  if (!schedule?.enabled) {
+    logger.log(`[scheduler] weekly ${stage} disabled`);
+    return { stop() {} };
+  }
+  const runKeys = new Set();
+  const tick = async () => {
+    const now = new Date();
+    if (!shouldRunWeeklyStage(now, schedule)) return;
+    const reportDate = getWeeklyReportRange(now, schedule.timezone || 'Asia/Shanghai').reportDate;
+    const instanceKey = getIsoWeekInfo(reportDate).key;
+    const runKey = `${stage}-${instanceKey}-${formatYmd(now, schedule.timezone)}-${schedule.time}`;
+    if (runKeys.has(runKey)) return;
+    runKeys.add(runKey);
+    logger.log(`[scheduler] weekly ${stage} triggered: ${runKey}`);
+    try { await onRun(now, runKey); } catch (err) { logger.error(formatSchedulerFailure(`weekly ${stage}`, err)); }
+  };
+  const timer = setInterval(tick, intervalMs);
+  tick();
+  return { stop() { clearInterval(timer); } };
 }
 
 export function startWeeklyInstanceScheduler({ config, onRun, logger = console, intervalMs = 60_000 }) {
@@ -143,6 +166,13 @@ export function shouldRunWeeklyPush(now, schedule) {
   return parts.dayOfWeek === Number(schedule.dayOfWeek ?? 6)
     && parts.hour === hour
     && parts.minute === minute;
+}
+
+export function shouldRunWeeklyStage(now, schedule) {
+  const parts = getLocalParts(now, schedule.timezone || 'Asia/Shanghai');
+  const [hour, minute] = String(schedule.time || '').split(':').map(Number);
+  return parts.dayOfWeek === Number(schedule.dayOfWeek)
+    && parts.hour === hour && parts.minute === minute;
 }
 
 export function shouldRunWeeklyInstanceCreation(now, schedule) {
