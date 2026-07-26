@@ -5,10 +5,10 @@ export class WeeklySheetWriter {
     this.client = client;
   }
 
-  async ensureWeeklySheet(sheetConfig, { weekStart, weekEnd }) {
+  async ensureWeeklySheet(sheetConfig, { reportDate, weekStart, weekEnd }) {
     assertWeeklySheetConfig(sheetConfig);
     const resolvedConfig = await this.resolveSheetConfig(sheetConfig);
-    const title = renderWeeklySheetTitle(sheetConfig.titlePattern, { weekStart, weekEnd });
+    const title = renderWeeklySheetTitle(sheetConfig.titlePattern, { reportDate, weekStart, weekEnd });
 
     if (sheetConfig.reuseExisting !== false) {
       const existing = await this.findSheetByTitle(resolvedConfig.spreadsheetToken, title);

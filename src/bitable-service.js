@@ -871,14 +871,23 @@ export class BitableService {
   }
 
   async updateWeeklyInstance(groupOrInstance, recordIdOrPatch, maybePatch, context = {}) {
-    const instance = maybePatch === undefined
+    const instanceStyleCall = maybePatch === undefined
       && recordIdOrPatch && typeof recordIdOrPatch === 'object'
       && (groupOrInstance?.group || groupOrInstance?.weeklyInstanceTable
         || groupOrInstance?.record || groupOrInstance?.recordId)
+    const instance = instanceStyleCall
       ? groupOrInstance
-      : null;
+      : (maybePatch && typeof maybePatch === 'object' && 'now' in maybePatch
+        && recordIdOrPatch && typeof recordIdOrPatch === 'object'
+        && (groupOrInstance?.group || groupOrInstance?.weeklyInstanceTable
+          || groupOrInstance?.record || groupOrInstance?.recordId)
+        ? groupOrInstance
+        : null);
     const group = instance?.group || groupOrInstance;
     const patch = instance ? recordIdOrPatch : maybePatch;
+    if (instance && maybePatch && typeof maybePatch === 'object' && 'now' in maybePatch) {
+      context = maybePatch;
+    }
     const recordId = instance
       ? instance.recordId || instance.record?.record_id
       : recordIdOrPatch;

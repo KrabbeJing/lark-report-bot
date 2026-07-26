@@ -84,6 +84,41 @@ test('reuses existing weekly sheet by title', async () => {
   assert.equal(calls.length, 1);
 });
 
+test('uses the Friday report date for the public weekly sheet title path', async () => {
+  const calls = [];
+  const writer = new WeeklySheetWriter({
+    request: async payload => {
+      calls.push(payload);
+      if (payload.url.includes('/sheets/query')) return { data: { sheets: [] } };
+      return {
+        data: {
+          replies: [{
+            copySheet: {
+              properties: {
+                sheetId: 'week_30',
+                title: payload.data.requests[0].copySheet.destination.title,
+              },
+            },
+          }],
+        },
+      };
+    },
+  });
+
+  const sheet = await writer.ensureWeeklySheet({
+    spreadsheetToken: 'sheet_token',
+    templateSheetId: 'template',
+    titlePattern: '数字金融部周报{{reportDateMMDD}}',
+  }, {
+    reportDate: '2026-07-24',
+    weekStart: '2026-07-17',
+    weekEnd: '2026-07-23',
+  });
+
+  assert.equal(sheet.title, '数字金融部周报0724');
+  assert.equal(calls.at(-1).data.requests[0].copySheet.destination.title, '数字金融部周报0724');
+});
+
 test('uses the Friday MMDD title default through the public writer path', async () => {
   for (const titlePattern of [undefined, '']) {
     const calls = [];

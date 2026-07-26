@@ -4,6 +4,8 @@ import {
   refreshWeeklyDraft,
   writeInitialWeeklyDraft,
 } from '../src/weekly-draft-service.js';
+import { BitableService } from '../src/bitable-service.js';
+import { normalizeConfig } from '../src/config.js';
 
 test('writes Friday AI drafts only into blank cells and persists exact ownership snapshots', async () => {
   const writes = [];
@@ -74,6 +76,44 @@ test('Saturday refresh updates only unchanged AI cells and keeps edited or clear
   assert.equal(updates[0].aiGenerationStatus, '已刷新');
   assert.equal(result.snapshot.C27.text, 'Friday edited later');
   assert.equal(result.snapshot.C28.text, 'Friday cleared later');
+});
+
+test('persists a draft through the real BitableService instance update overload', async () => {
+  let updatePayload;
+  const bitable = new BitableService({
+    bitable: {
+      appTableRecord: {
+        update: async payload => {
+          updatePayload = payload;
+          return { data: { record: { record_id: 'rec_week' } } };
+        },
+      },
+    },
+  });
+
+  await writeInitialWeeklyDraft({
+    instance: {
+      ...buildInstance(),
+      group: normalizeConfig({
+        groups: [{
+          weeklyInstanceTable: { appToken: 'base_token', tableId: 'instance_table' },
+        }],
+      }).groups[0],
+      recordId: 'rec_week',
+    },
+    preview: { cells: { C26: [{ text: 'AI draft', evidenceIds: ['fact-1'] }] } },
+    writer: {
+      readCells: async () => ({ C26: '' }),
+      writeCells: async () => {},
+      markAiCells: async () => {},
+    },
+    bitable,
+    now: new Date('2026-07-24T08:30:00+08:00'),
+  });
+
+  assert.equal(updatePayload.path.record_id, 'rec_week');
+  assert.equal(updatePayload.data.fields['AI生成状态'], '已生成');
+  assert.match(updatePayload.data.fields['AI草稿快照'], /AI draft/);
 });
 
 function buildInstance() {
