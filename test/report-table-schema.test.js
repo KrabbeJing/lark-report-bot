@@ -1,0 +1,181 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  REPORT_TABLE_KEYS,
+  buildReportTableSchemaCatalog,
+  validateReportTableSchema,
+  validateConfiguredReportTables,
+} from '../scripts/validate-report-table-schema.js';
+
+const expectedTableKeys = [
+  'dailyTable',
+  'chatDailyRawTable',
+  'dailyFactTable',
+  'contactTable',
+  'weeklySourceMappingTable',
+  'weeklySectionRuleTable',
+  'weeklyStyleExampleTable',
+  'coreMetricOwnerTable',
+  'weeklyInstanceTable',
+];
+
+test('catalog covers exactly the nine report tables', () => {
+  assert.deepEqual(REPORT_TABLE_KEYS, expectedTableKeys);
+  assert.deepEqual(Object.keys(buildReportTableSchemaCatalog()), expectedTableKeys);
+});
+
+test('catalog keeps agile and divisional fields out of contact and fact schemas', () => {
+  const catalog = buildReportTableSchemaCatalog();
+  const forbidden = ['敏捷小组', '分管领导'];
+
+  for (const tableKey of ['dailyFactTable', 'contactTable']) {
+    const names = catalog[tableKey].fields.map(field => field.name);
+    for (const fieldName of forbidden) assert.equal(names.includes(fieldName), false);
+  }
+});
+
+test('catalog declares the exact select option sets', () => {
+  const catalog = buildReportTableSchemaCatalog();
+  assert.deepEqual(findField(catalog.chatDailyRawTable, '解析状态').options, ['已解析', '低置信度', '解析失败']);
+  assert.deepEqual(findField(catalog.dailyFactTable, '合并状态').options, ['单来源', '重复已合并', '互补已合并', '按字段取最新']);
+  assert.deepEqual(findField(catalog.weeklySectionRuleTable, '模块').options, ['模块二', '模块三']);
+  assert.deepEqual(findField(catalog.weeklySectionRuleTable, '周报板块').options, [
+    '融羲项目组',
+    '收单项目组',
+    '线上营业厅项目组',
+    '手机银行项目组',
+    '新核心项目组',
+    '零售客群经营',
+    '对公客群经营及场景建设',
+    '渠道创新建设',
+    '业务风控合规',
+    '业务转型推动',
+  ]);
+  assert.deepEqual(findField(catalog.weeklyInstanceTable, '海报状态').options, [
+    '未生成',
+    '生成中',
+    '已生成',
+    '生成失败',
+    '已发送',
+    '发送失败',
+  ]);
+});
+
+test('validator accepts compatible date, person, url, and multiselect fields', () => {
+  const catalog = buildReportTableSchemaCatalog();
+  const actual = fieldsFor(catalog.weeklyInstanceTable, {
+    周报日期: { type: 5 },
+    周报链接: { type: 15 },
+    实例状态: { type: 3, options: ['已创建', '创建失败', '已发布'] },
+    AI生成状态: { type: 3, options: ['未生成', '生成中', '部分成功', '成功', '失败'] },
+    负责人通知状态: { type: 3, options: ['未发送', '部分成功', '成功', '失败'] },
+    海报状态: { type: 3, options: ['未生成', '生成中', '已生成', '生成失败', '已发送', '发送失败'] },
+    小群推送状态: { type: 3, options: ['停用', '未发送', '部分成功', '成功', '失败'] },
+    '周报实例唯一键': { type: 1 },
+    ISO年份: { type: 2 },
+    ISO周次: { type: 2 },
+    日报周期开始: { type: 5 },
+    日报周期结束: { type: 5 },
+    SpreadsheetToken: { type: 1 },
+    SheetID: { type: 1 },
+    工作表名称: { type: 1 },
+    创建时间: { type: 5 },
+    更新时间: { type: 5 },
+  });
+  const result = validateReportTableSchema(catalog.weeklyInstanceTable, actual);
+
+  assert.equal(result.valid, true);
+  assert.deepEqual(result.errors, []);
+});
+
+test('validator reports missing fields, incompatible types, and option drift', () => {
+  const catalog = buildReportTableSchemaCatalog();
+  const actual = fieldsFromOverrides({
+    消息ID: { type: 1 },
+    群ID: { type: 1 },
+    发送人OpenID: { type: 2 },
+    原始消息文本: { type: 1 },
+    内容指纹: { type: 1 },
+    消息时间: { type: 1 },
+    接收时间: { type: 5 },
+    解析状态: { type: 3, options: ['已解析', '失败'] },
+  });
+  const result = validateReportTableSchema(catalog.chatDailyRawTable, actual);
+
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some(error => error.code === 'missing_required_field' && error.field === '原始记录状态'));
+  assert.ok(result.errors.some(error => error.code === 'type_mismatch' && error.field === '发送人OpenID'));
+  assert.ok(result.errors.some(error => error.code === 'type_mismatch' && error.field === '消息时间'));
+  assert.ok(result.errors.some(error => error.code === 'options_mismatch' && error.field === '解析状态'));
+});
+
+test('configured validation reads all nine tables and never requires a write method', async () => {
+  const catalog = buildReportTableSchemaCatalog();
+  const calls = [];
+  const actualByTable = Object.fromEntries(REPORT_TABLE_KEYS.map(tableKey => [
+    tableKey,
+    fieldsFor(catalog[tableKey], {}),
+  ]));
+  const group = Object.fromEntries(REPORT_TABLE_KEYS.map(tableKey => [
+    tableKey,
+    { appToken: 'app_test', tableId: `tbl_${tableKey}` },
+  ]));
+
+  const result = await validateConfiguredReportTables({
+    groups: [{ name: '测试组', ...group }],
+    listFields: async table => {
+      calls.push([table.appToken, table.tableId]);
+      return actualByTable[REPORT_TABLE_KEYS.find(key => table.tableId === `tbl_${key}`)];
+    },
+  });
+
+  assert.equal(result.valid, true);
+  assert.equal(result.groups[0].tables.length, 9);
+  assert.equal(calls.length, 9);
+  assert.deepEqual(calls.map(([, tableId]) => tableId), REPORT_TABLE_KEYS.map(key => `tbl_${key}`));
+});
+
+function findField(table, name) {
+  return table.fields.find(field => field.name === name);
+}
+
+function fieldsFor(table, overrides) {
+  return table.fields.map(field => ({
+    field_name: field.name,
+    type: apiType(field.kind),
+    property: field.options || field.multiple
+      ? {
+        options: field.options?.map(name => ({ name })),
+        multiple: field.multiple === true || undefined,
+      }
+      : undefined,
+    ...overrides[field.name],
+  }));
+}
+
+function fieldsFromOverrides(overrides) {
+  return Object.entries(overrides).map(([field_name, override]) => ({
+    field_name,
+    ...override,
+    property: override.options
+      ? { options: override.options.map(name => ({ name })) }
+      : undefined,
+  }));
+}
+
+function apiType(kind) {
+  return {
+    text: 1,
+    longText: 1,
+    number: 2,
+    singleSelect: 3,
+    multiSelect: 4,
+    date: 5,
+    datetime: 5,
+    checkbox: 7,
+    user: 11,
+    url: 15,
+    link: 18,
+    lookup: 21,
+  }[kind];
+}

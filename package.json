@@ -7,6 +7,7 @@
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "weekly:ensure": "node scripts/ensure-weekly-instance.js",
+    "tables:validate": "node scripts/validate-report-table-schema.js",
     "daily-fact:backfill": "node scripts/backfill-daily-facts.js",
     "daily-chat:replay": "node scripts/replay-chat-daily-reports.js",
     "weekly:ai-preview": "node scripts/preview-weekly-ai.js",
