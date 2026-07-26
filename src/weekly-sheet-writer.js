@@ -212,10 +212,66 @@ export class WeeklySheetWriter {
       response: res,
     };
   }
+
+  async readCells(sheetConfig, sheetId, cells) {
+    assertWeeklySheetConfig(sheetConfig);
+    const resolvedConfig = await this.resolveSheetConfig(sheetConfig);
+    if (!sheetId) throw new Error('sheetId 为空，无法读取周报单元格');
+
+    const result = {};
+    for (const cell of [...new Set(cells || [])].filter(Boolean)) {
+      const range = `${sheetId}!${cell}:${cell}`;
+      const res = await this.client.request({
+        method: 'GET',
+        url: `/open-apis/sheets/v2/spreadsheets/${resolvedConfig.spreadsheetToken}/values/${encodeURIComponent(range)}`,
+      });
+      const values = res?.data?.valueRange?.values || res?.data?.value_range?.values || [];
+      result[cell] = normalizeCellValue(values?.[0]?.[0]);
+    }
+    return result;
+  }
+
+  async markAiCells(sheetConfig, sheetId, values, note = 'AI总结生成，仅供参考') {
+    assertWeeklySheetConfig(sheetConfig);
+    const resolvedConfig = await this.resolveSheetConfig(sheetConfig);
+    if (!sheetId) throw new Error('sheetId 为空，无法标记周报单元格');
+
+    const cells = Object.entries(values || {})
+      .filter(([cell]) => Boolean(cell))
+      .map(([cell, value]) => ({
+        cell,
+        value: value == null ? '' : String(value),
+        note,
+      }));
+    if (!cells.length) return { skipped: true, cellCount: 0 };
+
+    const response = await this.client.request({
+      method: 'POST',
+      url: `/open-apis/sheet_ai/v2/spreadsheets/${resolvedConfig.spreadsheetToken}/tools/invoke_write`,
+      data: {
+        input: JSON.stringify({
+          excel_id: resolvedConfig.spreadsheetToken,
+          operation: 'write',
+          sheet_id: sheetId,
+          cells,
+        }),
+        tool_name: 'write_cells',
+      },
+    });
+    for (const code of [response?.code, response?.data?.code]) {
+      if (code != null && String(code) !== '0') {
+        throw new Error(`周报 AI 标记失败：业务响应 code=${String(code).slice(0, 32)}`);
+      }
+    }
+    return { skipped: false, cellCount: cells.length, response };
+  }
 }
 
-export function renderWeeklySheetTitle(pattern, { weekStart, weekEnd }) {
-  return String(pattern || '数字金融部周报{{weekEndMMDD}}')
+export function renderWeeklySheetTitle(pattern, { reportDate, weekStart, weekEnd }) {
+  const effectiveReportDate = reportDate || weekEnd;
+  return String(pattern || '数字金融部周报{{reportDateMMDD}}')
+    .replaceAll('{{reportDate}}', reportDate || '')
+    .replaceAll('{{reportDateMMDD}}', monthDay(effectiveReportDate))
     .replaceAll('{{weekStart}}', weekStart || '')
     .replaceAll('{{weekEnd}}', weekEnd || '')
     .replaceAll('{{weekStartCompact}}', compactDate(weekStart))
@@ -282,4 +338,12 @@ function compactDate(ymd) {
 function monthDay(ymd) {
   const match = String(ymd || '').match(/^\d{4}-(\d{2})-(\d{2})$/);
   return match ? `${match[1]}${match[2]}` : '';
+}
+
+function normalizeCellValue(value) {
+  if (value == null) return '';
+  if (typeof value === 'object') {
+    return String(value.text ?? value.value ?? value.formattedValue ?? '').trim();
+  }
+  return String(value).trim();
 }

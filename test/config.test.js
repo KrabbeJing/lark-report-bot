@@ -54,7 +54,7 @@ test('normalizes weekly instance schedule, table, and semantic aliases without c
   assert.equal(config.groups[0].weeklyInstanceTable.fieldTypes.sheetUrl, 'url');
   assert.equal(config.groups[0].weeklySheet.cellMap, undefined);
   assert.deepEqual(config.groups[0].weeklySheet.entityAliases.agileProjects['融羲项目组'], ['融羲']);
-  assert.equal(config.groups[0].weeklySheet.titlePattern, '数字金融部周报{{weekEndMMDD}}');
+  assert.equal(config.groups[0].weeklySheet.titlePattern, '数字金融部周报{{reportDateMMDD}}');
 });
 
 test('all weekly title configurations use the Friday MMDD title pattern', () => {
@@ -65,7 +65,7 @@ test('all weekly title configurations use the Friday MMDD title pattern', () => 
   ]) {
     const config = normalizeConfig(JSON.parse(readFileSync(filePath, 'utf8')));
     for (const group of config.groups) {
-      assert.equal(group.weeklySheet?.titlePattern, '数字金融部周报{{weekEndMMDD}}', filePath);
+      assert.equal(group.weeklySheet?.titlePattern, '数字金融部周报{{reportDateMMDD}}', filePath);
     }
   }
 });

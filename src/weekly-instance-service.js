@@ -1,5 +1,5 @@
 import { WEEKLY_INSTANCE_FIELD_KEYS, tableIsConfigured } from './config.js';
-import { getIsoWeekInfo, getWorkWeekRange } from './date-utils.js';
+import { getIsoWeekInfo, getWeeklyReportRange } from './date-utils.js';
 import { buildWeeklySheetUrl } from './weekly-sheet-writer.js';
 
 export async function ensureWeeklyInstanceForGroup({
@@ -17,16 +17,21 @@ export async function ensureWeeklyInstanceForGroup({
     return { skipped: true, reason: 'weekly_instance_table_not_configured' };
   }
 
-  const { start: weekStart, end: weekEnd } = getWorkWeekRange(now, timezone);
-  const { isoYear, isoWeek, key: instanceKey } = getIsoWeekInfo(weekStart);
+  const { reportDate, start: periodStart, end: periodEnd } = getWeeklyReportRange(now, timezone);
+  const { isoYear, isoWeek, key: instanceKey } = getIsoWeekInfo(reportDate);
   const existing = await runWeeklyStage('find_existing_instance', () => (
     bitable.findWeeklyInstanceRecord(group, instanceKey)
   ));
   if (existing) {
-    const instance = readWeeklyInstanceRecord(existing, group.weeklyInstanceTable);
     const resolvedConfig = await runWeeklyStage('resolve_workbook', () => (
       resolveWeeklySheetConfig(sheetWriter, group.weeklySheet)
     ));
+    const instance = {
+      ...readWeeklyInstanceRecord(existing, group.weeklyInstanceTable),
+      group,
+      sheetConfig: resolvedConfig,
+      recordId: existing.record_id,
+    };
     await runWeeklyStage('validate_reused_instance', () => {
       assertReusableWeeklyInstance(instance, resolvedConfig);
     });
@@ -53,7 +58,11 @@ export async function ensureWeeklyInstanceForGroup({
   }
 
   const sheet = await runWeeklyStage('copy_sheet', () => retryOperation(
-    () => sheetWriter.ensureWeeklySheet(group.weeklySheet, { weekStart, weekEnd }),
+    () => sheetWriter.ensureWeeklySheet(group.weeklySheet, {
+      reportDate,
+      weekStart: periodStart,
+      weekEnd: periodEnd,
+    }),
     { attempts: 3, delayMs: retryDelayMs },
   ));
   const effectiveConfig = {
@@ -67,24 +76,30 @@ export async function ensureWeeklyInstanceForGroup({
     { aliasMap: group.weeklySheet.entityAliases },
   ));
   await runWeeklyStage('write_period', () => sheetWriter.writeCells(effectiveConfig, sheet.sheetId, {
-    [targets.reportPeriod]: `${weekStart} 至 ${weekEnd}`,
+    [targets.reportPeriod]: `${periodStart} 至 ${periodEnd}`,
   }));
 
   const instance = {
     instanceKey,
     isoYear,
     isoWeek,
-    weekStart,
-    weekEnd,
+    reportDate,
+    periodStart,
+    periodEnd,
+    weekStart: periodStart,
+    weekEnd: periodEnd,
     spreadsheetToken: effectiveConfig.spreadsheetToken,
     sheetId: sheet.sheetId,
     sheetTitle: sheet.title,
     sheetUrl: buildWeeklySheetUrl(effectiveConfig, sheet.sheetId),
     status: '已创建',
+    group,
+    sheetConfig: effectiveConfig,
   };
   const persisted = await runWeeklyStage('write_instance_base', () => (
     bitable.upsertWeeklyInstance(group, instance, { now, timezone })
   ));
+  if (persisted?.record?.record_id) instance.recordId = persisted.record.record_id;
   return {
     skipped: false,
     reused: sheet.reused,
@@ -119,14 +134,43 @@ function readWeeklyInstanceRecord(record, table) {
     instanceKey: value('instanceKey'),
     isoYear: value('isoYear'),
     isoWeek: value('isoWeek'),
-    weekStart: value('weekStart'),
-    weekEnd: value('weekEnd'),
+    reportDate: value('reportDate') || value('weekEnd'),
+    periodStart: value('periodStart') || value('weekStart'),
+    periodEnd: value('periodEnd') || value('weekEnd'),
+    weekStart: value('weekStart') || value('periodStart'),
+    weekEnd: value('weekEnd') || value('periodEnd'),
     spreadsheetToken: value('spreadsheetToken'),
     sheetId: value('sheetId'),
     sheetTitle: value('sheetTitle'),
     sheetUrl: normalizeInstanceUrl(record?.fields?.[fields.sheetUrl]),
     status: value('status'),
+    aiInitialAt: value('aiInitialAt'),
+    aiRefreshAt: value('aiRefreshAt'),
+    aiDraftSnapshot: parseJsonValue(record?.fields?.[fields.aiDraftSnapshot]),
+    aiEvidenceSnapshot: parseJsonValue(record?.fields?.[fields.aiEvidenceSnapshot]),
+    aiGenerationStatus: value('aiGenerationStatus'),
+    ownerNotificationStatus: value('ownerNotificationStatus'),
+    ownerNotificationDetails: parseJsonValue(record?.fields?.[fields.ownerNotificationDetails]),
+    ownerNotificationAt: value('ownerNotificationAt'),
+    coreMetricReminderDetails: parseJsonValue(record?.fields?.[fields.coreMetricReminderDetails]),
+    posterImageKey: value('posterImageKey'),
+    posterStatus: value('posterStatus'),
+    posterSentAt: value('posterSentAt'),
+    smallTeamPushStatus: value('smallTeamPushStatus'),
+    smallTeamPushDetails: parseJsonValue(record?.fields?.[fields.smallTeamPushDetails]),
+    lastErrorSummary: value('lastErrorSummary'),
   };
+}
+
+function parseJsonValue(value) {
+  const text = normalizeInstanceValue(value);
+  if (!text) return {};
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
 }
 
 function normalizeInstanceValue(value) {

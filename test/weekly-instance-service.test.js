@@ -35,13 +35,16 @@ test('copies, moves, validates, writes only report period, then registers instan
       },
       writeCells: async (_config, sheetId, values) => calls.push(['write', sheetId, values]),
     },
-    now: new Date('2026-07-13T01:00:00.000Z'),
+    now: new Date('2026-07-24T08:30:00+08:00'),
     timezone: 'Asia/Shanghai',
   });
 
-  assert.equal(result.instanceKey, '2026-W29');
+  assert.equal(result.instanceKey, '2026-W30');
+  assert.equal(calls[4][1].reportDate, '2026-07-24');
+  assert.equal(calls[4][1].periodStart, '2026-07-17');
+  assert.equal(calls[4][1].periodEnd, '2026-07-23');
   assert.deepEqual(calls.map(([name]) => name), ['copy', 'move', 'locate', 'write', 'register']);
-  assert.deepEqual(calls[3], ['write', 'week_29', { B2: '2026-07-13 至 2026-07-17' }]);
+  assert.deepEqual(calls[3], ['write', 'week_29', { B2: '2026-07-17 至 2026-07-23' }]);
   assert.equal(calls[4][1].status, '已创建');
 });
 

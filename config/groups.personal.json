@@ -128,7 +128,7 @@
         "wikiNodeToken": "AyekwGsr6iGxClkrMM1cb5YCn1d",
         "spreadsheetUrl": "https://acncyn3n5k6i.feishu.cn/wiki/AyekwGsr6iGxClkrMM1cb5YCn1d?fromScene=spaceOverview&sheet=0Yytpw",
         "templateSheetId": "R0qnOz",
-        "titlePattern": "数字金融部周报{{weekEndMMDD}}",
+        "titlePattern": "数字金融部周报{{reportDateMMDD}}",
         "copyTemplate": true,
         "reportScope": "allDailyTable",
         "reuseExisting": true,
@@ -137,9 +137,16 @@
       "weeklyInstanceTable": {
         "wikiUrl": "https://acncyn3n5k6i.feishu.cn/wiki/TOnDw6LUAiDNi4kc8yYcITpRnde?fromScene=spaceOverview&table=tblYoZqsc1AIHJbf&view=vewv5SmrCH",
         "fieldTypes": {
+          "reportDate": "date",
+          "periodStart": "date",
+          "periodEnd": "date",
           "weekStart": "date",
           "weekEnd": "date",
           "sheetUrl": "url",
+          "aiInitialAt": "datetime",
+          "aiRefreshAt": "datetime",
+          "ownerNotificationAt": "datetime",
+          "posterSentAt": "datetime",
           "createdAt": "datetime",
           "updatedAt": "datetime"
         }

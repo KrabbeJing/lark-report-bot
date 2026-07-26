@@ -4770,6 +4770,36 @@ test('updates existing weekly instance without replacing original creation time'
   assert.equal(typeof updatePayload.data.fields['更新时间'], 'number');
 });
 
+test('updates only requested weekly AI status fields with deterministic JSON', async () => {
+  let updatePayload;
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        update: async payload => {
+          updatePayload = payload;
+          return { data: { record: { record_id: 'rec_week' } } };
+        },
+      },
+    },
+  });
+
+  await service.updateWeeklyInstance(
+    buildWeeklyInstanceGroup(),
+    'rec_week',
+    {
+      aiEvidenceSnapshot: { C27: ['fact-2'], C26: ['fact-1'] },
+      aiGenerationStatus: '已刷新',
+    },
+    { now: new Date('2026-07-25T01:30:00.000Z') },
+  );
+
+  assert.equal(updatePayload.path.record_id, 'rec_week');
+  assert.equal(updatePayload.data.fields['AI证据快照'], '{"C26":["fact-1"],"C27":["fact-2"]}');
+  assert.equal(updatePayload.data.fields['AI生成状态'], '已刷新');
+  assert.equal(updatePayload.data.fields['实例状态'], undefined);
+  assert.equal(typeof updatePayload.data.fields['更新时间'], 'number');
+});
+
 function buildWeeklyInstanceGroup() {
   return normalizeConfig({
     groups: [{

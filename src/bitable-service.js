@@ -870,6 +870,40 @@ export class BitableService {
     };
   }
 
+  async updateWeeklyInstance(groupOrInstance, recordIdOrPatch, maybePatch, context = {}) {
+    const instance = maybePatch === undefined
+      && recordIdOrPatch && typeof recordIdOrPatch === 'object'
+      && (groupOrInstance?.group || groupOrInstance?.weeklyInstanceTable
+        || groupOrInstance?.record || groupOrInstance?.recordId)
+      ? groupOrInstance
+      : null;
+    const group = instance?.group || groupOrInstance;
+    const patch = instance ? recordIdOrPatch : maybePatch;
+    const recordId = instance
+      ? instance.recordId || instance.record?.record_id
+      : recordIdOrPatch;
+    const table = await this.resolveTableConfig(group.weeklyInstanceTable, 'weeklyInstanceTable');
+    assertTable(table, 'weeklyInstanceTable');
+    if (!recordId) throw new Error('周报实例 record_id 为空，无法更新');
+
+    const fields = buildWeeklyInstancePatchFields(table, patch, context);
+    const res = await withBitableErrorContext('weeklyInstance.update', table, () => (
+      this.client.bitable.appTableRecord.update({
+        path: {
+          app_token: table.appToken,
+          table_id: table.tableId,
+          record_id: recordId,
+        },
+        data: { fields },
+      })
+    ));
+    return {
+      updated: true,
+      record: extractRecordFromResponse(res),
+      fields,
+    };
+  }
+
   async listRecords(table, label = 'table.listRecords', options = {}) {
     const resolvedTable = await this.resolveTableConfig(table, 'table');
     assertTable(resolvedTable, 'table');
@@ -1855,6 +1889,9 @@ function buildWeeklyInstanceFields(table, instance, context = {}) {
     'instanceKey',
     'isoYear',
     'isoWeek',
+    'reportDate',
+    'periodStart',
+    'periodEnd',
     'weekStart',
     'weekEnd',
     'spreadsheetToken',
@@ -1862,11 +1899,26 @@ function buildWeeklyInstanceFields(table, instance, context = {}) {
     'sheetTitle',
     'sheetUrl',
     'status',
+    'aiInitialAt',
+    'aiRefreshAt',
+    'aiDraftSnapshot',
+    'aiEvidenceSnapshot',
+    'aiGenerationStatus',
+    'ownerNotificationStatus',
+    'ownerNotificationDetails',
+    'ownerNotificationAt',
+    'coreMetricReminderDetails',
+    'posterImageKey',
+    'posterStatus',
+    'posterSentAt',
+    'smallTeamPushStatus',
+    'smallTeamPushDetails',
+    'lastErrorSummary',
   ]) {
     const fieldContext = key === 'sheetUrl'
       ? { ...context, urlText: instance.sheetTitle || instance.sheetUrl }
       : context;
-    setMappedField(recordFields, table, key, instance[key], fieldContext);
+    setMappedField(recordFields, table, key, serializeWeeklyInstanceValue(key, instance[key]), fieldContext);
   }
   const now = context.now || new Date();
   if (!context.existing) {
@@ -1874,6 +1926,33 @@ function buildWeeklyInstanceFields(table, instance, context = {}) {
   }
   setMappedField(recordFields, table, 'updatedAt', now.getTime(), context);
   return recordFields;
+}
+
+function buildWeeklyInstancePatchFields(table, patch = {}, context = {}) {
+  const recordFields = {};
+  for (const [key, value] of Object.entries(patch || {})) {
+    if (!Object.prototype.hasOwnProperty.call(table.fields || {}, key)) continue;
+    setMappedField(recordFields, table, key, serializeWeeklyInstanceValue(key, value), context);
+  }
+  setMappedField(recordFields, table, 'updatedAt', (context.now || new Date()).getTime(), context);
+  return recordFields;
+}
+
+function serializeWeeklyInstanceValue(key, value) {
+  if (value == null) return value;
+  if (key.endsWith('At') && value instanceof Date) return value.getTime();
+  if (key.endsWith('Snapshot') || key.endsWith('Details')) {
+    return typeof value === 'string' ? value : stableJson(value);
+  }
+  return value;
+}
+
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(item => stableJson(item)).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
 }
 
 export function normalizeFieldValue(value) {

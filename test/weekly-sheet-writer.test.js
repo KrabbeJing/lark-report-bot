@@ -451,12 +451,49 @@ test('renders weekly sheet titles and a matching Sheets URL', () => {
     '数字金融部周报0710',
   );
   assert.equal(
+    renderWeeklySheetTitle('数字金融部周报{{reportDateMMDD}}', {
+      reportDate: '2026-07-24',
+      weekStart: '2026-07-17',
+      weekEnd: '2026-07-23',
+    }),
+    '数字金融部周报0724',
+  );
+  assert.equal(
     buildWeeklySheetUrl({
       spreadsheetToken: 'shtcn_test',
       spreadsheetUrl: 'https://example.feishu.cn/sheets/shtcn_test',
     }, 'new_sheet_1'),
     'https://example.feishu.cn/sheets/shtcn_test?sheet=new_sheet_1',
   );
+});
+
+test('reads selected cells and writes AI notes as non-printing metadata', async () => {
+  const calls = [];
+  const writer = new WeeklySheetWriter({
+    request: async payload => {
+      calls.push(payload);
+      if (payload.url.includes('/values/')) {
+        return { data: { valueRange: { values: [['AI draft']] } } };
+      }
+      return { data: {} };
+    },
+  });
+
+  assert.deepEqual(
+    await writer.readCells({ spreadsheetToken: 'sheet_token' }, 'week_1', ['C26']),
+    { C26: 'AI draft' },
+  );
+  await writer.markAiCells(
+    { spreadsheetToken: 'sheet_token' },
+    'week_1',
+    { C26: 'AI draft' },
+    'AI总结生成，仅供参考',
+  );
+
+  const markCall = calls.find(call => call.url.includes('/sheet_ai/v2/'));
+  assert.ok(markCall);
+  const input = JSON.parse(markCall.data.input);
+  assert.deepEqual(input.cells, [{ cell: 'C26', value: 'AI draft', note: 'AI总结生成，仅供参考' }]);
 });
 
 test('rebuilds a stale Sheets URL from the current wiki-resolved workbook token', () => {
