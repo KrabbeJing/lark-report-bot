@@ -30,3 +30,25 @@ test('sendImage applies uuid normalization before calling Feishu', async () => {
   assert.ok(payload.data.uuid.length <= 50);
   assert.equal(payload.data.uuid, normalizeMessageUuid(input));
 });
+
+test('sendTextToOpenId sends a private text message with a normalized uuid', async () => {
+  let payload;
+  const client = {
+    im: {
+      message: {
+        create: async input => { payload = input; },
+      },
+    },
+  };
+  const messenger = new LarkMessenger(client);
+  const input = `weekly-owner:${'ou_'.padEnd(45, 'a')}`;
+
+  await messenger.sendTextToOpenId('ou_owner', '请填写周报', input);
+
+  assert.equal(payload.params.receive_id_type, 'open_id');
+  assert.equal(payload.data.receive_id, 'ou_owner');
+  assert.equal(payload.data.msg_type, 'text');
+  assert.deepEqual(JSON.parse(payload.data.content), { text: '请填写周报' });
+  assert.equal(payload.data.uuid, normalizeMessageUuid(input));
+  assert.ok(payload.data.uuid.length <= 50);
+});
