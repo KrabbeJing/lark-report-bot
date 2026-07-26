@@ -111,6 +111,51 @@ export async function ensureWeeklyInstanceForGroup({
   };
 }
 
+export async function loadWeeklyInstanceForGroup({
+  group,
+  bitable,
+  sheetWriter,
+  now = new Date(),
+  timezone = 'Asia/Shanghai',
+}) {
+  if (!group.weeklySheet?.enabled) {
+    throw new Error('weekly_sheet_disabled');
+  }
+  if (!tableIsConfigured(group.weeklyInstanceTable)) {
+    throw new Error('weekly_instance_table_not_configured');
+  }
+
+  const { reportDate } = getWeeklyReportRange(now, timezone);
+  const { key: instanceKey } = getIsoWeekInfo(reportDate);
+  const existing = await runWeeklyStage('load_existing_instance', () => (
+    bitable.findWeeklyInstanceRecord(group, instanceKey)
+  ));
+  if (!existing) {
+    const error = new Error(`周报实例不存在：${instanceKey}`);
+    error.weeklyInstanceStage = 'load_existing_instance';
+    throw error;
+  }
+
+  const resolvedConfig = await runWeeklyStage('resolve_workbook', () => (
+    resolveWeeklySheetConfig(sheetWriter, group.weeklySheet)
+  ));
+  const instance = {
+    ...readWeeklyInstanceRecord(existing, group.weeklyInstanceTable),
+    group,
+    sheetConfig: resolvedConfig,
+    recordId: existing.record_id,
+  };
+  await runWeeklyStage('validate_reused_instance', () => {
+    assertReusableWeeklyInstance(instance, resolvedConfig);
+  });
+  const targets = await runWeeklyStage('validate_reused_sheet', () => sheetWriter.discoverTemplateTargets(
+    resolvedConfig,
+    instance.sheetId,
+    { aliasMap: group.weeklySheet.entityAliases },
+  ));
+  return { ...instance, targets };
+}
+
 async function resolveWeeklySheetConfig(sheetWriter, sheetConfig) {
   if (typeof sheetWriter.resolveSheetConfig === 'function') {
     return sheetWriter.resolveSheetConfig(sheetConfig);

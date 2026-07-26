@@ -19,13 +19,10 @@ import {
 } from './scheduler.js';
 import { runGroupedWorkflow } from './scheduled-workflows.js';
 import { SerialTaskQueue } from './serial-task-queue.js';
-import { ensureWeeklyInstanceForGroup } from './weekly-instance-service.js';
 import { WeeklySheetWriter } from './weekly-sheet-writer.js';
+import { WeeklyPosterService } from './weekly-poster-service.js';
 import { runWeeklyWorkflowStage } from './weekly-workflow.js';
-import { loadWeeklyConfiguration } from './weekly-config-repository.js';
-import { routeWeeklyFacts } from './weekly-source-router.js';
-import { writeInitialWeeklyDraft, refreshWeeklyDraft } from './weekly-draft-service.js';
-import { notifyWeeklyOwners, notifyMissingCoreMetricOwners } from './weekly-owner-notifier.js';
+import { createWeeklyWorkflowServices } from './weekly-workflow-services.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = path.resolve(__dirname, '..', 'out');
@@ -51,6 +48,7 @@ const messenger = new LarkMessenger(client);
 const bitable = new BitableService(client);
 const aiProvider = createAiProvider();
 const sheetWriter = new WeeklySheetWriter(client);
+const poster = new WeeklyPosterService({ sheetWriter, messenger, outDir: OUT_DIR });
 const processedMessageIds = new Set();
 const processingMessageIds = new Set();
 const messageQueue = new SerialTaskQueue();
@@ -102,38 +100,14 @@ const eventDispatcher = new lark.EventDispatcher({}).register({
   },
 });
 
-const workflowServices = {
-  timezone: config.timezone,
-  instanceService: {
-    ensure: args => ensureWeeklyInstanceForGroup({ ...args, bitable, sheetWriter, timezone: config.timezone }),
-    load: args => ensureWeeklyInstanceForGroup({ ...args, bitable, sheetWriter, timezone: config.timezone }),
-  },
-  factSync: {
-    sync: ({ group, period, now }) => bitable.syncDailyFactRecordsForGroup(group, {
-      now, timezone: config.timezone, startDate: period.start, endDate: period.end,
-    }),
-  },
-  configRepository: { load: ({ group, period }) => loadWeeklyConfiguration({ group, bitable, period }) },
-  sourceRouter: {
-    route: async ({ group, period, configuration }) => {
-      const facts = await bitable.listAllDailyReportsForRange(group, period.start, period.end);
-      const cellMap = await sheetWriter.discoverTemplateTargets(group.weeklySheet, group.weeklySheet?.templateSheetId, { aliasMap: group.weeklySheet?.entityAliases });
-      return routeWeeklyFacts({ facts, mappings: configuration.mappings, rules: configuration.rules, cellMap, period });
-    },
-  },
-  ai: {
-    generate: ({ group, period }) => aiProvider.generateWeeklySheetPreview({ group, target: {}, evidence: [], styleExamples: [], weekStart: period.start, weekEnd: period.end }),
-  },
-  draftService: {
-    writeInitial: args => writeInitialWeeklyDraft({ ...args, writer: sheetWriter, bitable }),
-    refresh: args => refreshWeeklyDraft({ ...args, writer: sheetWriter, bitable }),
-  },
+const workflowServices = createWeeklyWorkflowServices({
+  config,
   bitable,
-  ownerNotifier: {
-    owners: args => notifyWeeklyOwners({ ...args, messenger, bitable }),
-    metrics: args => notifyMissingCoreMetricOwners({ ...args, writer: sheetWriter, messenger, bitable }),
-  },
-};
+  sheetWriter,
+  aiProvider,
+  messenger,
+  poster,
+});
 
 for (const [scheduleKey, stage] of [
   ['weeklyDraft', 'draft'],

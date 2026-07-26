@@ -43,6 +43,48 @@ test('notify stage consolidates owner and blank metric notifications before pers
   assert.deepEqual(order, ['load config', 'notify weekly owners', 'notify blank metrics', 'persist notify']);
 });
 
+test('draft stage unwraps ensured instance results and passes discovered metric cells to reminders', async () => {
+  const order = [];
+  let draftInstance;
+  let metricCells;
+  const base = fakeServices(order, {
+    instanceService: {
+      ensure: async () => ({
+        instance: { instanceKey: '2026-W30', sheetId: 'sheet_week', sheetConfig: { enabled: true } },
+        targets: { metrics: { 手机银行月活: 'B5' } },
+      }),
+      load: async () => ({
+        instance: { instanceKey: '2026-W30', sheetId: 'sheet_week', sheetConfig: { enabled: true } },
+        targets: { metrics: { 手机银行月活: 'B5' } },
+      }),
+    },
+    draftService: {
+      writeInitial: async args => { draftInstance = args.instance; order.push('write protected cells'); return {}; },
+      refresh: async () => ({}),
+    },
+    ownerNotifier: {
+      owners: async () => { order.push('notify weekly owners'); },
+      metrics: async args => { metricCells = args.metricCells; order.push('notify blank metrics'); },
+    },
+  });
+
+  await runWeeklyWorkflowStage({
+    stage: 'draft',
+    group: { project: '测试组' },
+    now: new Date('2026-07-24T08:30:00+08:00'),
+    services: base,
+  });
+  assert.equal(draftInstance.sheetId, 'sheet_week');
+
+  await runWeeklyWorkflowStage({
+    stage: 'notify',
+    group: { project: '测试组' },
+    now: new Date('2026-07-24T09:00:00+08:00'),
+    services: base,
+  });
+  assert.deepEqual(metricCells, { 手机银行月活: 'B5' });
+});
+
 test('refresh stage syncs and refreshes only eligible cells', async () => {
   const order = [];
   await runWeeklyWorkflowStage({
@@ -75,9 +117,52 @@ test('publish stage sends department poster and filtered enabled small teams wit
     },
   };
   await runWeeklyWorkflowStage({ stage: 'publish', group, now: new Date('2026-07-25T03:00:00Z'), services });
-  assert.deepEqual(order, ['read current Sheet', 'render deterministic poster', 'validate image', 'send department image', 'send team-a', 'send team-b', 'persist publish']);
+  assert.deepEqual(order, ['read current Sheet', 'render deterministic poster', 'validate image', 'send department image', 'persist status', 'send team-a', 'persist status', 'send team-b', 'persist status', 'persist publish']);
   assert.deepEqual(sent.map(item => item.content), [{ Alpha: 'alpha' }, { Beta: 'beta' }]);
   assert.notEqual(sent[0].key, sent[1].key);
+});
+
+test('publish stage skips department and team sends already marked successful', async () => {
+  const sent = [];
+  const services = fakeServices([], {
+    instanceService: {
+      load: async () => ({
+        instance: {
+          instanceKey: '2026-W30',
+          sheetId: 'sheet_week',
+          sheetConfig: { enabled: true },
+          posterStatus: '已发送',
+          smallTeamPushDetails: [{
+            key: 'team-a',
+            status: '成功',
+            idempotencyKey: 'weekly-2026-07-24-publish-team-a',
+          }],
+        },
+        targets: {},
+      }),
+    },
+    poster: {
+      readSheet: async () => ({ sections: { Alpha: 'alpha' } }),
+      render: async sheet => sheet,
+      validate: async () => {},
+      sendDepartment: async () => sent.push('department'),
+      sendTeam: async target => sent.push(target.key),
+    },
+  });
+
+  await runWeeklyWorkflowStage({
+    stage: 'publish',
+    group: {
+      project: '测试组',
+      weeklyDelivery: {
+        departmentChatId: 'oc_same',
+        smallTeams: [{ key: 'team-a', enabled: true, sectionTargets: ['Alpha'] }],
+      },
+    },
+    now: new Date('2026-07-25T03:00:00Z'),
+    services,
+  });
+  assert.deepEqual(sent, []);
 });
 
 test('manual runner parses stage, date, and dry-run without contacting services', () => {

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   ensureWeeklyInstanceForGroup,
   ensureWeeklyInstancesForAllGroups,
+  loadWeeklyInstanceForGroup,
 } from '../src/weekly-instance-service.js';
 
 test('copies, moves, validates, writes only report period, then registers instance', async () => {
@@ -46,6 +47,39 @@ test('copies, moves, validates, writes only report period, then registers instan
   assert.deepEqual(calls.map(([name]) => name), ['copy', 'move', 'locate', 'write', 'register']);
   assert.deepEqual(calls[3], ['write', 'week_29', { B2: '2026-07-17 至 2026-07-23' }]);
   assert.equal(calls[4][1].status, '已创建');
+});
+
+test('loads an existing weekly instance without copying, writing, or registering', async () => {
+  const group = buildGroup();
+  const result = await loadWeeklyInstanceForGroup({
+    group,
+    bitable: {
+      findWeeklyInstanceRecord: async () => ({
+        record_id: 'rec_week',
+        fields: {
+          '周报实例唯一键': '2026-W30',
+          SpreadsheetToken: 'sheet_token',
+          SheetID: 'week_30',
+          工作表名称: '数字金融部周报0724',
+          周报链接: { text: '周报', link: 'https://example.invalid/sheet' },
+        },
+      }),
+    },
+    sheetWriter: {
+      resolveSheetConfig: async config => config,
+      discoverTemplateTargets: async () => ({
+        reportPeriod: 'B2',
+        metrics: { 手机银行月活: 'B5' },
+        agileProjects: {},
+        management: {},
+      }),
+    },
+    now: new Date('2026-07-24T09:00:00+08:00'),
+  });
+
+  assert.equal(result.recordId, 'rec_week');
+  assert.equal(result.sheetId, 'week_30');
+  assert.equal(result.targets.metrics.手机银行月活, 'B5');
 });
 
 test('persists a current-token URL instead of a stale configured workbook URL', async () => {
