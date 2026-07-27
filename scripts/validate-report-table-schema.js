@@ -3,6 +3,7 @@ import * as lark from '@larksuiteoapi/node-sdk';
 import { pathToFileURL } from 'node:url';
 import { BitableService } from '../src/bitable-service.js';
 import { loadGroupConfig } from '../src/config.js';
+import { sanitizeOperationalText } from '../src/error-reporter.js';
 import { buildLarkClientOptions } from '../src/lark-client.js';
 
 export const REPORT_TABLE_KEYS = [
@@ -343,8 +344,8 @@ function isCompatibleType(kind, actual) {
     checkbox: [7],
     user: [11],
     url: [15],
-    link: [18, 20],
-    lookup: [21, 22],
+    link: [18],
+    lookup: [19],
   }[kind] || [];
   return expectedTypes.includes(type);
 }
@@ -358,7 +359,7 @@ function sameStringSet(actual, expected) {
 }
 
 function safeErrorMessage(error) {
-  return String(error?.message || error || 'unknown read error').slice(0, 240);
+  return sanitizeOperationalText(error?.message || error || 'unknown read error').slice(0, 240);
 }
 
 const isMain = process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url;

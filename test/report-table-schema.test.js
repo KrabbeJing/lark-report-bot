@@ -135,6 +135,28 @@ test('configured validation reads all nine tables and never requires a write met
   assert.deepEqual(calls.map(([, tableId]) => tableId), REPORT_TABLE_KEYS.map(key => `tbl_${key}`));
 });
 
+test('configured validation sanitizes table read errors', async () => {
+  const group = Object.fromEntries(REPORT_TABLE_KEYS.map(tableKey => [
+    tableKey,
+    { appToken: 'bas_test', tableId: `tbl_${tableKey}` },
+  ]));
+  const result = await validateConfiguredReportTables({
+    groups: [{ name: '测试组', ...group }],
+    listFields: async table => {
+      if (table.tableId === 'tbl_dailyTable') {
+        throw new Error('request failed app_token=bas_secret table_id=tbl_secret Bearer secret-token');
+      }
+      return fieldsFor(buildReportTableSchemaCatalog().dailyTable, {});
+    },
+  });
+
+  const error = result.groups[0].tables.find(table => table.tableKey === 'dailyTable').errors[0];
+  assert.equal(error.code, 'read_failed');
+  assert.equal(error.message.includes('bas_secret'), false);
+  assert.equal(error.message.includes('tbl_secret'), false);
+  assert.equal(error.message.includes('secret-token'), false);
+});
+
 function findField(table, name) {
   return table.fields.find(field => field.name === name);
 }
@@ -176,6 +198,6 @@ function apiType(kind) {
     user: 11,
     url: 15,
     link: 18,
-    lookup: 21,
+    lookup: 19,
   }[kind];
 }
