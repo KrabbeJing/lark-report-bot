@@ -2097,6 +2097,11 @@ function setOrganizationPersonField({
 
 function formatFieldValue(table, key, value, context = {}) {
   const fieldType = table?.fieldTypes?.[key] || '';
+  // Form creator and lookup columns are read-only in Feishu Base. They are
+  // derived from the submitted record/contact mapping and must not be sent in
+  // create/update payloads when the form table is used as a fallback target.
+  if (fieldType === 'createdBy' || fieldType === 'lookup') return undefined;
+
   if (fieldType === 'date' || fieldType === 'datetime') {
     return toBitableDateTimestamp(value, fieldType);
   }

@@ -55,7 +55,9 @@
       "project": "公司项目组",
       "pushChatId": "oc_028a9bfea1721bcd4229efd7bd542d35",
       "dailyTable": {
-        "wikiUrl": "https://scnbvf7ldg2u.feishu.cn/wiki/WNumwlQuKi8ucak6ZEBcYiYtnH8?table=tblT1DtMmxmHx3cs&view=vewXSKRchw",
+        "wikiNodeToken": "WNumwlQuKi8ucak6ZEBcYiYtnH8",
+        "tableId": "tblT1DtMmxmHx3cs",
+        "viewId": "vewXSKRchw",
         "fields": {
           "reportDate": "日报日期",
           "project": "所属板块",
@@ -67,11 +69,16 @@
           "supervisor": "直属上级"
         },
         "fieldTypes": {
-          "reportDate": "date"
+          "reportDate": "date",
+          "reporterName": "createdBy",
+          "project": "lookup",
+          "supervisor": "lookup"
         }
       },
       "contactTable": {
-        "wikiUrl": "https://scnbvf7ldg2u.feishu.cn/wiki/WNumwlQuKi8ucak6ZEBcYiYtnH8?table=tblTtyLyDNHwwLyi&view=vewVnQxucW",
+        "wikiNodeToken": "WNumwlQuKi8ucak6ZEBcYiYtnH8",
+        "tableId": "tblTtyLyDNHwwLyi",
+        "viewId": "vewVnQxucW",
         "fields": {
           "teamName": "团队名称",
           "teamMember": "团队成员",
@@ -80,14 +87,18 @@
         }
       },
       "chatDailyRawTable": {
-        "wikiUrl": "https://scnbvf7ldg2u.feishu.cn/wiki/WNumwlQuKi8ucak6ZEBcYiYtnH8?table=tblLxEffVLL9fO3y&view=vewlDsLhVE",
+        "wikiNodeToken": "WNumwlQuKi8ucak6ZEBcYiYtnH8",
+        "tableId": "tblLxEffVLL9fO3y",
+        "viewId": "vewlDsLhVE",
         "fieldTypes": {
           "messageTime": "datetime",
           "receivedAt": "datetime"
         }
       },
       "dailyFactTable": {
-        "wikiUrl": "https://scnbvf7ldg2u.feishu.cn/wiki/WNumwlQuKi8ucak6ZEBcYiYtnH8?table=tbl7wzjEeIXmQhDw&view=vewf9t6U5V",
+        "wikiNodeToken": "WNumwlQuKi8ucak6ZEBcYiYtnH8",
+        "tableId": "tbl7wzjEeIXmQhDw",
+        "viewId": "vewf9t6U5V",
         "fieldTypes": {
           "reportDate": "date",
           "reporterName": "user",
@@ -125,7 +136,7 @@
         ]
       },
       "weeklyInstanceTable": {
-        "appToken": "WNumwlQuKi8ucak6ZEBcYiYtnH8",
+        "wikiNodeToken": "WNumwlQuKi8ucak6ZEBcYiYtnH8",
         "tableId": "tblLC8YDEQ27CFsq",
         "viewId": "vewC7hv6Ov",
         "fields": {
@@ -184,6 +195,75 @@
         "reportScope": "allDailyTable",
         "reuseExisting": true,
         "skipPushIfExisting": true
+      },
+      "weeklySourceMappingTable": {
+        "wikiNodeToken": "WNumwlQuKi8ucak6ZEBcYiYtnH8",
+        "tableId": "tblCuB5OK74Q5zgj",
+        "viewId": "vewCVqiSBe",
+        "fields": {
+          "mappingKey": "映射唯一键",
+          "member": "成员",
+          "memberRealName": "成员真实姓名",
+          "memberOpenId": "成员OpenID",
+          "module2Targets": "模块二可归集板块",
+          "module3Target": "模块三归属板块",
+          "effectiveFrom": "生效日期",
+          "effectiveTo": "失效日期",
+          "enabled": "是否启用",
+          "note": "备注"
+        },
+        "fieldTypes": {}
+      },
+      "coreMetricOwnerTable": {
+        "wikiNodeToken": "WNumwlQuKi8ucak6ZEBcYiYtnH8",
+        "tableId": "tblIROQ98WJGLZo4",
+        "viewId": "vew1fQfCL7",
+        "fields": {
+          "metricName": "指标名称",
+          "owners": "指标负责人",
+          "remindersEnabled": "启用提醒",
+          "enabled": "是否启用",
+          "note": "备注"
+        },
+        "fieldTypes": {}
+      },
+      "weeklyStyleExampleTable": {
+        "wikiNodeToken": "WNumwlQuKi8ucak6ZEBcYiYtnH8",
+        "tableId": "tblWKOhqosyytDSj",
+        "viewId": "vewIjshiao",
+        "fields": {
+          "exampleKey": "样例唯一键",
+          "module": "模块",
+          "target": "周报板块",
+          "contentType": "内容类型",
+          "weekKey": "样例周次",
+          "finalText": "最终样例正文",
+          "reviewer": "审核人",
+          "reviewedAt": "审核时间",
+          "highQuality": "纳入优质样例",
+          "enabled": "是否启用",
+          "note": "备注"
+        },
+        "fieldTypes": {}
+      },
+      "weeklySectionRuleTable": {
+        "wikiNodeToken": "WNumwlQuKi8ucak6ZEBcYiYtnH8",
+        "tableId": "tblcXhWi4Dwwwogo",
+        "viewId": "vewp70fE2g",
+        "fields": {
+          "ruleKey": "规则唯一键",
+          "module": "模块",
+          "target": "周报板块",
+          "contentType": "内容类型",
+          "includeTopics": "包含主题",
+          "excludeTopics": "排除主题",
+          "owners": "周报负责人",
+          "remindOwners": "负责人提醒",
+          "order": "排序",
+          "enabled": "是否启用",
+          "note": "备注"
+        },
+        "fieldTypes": {}
       }
     }
   ]

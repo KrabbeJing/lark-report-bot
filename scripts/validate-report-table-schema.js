@@ -44,12 +44,14 @@ export function buildReportTableSchemaCatalog() {
   return {
     dailyTable: schema('表单日报表', [
       field('日报日期', 'date', true),
-      field('日报提交人', 'user', true),
-      field('所属板块', 'text'),
+      // The formal form uses automatic fields/lookups; the personal test Base
+      // may still use writable person/text fields.
+      field('日报提交人', ['createdBy', 'user'], true),
+      field('所属板块', ['lookup', 'text']),
       field('今日工作总结', 'longText', true),
       field('明日工作计划', 'longText'),
       field('遇到的问题', 'longText'),
-      field('直属上级', 'user'),
+      field('直属上级', ['lookup', 'user']),
       field('AI汇总', 'longText'),
     ]),
     chatDailyRawTable: schema('群聊日报原始表', [
@@ -113,7 +115,7 @@ export function buildReportTableSchemaCatalog() {
     ], ['敏捷小组', '分管领导']),
     weeklySourceMappingTable: schema('周报来源映射表', [
       field('映射唯一键', 'text', true),
-      field('成员', 'link', true),
+      field('成员', 'user', true),
       field('成员真实姓名', 'lookup', true),
       field('成员OpenID', 'lookup'),
       field('模块二可归集板块', 'multiSelect', false, SECTIONS.slice(0, 5)),
@@ -333,7 +335,7 @@ function field(name, kind, required = false, options, multiple = false) {
 
 function isCompatibleType(kind, actual) {
   const type = Number(actual.type);
-  const expectedTypes = {
+  const typeMap = {
     text: [1],
     longText: [1],
     number: [2],
@@ -346,8 +348,10 @@ function isCompatibleType(kind, actual) {
     url: [15],
     link: [18],
     lookup: [19],
-  }[kind] || [];
-  return expectedTypes.includes(type);
+    createdBy: [1003],
+  };
+  const kinds = Array.isArray(kind) ? kind : [kind];
+  return kinds.some(item => (typeMap[item] || []).includes(type));
 }
 
 function describeActualType(actual) {

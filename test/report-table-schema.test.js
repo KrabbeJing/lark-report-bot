@@ -61,6 +61,29 @@ test('catalog declares the exact select option sets', () => {
   ]);
 });
 
+test('catalog accepts formal form automatic and lookup field types', () => {
+  const catalog = buildReportTableSchemaCatalog();
+  const actual = fieldsFromOverrides({
+    日报日期: { type: 5 },
+    日报提交人: { type: 1003 },
+    所属板块: { type: 19 },
+    今日工作总结: { type: 1 },
+    明日工作计划: { type: 1 },
+    遇到的问题: { type: 1 },
+    直属上级: { type: 19 },
+    AI汇总: { type: 1 },
+  });
+  const result = validateReportTableSchema(catalog.dailyTable, actual);
+
+  assert.equal(result.valid, true);
+  assert.deepEqual(result.errors, []);
+});
+
+test('weekly source mapping uses a single person field for member identity', () => {
+  const field = findField(buildReportTableSchemaCatalog().weeklySourceMappingTable, '成员');
+  assert.equal(field.kind, 'user');
+});
+
 test('validator accepts compatible date, person, url, and multiselect fields', () => {
   const catalog = buildReportTableSchemaCatalog();
   const actual = fieldsFor(catalog.weeklyInstanceTable, {
@@ -186,6 +209,7 @@ function fieldsFromOverrides(overrides) {
 }
 
 function apiType(kind) {
+  if (Array.isArray(kind)) return apiType(kind[0]);
   return {
     text: 1,
     longText: 1,
@@ -199,5 +223,6 @@ function apiType(kind) {
     url: 15,
     link: 18,
     lookup: 19,
+    createdBy: 1003,
   }[kind];
 }
