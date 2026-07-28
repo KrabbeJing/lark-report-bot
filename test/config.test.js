@@ -145,7 +145,7 @@ test('normalizes the weekly workflow configuration schema with disabled defaults
           name: '测试小团队A',
           enabled: true,
           chatId: 'oc_test',
-          sectionTargets: ['融羲项目组', '零售客群经营'],
+          sectionTargets: ['融羲项目组', '零售大众客群经营'],
         }],
       },
     }],
@@ -172,7 +172,7 @@ test('normalizes the weekly workflow configuration schema with disabled defaults
     name: '测试小团队A',
     enabled: true,
     chatId: 'oc_test',
-    sectionTargets: ['融羲项目组', '零售客群经营'],
+    sectionTargets: ['融羲项目组', '零售大众客群经营'],
   });
 });
 

@@ -13,7 +13,7 @@ function buildInstance(overrides = {}) {
     sheetUrl: 'https://feishu.test/sheets/week-30',
     targets: {
       agileProjects: { 融羲项目组: { current: 'C10' } },
-      management: { 零售客群经营: { current: ['C17', 'C18', 'C19'] } },
+      management: { 零售大众客群经营: { current: ['C17', 'C18', 'C19'] } },
     },
     ownerNotificationDetails: [],
     coreMetricReminderDetails: [],
@@ -33,7 +33,7 @@ function buildOwnerRules(overrides = {}) {
     },
     {
       module: 'module3',
-      target: '零售客群经营',
+      target: '零售大众客群经营',
       contentType: '本周工作进展',
       remindOwners: true,
       owners: [{ openId: 'ou_owner', name: '周报负责人' }],
@@ -77,7 +77,7 @@ test('consolidates two sections for one owner and includes available draft text 
 
   assert.equal(dependencies.sent.length, 1);
   assert.match(dependencies.sent[0].text, /融羲项目组/);
-  assert.match(dependencies.sent[0].text, /零售客群经营/);
+  assert.match(dependencies.sent[0].text, /零售大众客群经营/);
   assert.match(dependencies.sent[0].text, /完成融羲接口联调/);
   assert.match(dependencies.sent[0].text, /完成零售活动方案评审/);
   assert.match(dependencies.sent[0].text, /https:\/\/feishu\.test\/sheets\/week-30/);

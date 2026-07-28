@@ -22,7 +22,7 @@ const rows = [
   [],
   ['三、部门管理工作'],
   [[{ text: '填写说明：每项不超过3条' }]],
-  ['1.零售客群经营', '本周工作进展', ''],
+  ['1.零售大众客群经营', '本周工作进展', ''],
   ['', '', ''],
   ['', '', ''],
   ['', '', ''],
@@ -48,7 +48,7 @@ test('locates all module targets and inherits merged title context', () => {
   const result = locateWeeklyTemplateTargets(rows, {
     aliasMap: {
       agileProjects: { 融羲项目组: ['融羲'] },
-      management: { 零售客群经营: ['零售'] },
+      management: { 零售大众客群经营: ['零售'] },
     },
   });
 
@@ -60,7 +60,7 @@ test('locates all module targets and inherits merged title context', () => {
   assert.deepEqual(result.agileProjects['收单项目组'], {
     current: 'C12', next: 'C13', aliases: [],
   });
-  assert.deepEqual(result.management['零售客群经营'], {
+  assert.deepEqual(result.management['零售大众客群经营'], {
     current: ['C17', 'C18', 'C19'],
     next: ['C21', 'C22', 'C23'],
     aliases: ['零售'],
@@ -69,10 +69,10 @@ test('locates all module targets and inherits merged title context', () => {
 });
 
 test('rejects duplicate semantic paths', () => {
-  const duplicate = [...rows, ['2.零售客群经营', '本周工作进展', '']];
+  const duplicate = [...rows, ['2.零售大众客群经营', '本周工作进展', '']];
   assert.throws(
     () => locateWeeklyTemplateTargets(duplicate),
-    /重复定位.*三、部门管理工作.*零售客群经营.*本周工作进展/,
+    /重复定位.*三、部门管理工作.*零售大众客群经营.*本周工作进展/,
   );
 });
 
