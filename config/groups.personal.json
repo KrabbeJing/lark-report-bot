@@ -104,21 +104,21 @@
             "name": "测试小团队A",
             "enabled": true,
             "chatId": "oc_127d0a4ec12a42a31de3110fdf9b51f3",
-            "sectionTargets": ["融羲项目组", "零售客群经营"]
+            "sectionTargets": ["融羲项目组", "零售大众客群经营"]
           },
           {
             "key": "team-b",
             "name": "测试小团队B",
             "enabled": true,
             "chatId": "oc_127d0a4ec12a42a31de3110fdf9b51f3",
-            "sectionTargets": ["收单项目组", "对公客群经营及场景建设"]
+            "sectionTargets": ["线上营业厅项目组", "收单项目组", "对公客群经营及场景建设"]
           },
           {
             "key": "team-c",
             "name": "测试小团队C",
             "enabled": true,
             "chatId": "oc_127d0a4ec12a42a31de3110fdf9b51f3",
-            "sectionTargets": ["线上营业厅项目组", "手机银行项目组", "新核心项目组", "渠道创新建设", "业务风控合规", "业务转型推动"]
+            "sectionTargets": ["手机银行项目组", "新核心项目组", "渠道创新建设", "业务风控合规"]
           }
         ]
       },
