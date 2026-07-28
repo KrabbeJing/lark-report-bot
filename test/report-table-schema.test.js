@@ -158,6 +158,26 @@ test('configured validation reads all nine tables and never requires a write met
   assert.deepEqual(calls.map(([, tableId]) => tableId), REPORT_TABLE_KEYS.map(key => `tbl_${key}`));
 });
 
+test('configured validation accepts wiki-node table configurations', async () => {
+  const catalog = buildReportTableSchemaCatalog();
+  const actualByTable = Object.fromEntries(REPORT_TABLE_KEYS.map(tableKey => [
+    tableKey,
+    fieldsFor(catalog[tableKey], {}),
+  ]));
+  const group = Object.fromEntries(REPORT_TABLE_KEYS.map(tableKey => [
+    tableKey,
+    { wikiNodeToken: 'wiki_test', tableId: `tbl_${tableKey}` },
+  ]));
+
+  const result = await validateConfiguredReportTables({
+    groups: [{ name: '正式组织测试组', ...group }],
+    listFields: async table => actualByTable[REPORT_TABLE_KEYS.find(key => table.tableId === `tbl_${key}`)],
+  });
+
+  assert.equal(result.valid, true);
+  assert.equal(result.groups[0].tables.every(table => table.valid), true);
+});
+
 test('configured validation sanitizes table read errors', async () => {
   const group = Object.fromEntries(REPORT_TABLE_KEYS.map(tableKey => [
     tableKey,
