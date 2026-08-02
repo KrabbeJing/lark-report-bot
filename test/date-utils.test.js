@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getIsoWeekInfo, getWeeklyReportRange } from '../src/date-utils.js';
+import { getIsoWeekInfo, getWeeklyReportRange, getWorkWeekRange } from '../src/date-utils.js';
 
 test('uses ISO week year across calendar-year boundary', () => {
   assert.deepEqual(getIsoWeekInfo('2027-01-01'), {
@@ -15,20 +15,27 @@ test('uses ISO week year across calendar-year boundary', () => {
   });
 });
 
-test('anchors Friday generation to previous Friday through Thursday', () => {
+test('anchors Friday generation to previous Friday through the current Friday', () => {
   const range = getWeeklyReportRange(new Date('2026-07-24T08:30:00+08:00'));
   assert.deepEqual(range, {
     reportDate: '2026-07-24',
     start: '2026-07-17',
-    end: '2026-07-23',
+    end: '2026-07-24',
   });
 });
 
-test('Saturday refresh uses the same Friday report period', () => {
+test('Sunday refresh uses the same Friday report period including Friday reports', () => {
   const range = getWeeklyReportRange(new Date('2026-07-25T09:30:00+08:00'));
   assert.deepEqual(range, {
     reportDate: '2026-07-24',
     start: '2026-07-17',
-    end: '2026-07-23',
+    end: '2026-07-24',
+  });
+});
+
+test('derives the natural Monday-to-Friday display week from the report date', () => {
+  assert.deepEqual(getWorkWeekRange(new Date('2026-07-24T08:30:00+08:00')), {
+    start: '2026-07-20',
+    end: '2026-07-24',
   });
 });

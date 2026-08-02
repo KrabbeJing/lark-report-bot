@@ -1,3 +1,5 @@
+import { formatNaturalWeekPeriod } from './date-utils.js';
+
 const DEFAULT_EMPTY_VALUE = '';
 const EMPTY_WEEKLY_SHEET_CELL_MAP = {
   reportPeriod: '',
@@ -110,12 +112,5 @@ function cleanItemText(text) {
 }
 
 function formatWeekPeriod(weekStart, weekEnd) {
-  if (!weekStart && !weekEnd) return DEFAULT_EMPTY_VALUE;
-  if (!weekEnd) return compactDate(weekStart);
-  if (!weekStart) return compactDate(weekEnd);
-  return `${compactDate(weekStart)}-${compactDate(weekEnd)}`;
-}
-
-function compactDate(ymd) {
-  return String(ymd || '').replace(/-/g, '.');
+  return formatNaturalWeekPeriod(weekStart, weekEnd) || DEFAULT_EMPTY_VALUE;
 }

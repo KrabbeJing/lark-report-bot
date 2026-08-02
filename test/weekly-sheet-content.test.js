@@ -44,14 +44,14 @@ const routing = {
 
 test('formats only routed current work into semantic current cells', () => {
   const result = buildWeeklySheetValues({
-    weekStart: '2026-07-17',
-    weekEnd: '2026-07-23',
+    weekStart: '2026-07-20',
+    weekEnd: '2026-07-24',
     cellMap,
     routing,
   });
 
   assert.deepEqual(result.values, {
-    B2: '2026.07.17-2026.07.23',
+    B2: '2026年7月20日-7月24日',
     C26: '1. 张三：完成收单接口联调',
     C45: '',
     C46: '',

@@ -682,7 +682,7 @@ test('loads facts and weekly configuration before generating target-scoped curre
     'discover',
   ]);
   assert.equal(result.mode, 'read_only_preview');
-  assert.equal(result.cells.B2, '2026.07.13-2026.07.17');
+  assert.equal(result.cells.B2, '2026年7月13日-7月17日');
   assert.deepEqual(result.cells.D30, [
     {
       text: '完成收单接口联调，交易100笔，状态已完成',
@@ -800,7 +800,7 @@ test('returns current cells blank with configuration diagnostics when weekly tab
   });
 
   assert.equal(modelCalls, 0);
-  assert.equal(result.cells.B2, '2026.07.13-2026.07.17');
+  assert.equal(result.cells.B2, '2026年7月13日-7月17日');
   assert.deepEqual(result.cells.D30, []);
   assert.deepEqual(result.cells.D40, []);
   assert.equal(result.cells.D31, undefined);

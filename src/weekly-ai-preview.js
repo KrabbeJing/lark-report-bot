@@ -1,4 +1,5 @@
 import { tableIsConfigured } from './config.js';
+import { formatNaturalWeekPeriod } from './date-utils.js';
 import { loadWeeklyConfiguration } from './weekly-config-repository.js';
 import { routeWeeklyFacts } from './weekly-source-router.js';
 
@@ -97,6 +98,7 @@ export async function runWeeklyAiPreview({
         start: normalizedOptions.startDate,
         end: normalizedOptions.endDate,
       },
+      includeRoutineMeetingEvidence: true,
     });
     const result = await previewGroup({
       group,
@@ -614,7 +616,7 @@ function safeProviderError(error) {
 }
 
 function formatWeekPeriod(startDate, endDate) {
-  return `${startDate.replace(/-/g, '.')}-${endDate.replace(/-/g, '.')}`;
+  return formatNaturalWeekPeriod(startDate, endDate);
 }
 
 function moduleKey(value) {

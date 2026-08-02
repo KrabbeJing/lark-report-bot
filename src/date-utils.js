@@ -53,10 +53,15 @@ export function addDaysToYmd(ymd, days) {
 
 export function getWorkWeekRange(now = new Date(), timeZone = DEFAULT_TIMEZONE) {
   const today = formatYmd(now, timeZone);
-  const parsed = parseYmd(today);
+  return getWorkWeekRangeForYmd(today);
+}
+
+export function getWorkWeekRangeForYmd(ymd) {
+  const parsed = parseYmd(ymd);
+  if (!parsed) throw new Error(`Invalid YYYY-MM-DD date: ${ymd}`);
   const dow = new Date(Date.UTC(parsed.year, parsed.month - 1, parsed.day)).getUTCDay();
   const mondayOffset = dow === 0 ? -6 : 1 - dow;
-  const start = addDaysToYmd(today, mondayOffset);
+  const start = addDaysToYmd(ymd, mondayOffset);
   return {
     start,
     end: addDaysToYmd(start, 4),
@@ -72,8 +77,20 @@ export function getWeeklyReportRange(now = new Date(), timeZone = DEFAULT_TIMEZO
   return {
     reportDate,
     start: addDaysToYmd(reportDate, -7),
-    end: addDaysToYmd(reportDate, -1),
+    end: reportDate,
   };
+}
+
+export function formatNaturalWeekPeriod(startDate, endDate) {
+  if (!startDate && !endDate) return '';
+  const start = parseYmd(startDate);
+  const end = parseYmd(endDate);
+  if (!start || !end) return '';
+  const left = `${start.year}年${start.month}月${start.day}日`;
+  const right = start.year === end.year
+    ? `${end.month}月${end.day}日`
+    : `${end.year}年${end.month}月${end.day}日`;
+  return `${left}-${right}`;
 }
 
 export function getIsoWeekInfo(ymd) {

@@ -34,6 +34,7 @@ export function routeWeeklyFacts({
   rules = [],
   cellMap = {},
   period = {},
+  includeRoutineMeetingEvidence = false,
 } = {}) {
   const targetSpecs = buildTargetSpecs(cellMap);
   const bucketsByKey = new Map();
@@ -70,6 +71,7 @@ export function routeWeeklyFacts({
         bucketsByKey,
         evidence,
         blocked: memberKeys.some(memberKey => blockedMemberKeys.has(memberKey)),
+        includeRoutineMeetingEvidence,
       });
       if (diagnostic) diagnostics.push(diagnostic);
     }
@@ -82,16 +84,24 @@ export function routeWeeklyFacts({
   };
 }
 
-function routeItem({ source, memberResolution, rules, targetSpecs, bucketsByKey, evidence, blocked }) {
+function routeItem({
+  source,
+  memberResolution,
+  rules,
+  targetSpecs,
+  bucketsByKey,
+  evidence,
+  blocked,
+  includeRoutineMeetingEvidence,
+}) {
   if (blocked) return diagnostic(source, 'duplicate_active_mapping');
   if (memberResolution.diagnosticCode) return diagnostic(source, memberResolution.diagnosticCode);
   const { mappings: memberMappings } = memberResolution;
   if (!memberMappings.length) return diagnostic(source, 'unmapped_member');
   if (memberMappings.length > 1) return diagnostic(source, 'duplicate_active_mapping');
-  if (isRoutineMeetingWithoutOutcome(source.text)) {
+  if (!includeRoutineMeetingEvidence && isRoutineMeetingWithoutOutcome(source.text)) {
     return diagnostic(source, 'routine_meeting_without_result');
   }
-
   const allowedModule2Targets = new Set(memberMappings.flatMap(mapping => toTextArray(mapping.module2Targets)));
   const allowedModule3Targets = new Set(memberMappings.map(mapping => normalized(mapping.module3Target)).filter(Boolean));
   const module2 = matchingTargets({

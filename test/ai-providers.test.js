@@ -109,6 +109,29 @@ test('strict preview requests JSON mode', async () => {
   assert.deepEqual(body.response_format, { type: 'json_object' });
 });
 
+test('weekly preview prompt asks AI to merge repeated daily items and retain communication evidence', async () => {
+  const originalFetch = globalThis.fetch;
+  let prompt;
+  globalThis.fetch = async (_url, options) => {
+    prompt = JSON.parse(options.body).messages[1].content;
+    return {
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: JSON.stringify({ cells: {} }) } }] }),
+    };
+  };
+
+  try {
+    await configuredProvider().generateWeeklySheetPreview(previewInput());
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.match(prompt, /合并重复|同一事项/);
+  assert.match(prompt, /沟通、讨论、协调/);
+  assert.match(prompt, /阶段性成果|提炼/);
+  assert.match(prompt, /不得简单复制日报原文/);
+});
+
 test('weekly sheet summary requests JSON mode', async () => {
   const originalFetch = globalThis.fetch;
   let body;
@@ -303,7 +326,7 @@ test('legacy weekly summaries do not restore broad weekly sheet routing on timeo
 
     assert.equal(summary.reportCount, 1);
     assert.match(summary.summaryText, /完成收单联调/);
-    assert.equal(sheet.values.B2, '2026.07.13-2026.07.17');
+    assert.equal(sheet.values.B2, '2026年7月13日-7月17日');
     assert.equal(sheet.values.D30, '');
     assert.equal(sheet.values.D31, undefined);
     assert.equal(summary.provider, undefined);
@@ -332,7 +355,7 @@ test('legacy weekly summaries also fall back when response body reading aborts',
     const summary = await provider.summarizeWeeklyReports(input);
     const sheet = await provider.summarizeWeeklySheet(input);
     assert.equal(summary.reportCount, 0);
-    assert.equal(sheet.values.B2, '2026.07.13-2026.07.17');
+    assert.equal(sheet.values.B2, '2026年7月13日-7月17日');
   } finally {
     globalThis.fetch = originalFetch;
   }

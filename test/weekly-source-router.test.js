@@ -608,6 +608,26 @@ test('does not treat meeting subjects as completed outcomes', () => {
   ]);
 });
 
+test('keeps communication and discussion evidence for AI summarization', () => {
+  const result = routeWeeklyFacts({
+    facts: [fact({ workItems: [
+      '收单项目沟通测试进度并确认后续安排',
+      '参加收单项目会讨论上线验证事项',
+    ] })],
+    mappings: [mapping({ module3Target: '' })],
+    rules: [rule('模块二', '收单项目组', ['收单'])],
+    cellMap,
+    period,
+    includeRoutineMeetingEvidence: true,
+  });
+
+  assert.deepEqual(texts(result, '收单项目组'), [
+    '收单项目沟通测试进度并确认后续安排',
+    '参加收单项目会讨论上线验证事项',
+  ]);
+  assert.equal(result.diagnostics.some(item => item.code === 'routine_meeting_without_result'), false);
+});
+
 test('does not treat pre-meeting action phrases as completed outcomes', () => {
   const result = routeWeeklyFacts({
     facts: [fact({ workItems: [
