@@ -128,7 +128,7 @@ for (const [scheduleKey, stage] of [
     onRun: now => runGroupedWorkflow({
       task: `周报${stage}`,
       stage: `weekly_${stage}`,
-      groups: config.groups,
+      groups: reportingUnits,
       operation: group => runWeeklyWorkflowStage({ stage, group, services: workflowServices, now }),
       notifyFailure,
     }),

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { normalizeConfig } from '../src/config.js';
 import {
   ensureWeeklyInstanceForGroup,
   ensureWeeklyInstancesForAllGroups,
@@ -516,6 +517,51 @@ test('returns staged reuse validation failures from the all-groups workflow', as
     'validate_reused_sheet',
     'validate_reused_sheet',
   ]);
+});
+
+test('ensures one shared reporting unit once for multiple chats', async () => {
+  const resourceGroup = buildGroup();
+  const config = normalizeConfig({
+    sharedResources: {
+      key: 'digital-finance',
+      name: '数字金融部',
+      ...resourceGroup,
+    },
+    groups: [
+      { chatId: 'oc_a', name: '日报群A', project: '板块A' },
+      { chatId: 'oc_b', name: '日报群B', project: '板块B' },
+    ],
+  });
+  let instanceCalls = 0;
+  const results = await ensureWeeklyInstancesForAllGroups({
+    config,
+    bitable: {
+      findWeeklyInstanceRecord: async () => {
+        instanceCalls += 1;
+        return {
+          record_id: 'rec_week',
+          fields: {
+            SpreadsheetToken: 'sheet_token',
+            SheetID: 'week_29',
+            工作表名称: '数字金融部周报',
+          },
+        };
+      },
+    },
+    sheetWriter: {
+      discoverTemplateTargets: async () => ({
+        reportPeriod: 'B2',
+        metrics: {},
+        agileProjects: {},
+        management: {},
+      }),
+    },
+    now: new Date('2026-07-13T01:00:00.000Z'),
+  });
+
+  assert.equal(instanceCalls, 1);
+  assert.equal(results.length, 1);
+  assert.equal(results[0].group, '数字金融部');
 });
 
 function buildGroup({

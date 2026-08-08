@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { normalizeConfig } from '../src/config.js';
 import { parseWeeklyAiPreviewArgs, runWeeklyAiPreview } from '../src/weekly-ai-preview.js';
 import { runWeeklyAiPreviewCli } from '../src/weekly-ai-preview-cli.js';
 
@@ -79,6 +80,21 @@ function createGroup() {
       entityAliases: { 收单项目组: ['收单'] },
     },
   };
+}
+
+function createSharedWeeklyConfig() {
+  const resourceGroup = createGroup();
+  return normalizeConfig({
+    sharedResources: {
+      key: 'digital-finance',
+      name: '数字金融部',
+      ...resourceGroup,
+    },
+    groups: [
+      { chatId: 'oc_a', name: '日报群A', project: '板块A' },
+      { chatId: 'oc_b', name: '日报群B', project: '板块B' },
+    ],
+  });
 }
 
 function report(overrides = {}) {
@@ -1349,4 +1365,26 @@ test('keeps multi-group shared coordinates isolated and aggregates partial-failu
     result.warnings.join('\n'),
     /groups\[\]\.cells\/evidence\/warnings\/diagnostics\/provider\/model/,
   );
+});
+
+test('previews one shared reporting unit once for multiple chats', async () => {
+  const config = createSharedWeeklyConfig();
+  let factListCalls = 0;
+  const result = await runWeeklyAiPreview({
+    config,
+    bitable: {
+      listAllDailyReportsForRange: async () => {
+        factListCalls += 1;
+        return [];
+      },
+      listRecords: async () => [],
+    },
+    sheetWriter: { discoverTemplateTargets: async () => cellMap },
+    aiProvider: { generateWeeklySheetPreview: async () => ({ cells: {} }) },
+    options,
+  });
+
+  assert.equal(factListCalls, 1);
+  assert.equal(result.groups.length, 1);
+  assert.equal(result.groups[0].name, '数字金融部');
 });

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { getReportingUnits, normalizeConfig } from '../src/config.js';
 import {
   REPORT_TABLE_KEYS,
   buildReportTableSchemaCatalog,
@@ -198,6 +199,39 @@ test('configured validation sanitizes table read errors', async () => {
   assert.equal(error.message.includes('bas_secret'), false);
   assert.equal(error.message.includes('tbl_secret'), false);
   assert.equal(error.message.includes('secret-token'), false);
+});
+
+test('validates one shared schema group regardless of chat-group count', async () => {
+  const config = normalizeConfig({
+    sharedResources: {
+      key: 'digital-finance',
+      name: '数字金融部',
+      ...Object.fromEntries(REPORT_TABLE_KEYS.map(tableKey => [
+        tableKey,
+        { appToken: 'bas_shared', tableId: `tbl_${tableKey}` },
+      ])),
+    },
+    groups: [
+      { chatId: 'oc_a', name: '日报群A', project: '板块A' },
+      { chatId: 'oc_b', name: '日报群B', project: '板块B' },
+    ],
+  });
+  const listFieldsCalls = [];
+  const result = await validateConfiguredReportTables({
+    groups: getReportingUnits(config),
+    listFields: async table => {
+      listFieldsCalls.push(table.tableId);
+      return [];
+    },
+  });
+
+  assert.equal(result.groups.length, 1);
+  assert.equal(result.groups[0].group, '数字金融部');
+  assert.deepEqual(
+    result.groups[0].tables.map(table => table.tableKey),
+    REPORT_TABLE_KEYS,
+  );
+  assert.equal(listFieldsCalls.length, REPORT_TABLE_KEYS.length);
 });
 
 function findField(table, name) {

@@ -2,7 +2,7 @@ import 'dotenv/config';
 import * as lark from '@larksuiteoapi/node-sdk';
 import { pathToFileURL } from 'node:url';
 import { BitableService } from '../src/bitable-service.js';
-import { loadGroupConfig, tableIsConfigured } from '../src/config.js';
+import { getReportingUnits, loadGroupConfig, tableIsConfigured } from '../src/config.js';
 import { sanitizeOperationalText } from '../src/error-reporter.js';
 import { buildLarkClientOptions } from '../src/lark-client.js';
 
@@ -317,7 +317,7 @@ async function main() {
   }));
   const tableService = new BitableService(client);
   const result = await validateConfiguredReportTables({
-    groups: config.groups,
+    groups: getReportingUnits(config),
     listFields: table => listConfiguredFields(client, tableService, table),
   });
 

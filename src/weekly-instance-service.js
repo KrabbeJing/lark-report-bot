@@ -1,4 +1,4 @@
-import { WEEKLY_INSTANCE_FIELD_KEYS, tableIsConfigured } from './config.js';
+import { WEEKLY_INSTANCE_FIELD_KEYS, getReportingUnits, tableIsConfigured } from './config.js';
 import {
   formatNaturalWeekPeriod,
   getIsoWeekInfo,
@@ -251,10 +251,10 @@ export async function ensureWeeklyInstancesForAllGroups({
   now = new Date(),
 }) {
   const results = [];
-  for (const group of config.groups) {
+  for (const group of getReportingUnits(config)) {
     try {
       results.push({
-        group: group.project || group.chatId,
+        group: group.name || group.project || group.chatId,
         ...(await ensureWeeklyInstanceForGroup({
           group,
           bitable,
@@ -265,7 +265,7 @@ export async function ensureWeeklyInstancesForAllGroups({
       });
     } catch (error) {
       results.push({
-        group: group.project || group.chatId,
+        group: group.name || group.project || group.chatId,
         skipped: false,
         error,
       });

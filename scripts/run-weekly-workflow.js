@@ -20,7 +20,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const path = await import('node:path');
   const { fileURLToPath } = await import('node:url');
   const lark = await import('@larksuiteoapi/node-sdk');
-  const { loadGroupConfig } = await import('../src/config.js');
+  const { getReportingUnits, loadGroupConfig } = await import('../src/config.js');
   const { BitableService } = await import('../src/bitable-service.js');
   const { LarkMessenger } = await import('../src/lark-messenger.js');
   const { WeeklySheetWriter } = await import('../src/weekly-sheet-writer.js');
@@ -56,7 +56,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     messenger,
     poster,
   });
-  for (const group of config.groups) {
+  for (const group of getReportingUnits(config)) {
     const result = await runWeeklyWorkflowStage({ stage: options.stage, group, now, dryRun: options.dryRun, services });
     console.log(JSON.stringify({ group: group.project, stage: options.stage, dryRun: options.dryRun, result }, null, 2));
   }

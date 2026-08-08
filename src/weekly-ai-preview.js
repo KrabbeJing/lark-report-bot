@@ -1,4 +1,4 @@
-import { tableIsConfigured } from './config.js';
+import { getReportingUnits, tableIsConfigured } from './config.js';
 import { formatNaturalWeekPeriod } from './date-utils.js';
 import { loadWeeklyConfiguration } from './weekly-config-repository.js';
 import { routeWeeklyFacts } from './weekly-source-router.js';
@@ -59,7 +59,7 @@ export async function runWeeklyAiPreview({
   options = {},
 } = {}) {
   const normalizedOptions = validateOptions(options);
-  const groups = config?.groups || [];
+  const groups = getReportingUnits(config);
   for (const group of groups) {
     if (!tableIsConfigured(group.dailyFactTable)) {
       throw new Error(`dailyFactTable must be configured for group ${group.name || group.project || 'group'}`);
