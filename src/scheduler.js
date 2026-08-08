@@ -156,6 +156,33 @@ export function startDailyFactSyncScheduler({ config, onRun, logger = console, i
   };
 }
 
+export function startChatDailyReplayScheduler({ config, onRun, logger = console, intervalMs = 60_000 }) {
+  const schedule = config.chatDailyReplay;
+  if (!schedule?.enabled) {
+    logger.log('[scheduler] chat daily replay disabled');
+    return { stop() {} };
+  }
+
+  let lastRunKey = '';
+  const tick = async () => {
+    const now = new Date();
+    if (!shouldRunChatDailyReplay(now, schedule)) return;
+    const runKey = Math.floor(now.getTime() / 60_000).toString();
+    if (runKey === lastRunKey) return;
+    lastRunKey = runKey;
+    logger.log(`[scheduler] chat daily replay triggered: ${runKey}`);
+    try {
+      await onRun(now);
+    } catch (err) {
+      logger.error(formatSchedulerFailure('chat daily replay', err));
+    }
+  };
+
+  const timer = setInterval(tick, intervalMs);
+  tick();
+  return { stop() { clearInterval(timer); } };
+}
+
 export function formatSchedulerFailure(task, error) {
   return `[scheduler] ${task} failed ${formatOperationalError(error)}`;
 }
@@ -189,6 +216,11 @@ export function shouldRunDailySupervisorPush(now, schedule) {
 
 export function shouldRunDailyFactSync(now, schedule) {
   return shouldRunDailySchedule(now, schedule, '18:10');
+}
+
+export function shouldRunChatDailyReplay(now, schedule) {
+  const intervalMinutes = Math.max(1, Number(schedule?.intervalMinutes || 1440));
+  return Math.floor(now.getTime() / 60_000) % intervalMinutes === 0;
 }
 
 function shouldRunDailySchedule(now, schedule, defaultTime) {

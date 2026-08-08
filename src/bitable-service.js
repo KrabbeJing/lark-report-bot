@@ -153,6 +153,35 @@ export class BitableService {
     const table = await this.resolveTableConfig(group.chatDailyRawTable, 'chatDailyRawTable');
     assertTable(table, 'chatDailyRawTable');
     const fields = buildChatRawFields(table, report, context);
+
+    const existing = await this.findChatRawRecordByMessageId(group, context.messageId);
+    if (existing) {
+      const res = await withBitableErrorContext('chatDailyRaw.update', table, () => (
+        this.client.bitable.appTableRecord.update({
+          path: {
+            app_token: table.appToken,
+            table_id: table.tableId,
+            record_id: existing.record_id,
+          },
+          params: { user_id_type: 'open_id' },
+          data: { fields },
+        })
+      ));
+      const record = extractRecordFromResponse(res) || { record_id: existing.record_id, fields };
+      const historical = await this.markPreviousChatRawRecordsHistorical(group, report, {
+        ...context,
+        excludeRecordId: existing.record_id,
+        excludeMessageId: context.messageId,
+      });
+      return {
+        created: false,
+        updated: true,
+        record,
+        fields,
+        historicalUpdated: historical.updated,
+      };
+    }
+
     const res = await withBitableErrorContext('chatDailyRaw.create', table, () => (
       this.client.bitable.appTableRecord.create({
         path: {
@@ -170,6 +199,40 @@ export class BitableService {
       excludeMessageId: context.messageId,
     });
     return { created: true, record, fields, historicalUpdated: historical.updated };
+  }
+
+  async findChatRawRecordByMessageId(group, messageId) {
+    if (!messageId || !tableIsConfigured(group.chatDailyRawTable)) return null;
+    const table = await this.resolveTableConfig(group.chatDailyRawTable, 'chatDailyRawTable');
+    const fieldName = table.fields.messageId;
+    if (!fieldName) return null;
+    const records = await this.listRecords(table, 'chatDailyRaw.findByMessageId', { includeView: false });
+    return records.find(record => normalizeFieldValue(record.fields?.[fieldName]) === String(messageId)) || null;
+  }
+
+  async markChatDailyRawRecordHistoricalByMessageId(group, messageId) {
+    if (!messageId || !tableIsConfigured(group.chatDailyRawTable)) return { updated: 0 };
+    const table = await this.resolveTableConfig(group.chatDailyRawTable, 'chatDailyRawTable');
+    const fieldName = table.fields.messageId;
+    const statusField = table.fields.rawRecordStatus;
+    if (!fieldName || !statusField) return { updated: 0 };
+    const records = await this.listRecords(table, 'chatDailyRaw.findRecalled', { includeView: false });
+    const record = records.find(item => (
+      normalizeFieldValue(item.fields?.[fieldName]) === String(messageId)
+      && normalizeFieldValue(item.fields?.[statusField]) === '主版本'
+    ));
+    if (!record) return { updated: 0 };
+    await withBitableErrorContext('chatDailyRaw.markRecalledHistorical', table, () => (
+      this.client.bitable.appTableRecord.update({
+        path: {
+          app_token: table.appToken,
+          table_id: table.tableId,
+          record_id: record.record_id,
+        },
+        data: { fields: { [statusField]: '历史版本' } },
+      })
+    ));
+    return { updated: 1, recordId: record.record_id };
   }
 
   async markPreviousChatRawRecordsHistorical(group, report, context = {}) {
@@ -343,6 +406,7 @@ export class BitableService {
           sourceRecordId: formRecord.record_id || '',
           source: 'form',
           reportDate: report.reportDate,
+          reportType: '单日',
           reporterName,
           memberOpenId,
           senderOpenId: report.senderOpenId,
@@ -1081,20 +1145,23 @@ function isEffectiveFactRecord(record, fields) {
 
 function normalizeChatRawRecord(record, fields, group) {
   const f = record.fields || {};
+  const reportDate = normalizeDateFieldValue(fields.reportDate ? f[fields.reportDate] : '');
+  const reportDates = splitMultiline(fields.reportDates ? f[fields.reportDates] : '');
   return {
     recordId: record.record_id,
     messageId: normalizeFieldValue(fields.messageId ? f[fields.messageId] : ''),
     chatId: normalizeFieldValue(fields.chatId ? f[fields.chatId] : '') || group.chatId || '',
     senderOpenId: normalizeFieldValue(fields.senderOpenId ? f[fields.senderOpenId] : ''),
     reporterName: normalizeFieldValue(fields.reporterName ? f[fields.reporterName] : ''),
-    reportDate: normalizeDateFieldValue(fields.reportDate ? f[fields.reportDate] : ''),
+    reportDate,
     dateRange: normalizeFieldValue(fields.reportDateRange ? f[fields.reportDateRange] : '')
       || normalizeFieldValue(fields.dateRange ? f[fields.dateRange] : ''),
-    reportDates: splitMultiline(fields.reportDates ? f[fields.reportDates] : ''),
+    reportDates,
     rawText: normalizeFieldValue(fields.rawText ? f[fields.rawText] : ''),
     workSummaryText: normalizeFieldValue(fields.workSummaryText ? f[fields.workSummaryText] : ''),
     project: normalizeFieldValue(fields.project ? f[fields.project] : '') || group.project || '',
-    reportType: normalizeFieldValue(fields.reportType ? f[fields.reportType] : ''),
+    reportType: normalizeFieldValue(fields.reportType ? f[fields.reportType] : '')
+      || inferDailyReportType({ source: 'chat', reportDate, reportDates }),
     messageTime: normalizeFieldValue(fields.messageTime ? f[fields.messageTime] : ''),
     rawRecordStatus: normalizeFieldValue(fields.rawRecordStatus ? f[fields.rawRecordStatus] : ''),
   };
@@ -1592,7 +1659,7 @@ function buildDailyFactFields(table, input, existing, options = {}) {
   });
   setMappedField(recordFields, table, 'matchingStatus', snapshot.matchingStatus);
   setMappedField(recordFields, table, 'matchMethod', snapshot.matchMethod);
-  setCanonicalField(recordFields, 'reportType', input.reportType || '');
+  setCanonicalField(recordFields, 'reportType', inferDailyReportType(input));
   setCanonicalField(recordFields, 'dateRange', input.dateRange || '');
   setCanonicalField(recordFields, 'messageTime', input.messageTime || '');
   setMappedField(recordFields, table, 'syncedAt', input.syncedAt || formatDateTime(new Date(), DEFAULT_TIMEZONE));
@@ -2032,6 +2099,17 @@ function normalizeDailyFactCandidateValues(input = {}) {
     ),
     riskItems: normalizeCandidateText(values.riskItems ?? input.riskItems),
   };
+}
+
+function inferDailyReportType(input = {}) {
+  const explicit = String(input.reportType || '').trim();
+  if (explicit) return explicit;
+  const reportDates = Array.isArray(input.reportDates)
+    ? input.reportDates.filter(Boolean)
+    : splitMultiline(input.reportDates);
+  if (reportDates.length > 1) return '多日合并';
+  if (input.source === 'form' || reportDates.length === 1 || input.reportDate) return '单日';
+  return '';
 }
 
 function normalizeCandidateText(value) {

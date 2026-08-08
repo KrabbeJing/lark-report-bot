@@ -11,6 +11,14 @@ export function getSenderOpenId(eventData) {
   return eventData?.sender?.sender_id?.open_id || '';
 }
 
+export function getMessageFingerprint(message) {
+  return JSON.stringify({
+    messageType: message?.message_type || '',
+    content: message?.content || '',
+    mentions: message?.mentions || [],
+  });
+}
+
 export function isMentionedBot(message, botNames = ['数金小助手']) {
   const text = getMessageText(message);
   if (message?.mentions?.some(mention => {

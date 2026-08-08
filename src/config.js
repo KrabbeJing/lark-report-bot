@@ -219,22 +219,22 @@ export function normalizeConfig(raw) {
   const errorReporting = normalizeErrorReporting(raw.errorReporting || raw.error_reporting || {});
   const weeklyDraft = normalizeWeeklySchedule(raw.weeklyDraft, {
     dayOfWeek: 5,
-    time: '16:30',
+    time: '09:00',
     timezone,
   });
   const weeklyOwnerReminder = normalizeWeeklySchedule(raw.weeklyOwnerReminder, {
     dayOfWeek: 5,
-    time: '17:00',
+    time: '16:00',
     timezone,
   });
   const weeklyRefresh = normalizeWeeklySchedule(raw.weeklyRefresh, {
-    dayOfWeek: 6,
-    time: '09:30',
+    dayOfWeek: 0,
+    time: '09:00',
     timezone,
   });
   const weeklyPush = normalizeWeeklySchedule(raw.weeklyPush, {
-    dayOfWeek: 6,
-    time: '11:00',
+    dayOfWeek: 0,
+    time: '12:00',
     timezone,
   });
   const weeklyInstanceCreation = {
@@ -253,6 +253,11 @@ export function normalizeConfig(raw) {
     time: raw.dailyFactSync?.time || '18:10',
     timezone: raw.dailyFactSync?.timezone || timezone,
     lookbackDays: Number(raw.dailyFactSync?.lookbackDays ?? raw.dailyFactSync?.lookback_days ?? 7),
+  };
+  const chatDailyReplay = {
+    enabled: raw.chatDailyReplay?.enabled === true,
+    intervalMinutes: Math.max(1, Number(raw.chatDailyReplay?.intervalMinutes ?? raw.chatDailyReplay?.interval_minutes ?? 1440)),
+    lookbackMinutes: Math.max(1, Number(raw.chatDailyReplay?.lookbackMinutes ?? raw.chatDailyReplay?.lookback_minutes ?? 1440)),
   };
 
   const groups = (raw.groups || [])
@@ -304,6 +309,7 @@ export function normalizeConfig(raw) {
     weeklyInstanceCreation,
     dailySupervisorPush,
     dailyFactSync,
+    chatDailyReplay,
     groups,
   };
 }
@@ -327,8 +333,21 @@ function normalizeWeeklyDelivery(delivery) {
         enabled: team?.enabled === true,
         chatId: String(team?.chatId || team?.chat_id || '').trim(),
         sectionTargets: normalizeStringList(team?.sectionTargets || team?.section_targets),
+        sourceSupervisors: normalizeStringList(team?.sourceSupervisors || team?.source_supervisors),
+        posterSections: normalizePosterSections(team?.posterSections || team?.poster_sections),
       })),
   };
+}
+
+function normalizePosterSections(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((section, index) => ({
+    key: String(section?.key || `section-${index + 1}`).trim(),
+    name: String(section?.name || section?.key || '').trim(),
+    sourceTargets: normalizeStringList(section?.sourceTargets || section?.source_targets),
+    includeTopics: normalizeStringList(section?.includeTopics || section?.include_topics),
+    excludeTopics: normalizeStringList(section?.excludeTopics || section?.exclude_topics),
+  })).filter(section => section.name);
 }
 
 function normalizeErrorReporting(raw) {

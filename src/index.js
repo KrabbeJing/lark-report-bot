@@ -12,8 +12,13 @@ import { loadGroupConfig } from './config.js';
 import { buildLarkClientOptions } from './lark-client.js';
 import { LarkMessenger } from './lark-messenger.js';
 import { handleMessageEvent } from './message-router.js';
+import { handleRecalledMessageEvent } from './chat-message-events.js';
+import { replayRecentChatDailyReports } from './chat-daily-replay.js';
+import { createMessageDeduper } from './message-deduper.js';
+import { getMessageFingerprint } from './message-utils.js';
 import {
   startDailyFactSyncScheduler,
+  startChatDailyReplayScheduler,
   startDailySupervisorScheduler,
   startWeeklyStageScheduler,
 } from './scheduler.js';
@@ -49,8 +54,7 @@ const bitable = new BitableService(client);
 const aiProvider = createAiProvider();
 const sheetWriter = new WeeklySheetWriter(client);
 const poster = new WeeklyPosterService({ sheetWriter, messenger, outDir: OUT_DIR });
-const processedMessageIds = new Set();
-const processingMessageIds = new Set();
+const messageDeduper = createMessageDeduper();
 const messageQueue = new SerialTaskQueue();
 const notifyFailure = async ({ task, scope, stage, errors }) => reportOperationalFailure({
   task,
@@ -65,12 +69,12 @@ const eventDispatcher = new lark.EventDispatcher({}).register({
   'im.message.receive_v1': (data) => {
     const { message } = data;
     const messageId = message.message_id;
+    const fingerprint = getMessageFingerprint(message);
 
-    if (processedMessageIds.has(messageId) || processingMessageIds.has(messageId)) {
+    if (!messageDeduper.begin(messageId, fingerprint)) {
       console.log('[dedupe] already processing/processed');
       return;
     }
-    processingMessageIds.add(messageId);
 
     console.log('[event] message received', {
       chat_type: message.chat_type,
@@ -89,15 +93,16 @@ const eventDispatcher = new lark.EventDispatcher({}).register({
           sheetWriter,
           outDir: OUT_DIR,
         });
-        rememberMessageId(messageId);
+        messageDeduper.complete(messageId, fingerprint);
       } catch (err) {
         console.error(`[handler] failed ${formatOperationalError(err, { stage: 'handler' })}`);
         await reportHandlerError({ err, message, messenger, config });
       } finally {
-        processingMessageIds.delete(messageId);
+        messageDeduper.fail(messageId);
       }
     });
   },
+  'im.message.recalled_v1': (data) => handleRecalledMessageEvent({ data, bitable, config }),
 });
 
 const workflowServices = createWeeklyWorkflowServices({
@@ -156,13 +161,15 @@ startDailyFactSyncScheduler({
   }),
 });
 
+startChatDailyReplayScheduler({
+  config,
+  onRun: now => replayRecentChatDailyReports({
+    client,
+    bitable,
+    config,
+    now,
+  }),
+});
+
 wsClient.start({ eventDispatcher });
 console.log(`[bot] WSClient started, waiting for events... groups=${config.groups.length}, ai=${aiProvider.name}`);
-
-function rememberMessageId(messageId) {
-  processedMessageIds.add(messageId);
-  if (processedMessageIds.size > 1000) {
-    const first = processedMessageIds.values().next().value;
-    processedMessageIds.delete(first);
-  }
-}

@@ -87,6 +87,56 @@ test('replays only missing daily messages and repairs facts from historical raw 
   assert.equal(syncCalls[0].repairOrganization, true);
 });
 
+test('replays an edited message when its message id already exists with older content', async () => {
+  const config = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      dailyTable: { appToken: 'bas', tableId: 'tbl_form' },
+      chatDailyRawTable: { appToken: 'bas', tableId: 'tbl_raw' },
+      dailyFactTable: { appToken: 'bas', tableId: 'tbl_fact' },
+    }],
+  });
+  const handled = [];
+  const result = await replayChatDailyReports({
+    client: {
+      im: {
+        message: {
+          list: async () => ({
+            code: 0,
+            data: {
+              has_more: false,
+              items: [message('om_edited', '刘喜双8.5工作日报\n1、修改后的事项')],
+            },
+          }),
+        },
+      },
+    },
+    bitable: {
+      listRecords: async () => [{
+        record_id: 'rec_raw',
+        fields: {
+          消息ID: 'om_edited',
+          内容指纹: 'old-fingerprint',
+        },
+      }],
+      syncDailyFactRecordsForGroup: async () => ({ created: 0, updated: 0, errors: [] }),
+    },
+    config,
+    options: {
+      chatId: 'oc_test',
+      messageStart: '2026-08-05T00:00:00+08:00',
+      messageEnd: '2026-08-06T00:00:00+08:00',
+      reportStart: '2026-08-05',
+      reportEnd: '2026-08-05',
+    },
+    handleMessage: async input => handled.push(input.data.message.message_id),
+  });
+
+  assert.deepEqual(handled, ['om_edited']);
+  assert.equal(result.replayed, 1);
+  assert.equal(result.skippedExisting, 0);
+});
+
 function message(messageId, text) {
   return {
     message_id: messageId,

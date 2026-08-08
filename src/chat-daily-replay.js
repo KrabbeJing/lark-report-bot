@@ -1,6 +1,7 @@
 import { findGroupByChatId } from './config.js';
-import { coerceLarkTimestamp } from './date-utils.js';
+import { coerceLarkTimestamp, formatYmd } from './date-utils.js';
 import { parseDailyReportText } from './daily-report-parser.js';
+import { buildContentFingerprint } from './daily-record-utils.js';
 import { handleMessageEvent } from './message-router.js';
 import { getMessageText } from './message-utils.js';
 
@@ -56,9 +57,16 @@ export async function replayChatDailyReports({
     { includeView: false },
   );
   const messageIdField = group.chatDailyRawTable.fields.messageId;
-  const existingMessageIds = new Set(existingRawRecords
-    .map(record => String(record.fields?.[messageIdField] || '').trim())
-    .filter(Boolean));
+  const contentFingerprintField = group.chatDailyRawTable.fields.contentFingerprint;
+  const existingMessages = new Map(existingRawRecords
+    .map(record => [
+      String(record.fields?.[messageIdField] || '').trim(),
+      {
+        fingerprint: String(record.fields?.[contentFingerprintField] || '').trim(),
+        hasFingerprint: Boolean(contentFingerprintField && record.fields?.[contentFingerprintField]),
+      },
+    ])
+    .filter(([messageId]) => messageId));
   const messages = await listChatMessages(client, options);
 
   let replayed = 0;
@@ -67,18 +75,31 @@ export async function replayChatDailyReports({
   for (const item of messages) {
     const data = toMessageEvent(item);
     const messageId = data.message.message_id;
-    if (existingMessageIds.has(messageId)) {
-      skippedExisting += 1;
-      continue;
-    }
-
     const text = getMessageText(data.message);
     const parsed = parseDailyReportText(text, {
       messageTime: coerceLarkTimestamp(data.message.create_time),
       timezone: config.timezone,
     });
-    if (item.deleted || item.msg_type !== 'text' || !parsed?.highConfidence) {
+    if (item.deleted) {
+      if (existingMessages.has(messageId) && typeof bitable.markChatDailyRawRecordHistoricalByMessageId === 'function') {
+        await bitable.markChatDailyRawRecordHistoricalByMessageId(group, messageId);
+      }
       ignored += 1;
+      continue;
+    }
+    if (item.msg_type !== 'text' || !parsed?.highConfidence) {
+      ignored += 1;
+      continue;
+    }
+
+    const fingerprint = buildContentFingerprint({
+      workItems: parsed.workSummaryText || parsed.workItems || '',
+      tomorrowPlanItems: parsed.tomorrowPlanItems || '',
+      riskItems: parsed.riskItems || '',
+    });
+    const existing = existingMessages.get(messageId);
+    if (existing && (!existing.hasFingerprint || existing.fingerprint === fingerprint)) {
+      skippedExisting += 1;
       continue;
     }
 
@@ -92,7 +113,7 @@ export async function replayChatDailyReports({
       sheetWriter: null,
       outDir: '',
     });
-    existingMessageIds.add(messageId);
+    existingMessages.set(messageId, { fingerprint, hasFingerprint: true });
     replayed += 1;
   }
 
@@ -112,6 +133,52 @@ export async function replayChatDailyReports({
     ignored,
     syncResult,
   };
+}
+
+export async function replayRecentChatDailyReports({
+  client,
+  bitable,
+  config,
+  now = new Date(),
+  lookbackMinutes = config.chatDailyReplay?.lookbackMinutes,
+  logger = console,
+}) {
+  const minutes = Math.max(1, Number(lookbackMinutes || 1440));
+  const start = new Date(now.getTime() - minutes * 60_000);
+  const optionsForGroup = group => ({
+    chatId: group.chatId,
+    messageStart: start.toISOString(),
+    messageEnd: now.toISOString(),
+    reportStart: formatYmd(start, config.timezone),
+    reportEnd: formatYmd(now, config.timezone),
+  });
+  const results = [];
+  for (const group of config.groups) {
+    if (!group.chatDailyRawTable?.appToken || !group.chatDailyRawTable?.tableId) continue;
+    try {
+      const result = await replayChatDailyReports({
+        client,
+        bitable,
+        config,
+        options: optionsForGroup(group),
+      });
+      results.push({ group: group.project || group.chatId, ...result });
+      logger.log('[daily-chat-replay] group result', {
+        group: group.project || group.chatId,
+        messagesRead: result.messagesRead,
+        replayed: result.replayed,
+        skippedExisting: result.skippedExisting,
+        ignored: result.ignored,
+      });
+    } catch (error) {
+      logger.error('[daily-chat-replay] group failed', {
+        group: group.project || group.chatId,
+        message: error?.message || String(error),
+      });
+      results.push({ group: group.project || group.chatId, failed: true, error });
+    }
+  }
+  return results;
 }
 
 async function listChatMessages(client, options) {
@@ -152,6 +219,7 @@ function toMessageEvent(item) {
       message_type: item.msg_type || '',
       content: item.body?.content || '',
       create_time: item.create_time || '',
+      update_time: item.update_time || '',
       mentions: item.mentions || [],
     },
   };

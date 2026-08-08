@@ -329,6 +329,57 @@ test('writes configured chat reports to raw table and fact table', async () => {
   });
 });
 
+test('writes separate facts when one chat message contains two report blocks', async () => {
+  const config = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      project: '支付平台',
+      chatDailyRawTable: { appToken: 'bas', tableId: 'tbl_chat_raw' },
+      dailyFactTable: { appToken: 'bas', tableId: 'tbl_fact' },
+    }],
+  });
+  const factInputs = [];
+
+  await handleMessageEvent({
+    data: {
+      sender: { sender_id: { open_id: 'ou_liu' } },
+      message: {
+        message_id: 'om_two_reports',
+        chat_id: 'oc_test',
+        chat_type: 'group',
+        message_type: 'text',
+        create_time: String(new Date('2026-08-06T23:00:00+08:00').getTime()),
+        content: JSON.stringify({
+          text: `刘喜双 8.5日工作日报
+1、配置聊城分行收单商户手续费额度包
+2、处理日常收单业务问题
+刘喜双 8.6 日工作日报
+1、解决市南支行收单系统机具中心云喇叭分拨报错问题
+2、处理日常收单业务问题`,
+        }),
+      },
+    },
+    client: {},
+    messenger: { replyText: async () => {} },
+    bitable: {
+      createChatDailyRawRecord: async () => ({ created: true, record: { record_id: 'rec_raw' } }),
+      upsertDailyFactRecord: async (_group, input) => {
+        factInputs.push(input);
+        return { created: true, record: { record_id: `rec_fact_${factInputs.length}` } };
+      },
+    },
+    config,
+    aiProvider: {},
+    outDir: '/tmp',
+  });
+
+  assert.deepEqual(factInputs.map(input => input.reportDate), ['2026-08-05', '2026-08-06']);
+  assert.deepEqual(factInputs.map(input => input.workSummaryText), [
+    '1、配置聊城分行收单商户手续费额度包\n2、处理日常收单业务问题',
+    '1、解决市南支行收单系统机具中心云喇叭分拨报错问题\n2、处理日常收单业务问题',
+  ]);
+});
+
 test('passes configured group name to chat raw records', async () => {
   const config = normalizeConfig({
     groups: [{

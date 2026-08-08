@@ -1,10 +1,13 @@
 import { addDaysToYmd, coerceLarkTimestamp, formatYmd } from './date-utils.js';
 
 const DATE_RANGE_PATTERNS = [
-  /(?:(?<startYear>20\d{2})\s*[-/.年]\s*)?(?<startMonth>\d{1,2})\s*[-/.月]\s*(?<startDay>\d{1,2})\s*(?:日)?\s*[-~至到]\s*(?:(?<endYear>20\d{2})\s*[-/.年]\s*)?(?:(?<endMonth>\d{1,2})\s*[-/.月]\s*)?(?<endDay>\d{1,2})\s*日?/,
+  /(?:(?<startYear>20\d{2})\s*[-/.年]\s*)?(?<startMonth>\d{1,2})\s*[-/.月]\s*(?<startDay>\d{1,2})\s*(?:日)?\s*[-~—–－至到]\s*(?:(?<endYear>20\d{2})\s*[-/.年]\s*)?(?:(?<endMonth>\d{1,2})\s*[-/.月]\s*)?(?<endDay>\d{1,2})\s*日?/,
 ];
 
-const DATE_RANGE_LIKE_RE = /(?:^|[^\d])(?:20\d{2}\s*[-/.年]\s*)?(?:0?[1-9]|1[0-2])\s*[-/.月]\s*(?:0?[1-9]|[12]\d|3[01])\s*(?:日)?\s*[-~至到]\s*(?:(?:20\d{2})\s*[-/.年]\s*)?(?:(?:0?[1-9]|1[0-2])\s*[-/.月]\s*)?(?:0?[1-9]|[12]\d|3[01])\s*日?/;
+const DATE_RANGE_LIKE_RE = /(?:^|[^\d])(?:20\d{2}\s*[-/.年]\s*)?(?:0?[1-9]|1[0-2])\s*[-/.月]\s*(?:0?[1-9]|[12]\d|3[01])\s*(?:日)?\s*[-~—–－至到]\s*(?:(?:20\d{2})\s*[-/.年]\s*)?(?:(?:0?[1-9]|1[0-2])\s*[-/.月]\s*)?(?:0?[1-9]|[12]\d|3[01])\s*日?/;
+
+const DATE_LIST_PATTERN = /(?<first>(?:(?:20\d{2}|\d{2})\s*[-/.年]\s*)?\d{1,2}\s*[-/.月]\s*\d{1,2}\s*日?)\s*(?<rest>(?:[、,，]\s*(?:(?:(?:20\d{2}|\d{2})\s*[-/.年]\s*)?(?:\d{1,2}\s*[-/.月]\s*)?\d{1,2}\s*日?)+))/;
+const DATE_LIST_TOKEN_PATTERN = /[、,，]\s*(?:(?<year>20\d{2}|\d{2})\s*[-/.年]\s*)?(?:(?<month>\d{1,2})\s*[-/.月]\s*)?(?<day>\d{1,2})\s*日?/g;
 
 const DATE_PATTERNS = [
   /(?<year>20\d{2})\s*[-/.年]\s*(?<month>\d{1,2})\s*[-/.月]\s*(?<day>\d{1,2})\s*日?/,
@@ -21,6 +24,46 @@ export function parseDailyReportText(text, options = {}) {
   const timezone = options.timezone || 'Asia/Shanghai';
   const normalized = normalizeText(text);
   const lines = normalized.split('\n').map(line => line.trim()).filter(Boolean);
+  if (lines.length === 0) return null;
+
+  const titleIndexes = findReportTitleIndexes(lines, fallbackDate, timezone);
+  if (titleIndexes.length > 1) {
+    return parseMultipleReportBlocks(lines, titleIndexes, fallbackDate, timezone, normalized);
+  }
+
+  return parseReportBlock(lines, fallbackDate, timezone, normalized);
+}
+
+function parseMultipleReportBlocks(lines, titleIndexes, fallbackDate, timezone, normalized) {
+  const reports = titleIndexes.map((start, index) => {
+    const end = titleIndexes[index + 1] || lines.length;
+    const blockLines = lines.slice(start, end);
+    return parseReportBlock(blockLines, fallbackDate, timezone, blockLines.join('\n'));
+  });
+  const validReports = reports.filter(report => report?.highConfidence);
+  if (validReports.length !== reports.length || validReports.length < 2) {
+    return parseReportBlock(lines, fallbackDate, timezone, normalized);
+  }
+
+  const reportDates = [...new Set(validReports.flatMap(report => report.reportDates || [report.reportDate]))].sort();
+  const reporterNames = [...new Set(validReports.map(report => report.reporterName).filter(Boolean))];
+  return {
+    ...validReports[0],
+    reporterName: reporterNames[0] || validReports[0].reporterName,
+    reportDate: reportDates[0],
+    reportDates,
+    dateRange: reportDates.join('、'),
+    reportType: '多段日报',
+    rawText: normalized,
+    workSummaryText: validReports.map(report => report.workSummaryText).filter(Boolean).join('\n'),
+    workItems: validReports.flatMap(report => report.workItems || []),
+    tomorrowPlanItems: validReports.flatMap(report => report.tomorrowPlanItems || []),
+    riskItems: validReports.flatMap(report => report.riskItems || []),
+    reports: validReports,
+  };
+}
+
+function parseReportBlock(lines, fallbackDate, timezone, normalized) {
   if (lines.length === 0) return null;
 
   const title = lines[0];
@@ -68,7 +111,18 @@ export function parseDailyReportText(text, options = {}) {
     tomorrowPlanItems,
     riskItems,
     title,
+    reports: [],
   };
+}
+
+function findReportTitleIndexes(lines, fallbackDate, timezone) {
+  return lines.reduce((indexes, line, index) => {
+    if (!/(?:工作)?日报/.test(line)) return indexes;
+    const dateInfo = extractDateInfo(line, fallbackDate, timezone);
+    const reporterName = extractReporterName(line, dateInfo?.raw);
+    if (dateInfo?.raw && reporterName) indexes.push(index);
+    return indexes;
+  }, []);
 }
 
 function normalizeText(text) {
@@ -82,6 +136,9 @@ function normalizeText(text) {
 function extractDateInfo(title, fallbackDate, timezone) {
   const range = extractDateRange(title, fallbackDate, timezone);
   if (range) return range;
+
+  const list = extractDateList(title, fallbackDate, timezone);
+  if (list) return list;
 
   if (looksLikeDateRange(title)) {
     return {
@@ -129,6 +186,57 @@ function extractDateRange(title, fallbackDate, timezone) {
       dates,
       rangeText: `${dates[0]}~${dates[dates.length - 1]}`,
       reportType: '多日合并',
+    };
+  }
+  return null;
+}
+
+function extractDateList(title, fallbackDate, timezone) {
+  const match = String(title || '').match(DATE_LIST_PATTERN);
+  if (!match?.groups) return null;
+
+  const fallbackYear = Number(formatYmd(fallbackDate, timezone).slice(0, 4));
+  const first = parseDateToken(match.groups.first, fallbackYear);
+  if (!first) return null;
+
+  const dates = [first.ymd];
+  let currentYear = first.year;
+  let currentMonth = first.month;
+  for (const token of match.groups.rest.matchAll(DATE_LIST_TOKEN_PATTERN)) {
+    const year = normalizeYear(token.groups.year?.startsWith('20') ? token.groups.year : '',
+      token.groups.year && !token.groups.year.startsWith('20') ? token.groups.year : '',
+      currentYear);
+    const month = token.groups.month ? Number(token.groups.month) : currentMonth;
+    const day = Number(token.groups.day);
+    if (!isValidMonthDay(month, day)) return null;
+    currentYear = year;
+    currentMonth = month;
+    dates.push(`${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`);
+  }
+
+  const uniqueDates = [...new Set(dates)].sort();
+  if (uniqueDates.length < 2) return null;
+  return {
+    raw: match[0],
+    ymd: uniqueDates[0],
+    dates: uniqueDates,
+    rangeText: uniqueDates.join('、'),
+    reportType: '多日合并',
+  };
+}
+
+function parseDateToken(token, fallbackYear) {
+  for (const pattern of DATE_PATTERNS) {
+    const match = String(token || '').match(pattern);
+    if (!match?.groups) continue;
+    const year = normalizeYear(match.groups.year, match.groups.shortYear, fallbackYear);
+    const month = Number(match.groups.month);
+    const day = Number(match.groups.day);
+    if (!isValidMonthDay(month, day)) continue;
+    return {
+      year,
+      month,
+      ymd: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
     };
   }
   return null;
@@ -188,6 +296,7 @@ function extractReporterName(title, dateRaw = '') {
     name = name.replace(dateRaw.replace(/日$/, ''), '');
   }
   name = name
+    .replace(/(?:（[^（）]*）|\([^()]*\))\s*$/g, '')
     .replace(/[：:，,\s_-]+$/g, '')
     .replace(/^[：:，,\s_-]+/g, '')
     .trim();

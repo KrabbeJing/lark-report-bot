@@ -91,21 +91,75 @@ async function runPublish(context) {
   }
   if (!dryRun) {
     const sections = currentSheet?.sections || {};
-    for (const target of (group.weeklyDelivery?.smallTeams || []).filter(item => item.enabled === true)) {
+    const targets = (group.weeklyDelivery?.smallTeams || []).filter(item => item.enabled === true);
+    const pendingTargets = targets.filter(target => !hasCompletedDetail(
+      publishDetails,
+      `weekly-${context.period.reportDate}-publish-${target.key}`,
+    ));
+    const smallTeamSummaries = new Map();
+    if (services.smallTeam?.generate) {
+      for (const target of pendingTargets.filter(item => item.posterSections?.length)) {
+        try {
+          smallTeamSummaries.set(target.key, await call(services.smallTeam, 'generate', {
+            ...context,
+            target,
+            period: context.period,
+            instance,
+          }));
+        } catch (error) {
+          smallTeamSummaries.set(target.key, { error });
+        }
+      }
+    }
+    for (const target of targets) {
       const idempotencyKey = `weekly-${context.period.reportDate}-publish-${target.key}`;
-      if (hasSuccessfulDetail(publishDetails, idempotencyKey)) continue;
-      const content = Object.fromEntries((target.sectionTargets || [])
-        .filter(section => Object.prototype.hasOwnProperty.call(sections, section))
-        .map(section => [section, sections[section]]));
+      if (hasCompletedDetail(publishDetails, idempotencyKey)) continue;
       try {
-        await services.poster.sendTeam(target, content, idempotencyKey);
-        publishDetails.push({
-          key: target.key,
-          status: '成功',
-          sentAt: context.now.getTime(),
-          idempotencyKey,
-          errorCode: '',
-        });
+        const summary = smallTeamSummaries.get(target.key);
+        if (summary?.error) throw summary.error;
+        if (target.posterSections?.length) {
+          if (!services.smallTeam?.generate) throw new Error('small_team_service_missing');
+          if (!summary?.sections?.length) {
+            publishDetails.push({
+              key: target.key,
+              status: '跳过',
+              sentAt: context.now.getTime(),
+              idempotencyKey,
+              errorCode: 'no_content',
+            });
+            await persist(context, instance, { smallTeamPushDetails: publishDetails });
+            continue;
+          }
+          const teamPoster = await call(services.poster, 'renderTeam', {
+            ...context,
+            target,
+            summary,
+            instance,
+          });
+          await call(services.poster, 'validate', { ...context, poster: teamPoster, instance });
+          const sendResult = await services.poster.sendTeam(target, teamPoster, idempotencyKey);
+          publishDetails.push({
+            key: target.key,
+            status: '成功',
+            sentAt: context.now.getTime(),
+            idempotencyKey,
+            imageKey: sendResult?.imageKey || teamPoster.imageKey || '',
+            sectionKeys: summary.sections.map(section => section.key),
+            errorCode: '',
+          });
+        } else {
+          const content = Object.fromEntries((target.sectionTargets || [])
+            .filter(section => Object.prototype.hasOwnProperty.call(sections, section))
+            .map(section => [section, sections[section]]));
+          await services.poster.sendTeam(target, content, idempotencyKey);
+          publishDetails.push({
+            key: target.key,
+            status: '成功',
+            sentAt: context.now.getTime(),
+            idempotencyKey,
+            errorCode: '',
+          });
+        }
       } catch (error) {
         publishErrors.push(error);
         publishDetails.push({
@@ -121,7 +175,7 @@ async function runPublish(context) {
   }
   const enabledTeams = (group.weeklyDelivery?.smallTeams || []).filter(item => item.enabled === true);
   const failedTeams = publishDetails.filter(item => item.status === '失败').length;
-  const successfulTeams = publishDetails.filter(item => item.status === '成功').length;
+  const successfulTeams = publishDetails.filter(item => item.status === '成功' || item.status === '跳过').length;
   const smallTeamPushStatus = dryRun
     ? '预览'
     : enabledTeams.length === 0
@@ -186,8 +240,11 @@ function isPosterSent(instance) {
   return instance?.posterStatus === '已发送' || Boolean(instance?.posterSentAt);
 }
 
-function hasSuccessfulDetail(details, idempotencyKey) {
-  return details.some(item => item?.idempotencyKey === idempotencyKey && item?.status === '成功');
+function hasCompletedDetail(details, idempotencyKey) {
+  return details.some(item => (
+    item?.idempotencyKey === idempotencyKey
+      && (item?.status === '成功' || item?.status === '跳过')
+  ));
 }
 
 function normalizeDetails(value) {

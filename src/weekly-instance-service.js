@@ -1,5 +1,10 @@
 import { WEEKLY_INSTANCE_FIELD_KEYS, tableIsConfigured } from './config.js';
-import { getIsoWeekInfo, getWeeklyReportRange } from './date-utils.js';
+import {
+  formatNaturalWeekPeriod,
+  getIsoWeekInfo,
+  getWeeklyReportRange,
+  getWorkWeekRangeForYmd,
+} from './date-utils.js';
 import { buildWeeklySheetUrl } from './weekly-sheet-writer.js';
 
 export async function ensureWeeklyInstanceForGroup({
@@ -18,6 +23,7 @@ export async function ensureWeeklyInstanceForGroup({
   }
 
   const { reportDate, start: periodStart, end: periodEnd } = getWeeklyReportRange(now, timezone);
+  const { start: weekStart, end: weekEnd } = getWorkWeekRangeForYmd(reportDate);
   const { isoYear, isoWeek, key: instanceKey } = getIsoWeekInfo(reportDate);
   const existing = await runWeeklyStage('find_existing_instance', () => (
     bitable.findWeeklyInstanceRecord(group, instanceKey)
@@ -60,8 +66,8 @@ export async function ensureWeeklyInstanceForGroup({
   const sheet = await runWeeklyStage('copy_sheet', () => retryOperation(
     () => sheetWriter.ensureWeeklySheet(group.weeklySheet, {
       reportDate,
-      weekStart: periodStart,
-      weekEnd: periodEnd,
+      weekStart,
+      weekEnd,
     }),
     { attempts: 3, delayMs: retryDelayMs },
   ));
@@ -76,7 +82,7 @@ export async function ensureWeeklyInstanceForGroup({
     { aliasMap: group.weeklySheet.entityAliases },
   ));
   await runWeeklyStage('write_period', () => sheetWriter.writeCells(effectiveConfig, sheet.sheetId, {
-    [targets.reportPeriod]: `${periodStart} 至 ${periodEnd}`,
+    [targets.reportPeriod]: formatNaturalWeekPeriod(weekStart, weekEnd),
   }));
 
   const instance = {
@@ -86,8 +92,8 @@ export async function ensureWeeklyInstanceForGroup({
     reportDate,
     periodStart,
     periodEnd,
-    weekStart: periodStart,
-    weekEnd: periodEnd,
+    weekStart,
+    weekEnd,
     spreadsheetToken: effectiveConfig.spreadsheetToken,
     sheetId: sheet.sheetId,
     sheetTitle: sheet.title,

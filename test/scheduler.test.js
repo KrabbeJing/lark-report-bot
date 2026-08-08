@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  shouldRunChatDailyReplay,
   shouldRunDailyFactSync,
   shouldRunDailySupervisorPush,
   shouldRunWeeklyInstanceCreation,
@@ -10,22 +11,36 @@ import {
 } from '../src/scheduler.js';
 import { normalizeConfig } from '../src/config.js';
 
-test('runs weekly push at configured Saturday time in Asia Shanghai', () => {
-  const now = new Date('2026-06-27T02:00:00.000Z');
+test('runs weekly push at configured Sunday time in Asia Shanghai', () => {
+  const now = new Date('2026-06-28T04:00:00.000Z');
   assert.equal(shouldRunWeeklyPush(now, {
-    dayOfWeek: 6,
-    time: '10:00',
+    dayOfWeek: 0,
+    time: '12:00',
     timezone: 'Asia/Shanghai',
   }), true);
 });
 
 test('does not run at the wrong minute', () => {
-  const now = new Date('2026-06-27T02:01:00.000Z');
+  const now = new Date('2026-06-28T04:01:00.000Z');
   assert.equal(shouldRunWeeklyPush(now, {
-    dayOfWeek: 6,
-    time: '10:00',
+    dayOfWeek: 0,
+    time: '12:00',
     timezone: 'Asia/Shanghai',
   }), false);
+});
+
+test('runs chat daily replay at the configured interval', () => {
+  assert.equal(shouldRunChatDailyReplay(new Date('2026-06-28T04:10:00.000Z'), {
+    intervalMinutes: 5,
+  }), true);
+  assert.equal(shouldRunChatDailyReplay(new Date('2026-06-28T04:11:00.000Z'), {
+    intervalMinutes: 5,
+  }), false);
+});
+
+test('runs chat daily replay once per day by default', () => {
+  assert.equal(shouldRunChatDailyReplay(new Date('2026-06-28T00:00:00.000Z'), {}), true);
+  assert.equal(shouldRunChatDailyReplay(new Date('2026-06-28T00:05:00.000Z'), {}), false);
 });
 
 test('runs weekly instance creation Monday at configured Shanghai time', () => {
@@ -96,12 +111,12 @@ test('daily fact sync is disabled unless explicitly enabled', () => {
   assert.equal(config.dailyFactSync.lookbackDays, 3);
 });
 
-test('weekly stage schedules default to disabled and exact Friday/Saturday times', () => {
+test('weekly stage schedules default to disabled and exact Friday/Sunday times', () => {
   const config = normalizeConfig({});
-  assert.deepEqual(config.weeklyDraft, { enabled: false, dayOfWeek: 5, time: '16:30', timezone: 'Asia/Shanghai' });
-  assert.deepEqual(config.weeklyOwnerReminder, { enabled: false, dayOfWeek: 5, time: '17:00', timezone: 'Asia/Shanghai' });
-  assert.deepEqual(config.weeklyRefresh, { enabled: false, dayOfWeek: 6, time: '09:30', timezone: 'Asia/Shanghai' });
-  assert.deepEqual(config.weeklyPush, { enabled: false, dayOfWeek: 6, time: '11:00', timezone: 'Asia/Shanghai' });
-  assert.equal(shouldRunWeeklyStage(new Date('2026-07-24T08:30:00Z'), config.weeklyDraft), true);
-  assert.equal(shouldRunWeeklyStage(new Date('2026-07-25T01:30:00Z'), config.weeklyRefresh), true);
+  assert.deepEqual(config.weeklyDraft, { enabled: false, dayOfWeek: 5, time: '09:00', timezone: 'Asia/Shanghai' });
+  assert.deepEqual(config.weeklyOwnerReminder, { enabled: false, dayOfWeek: 5, time: '16:00', timezone: 'Asia/Shanghai' });
+  assert.deepEqual(config.weeklyRefresh, { enabled: false, dayOfWeek: 0, time: '09:00', timezone: 'Asia/Shanghai' });
+  assert.deepEqual(config.weeklyPush, { enabled: false, dayOfWeek: 0, time: '12:00', timezone: 'Asia/Shanghai' });
+  assert.equal(shouldRunWeeklyStage(new Date('2026-07-24T01:00:00Z'), config.weeklyDraft), true);
+  assert.equal(shouldRunWeeklyStage(new Date('2026-07-26T01:00:00Z'), config.weeklyRefresh), true);
 });

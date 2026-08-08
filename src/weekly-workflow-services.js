@@ -4,6 +4,7 @@ import { routeWeeklyFacts } from './weekly-source-router.js';
 import { runWeeklyAiPreview } from './weekly-ai-preview.js';
 import { writeInitialWeeklyDraft, refreshWeeklyDraft } from './weekly-draft-service.js';
 import { notifyWeeklyOwners, notifyMissingCoreMetricOwners } from './weekly-owner-notifier.js';
+import { generateSmallTeamSummaries } from './small-team-weekly.js';
 
 export function createWeeklyWorkflowServices({ config, bitable, sheetWriter, aiProvider, messenger, poster }) {
   return {
@@ -37,6 +38,7 @@ export function createWeeklyWorkflowServices({ config, bitable, sheetWriter, aiP
           rules: configuration.rules,
           cellMap,
           period,
+          includeRoutineMeetingEvidence: true,
         });
       },
     },
@@ -57,6 +59,33 @@ export function createWeeklyWorkflowServices({ config, bitable, sheetWriter, aiP
     ownerNotifier: {
       owners: args => notifyWeeklyOwners({ ...args, messenger, bitable }),
       metrics: args => notifyMissingCoreMetricOwners({ ...args, writer: sheetWriter, messenger, bitable }),
+    },
+    smallTeam: {
+      generate: async ({ group, target, period }) => {
+        const facts = await bitable.listAllDailyReportsForRange(group, period.start, period.end);
+        const configuration = await loadWeeklyConfiguration({ group, bitable, period });
+        const cellMap = await sheetWriter.discoverTemplateTargets(
+          group.weeklySheet,
+          group.weeklySheet?.templateSheetId,
+          { aliasMap: group.weeklySheet?.entityAliases },
+        );
+        const routing = routeWeeklyFacts({
+          facts,
+          mappings: configuration.mappings,
+          rules: configuration.rules,
+          cellMap,
+          period,
+          includeRoutineMeetingEvidence: true,
+        });
+        return generateSmallTeamSummaries({
+          group,
+          target,
+          facts,
+          routing,
+          period,
+          aiProvider,
+        });
+      },
     },
     poster,
   };

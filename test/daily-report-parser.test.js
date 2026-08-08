@@ -205,6 +205,50 @@ test('parses date range daily report into multiple report dates', () => {
 2、整理千分卡考核指标`);
 });
 
+test('parses a non-contiguous Chinese date list and keeps the reporter name', () => {
+  const parsed = parseDailyReportText(`王秀男7月24日、27日工作日报
+【1】继续处理259号文未改造POS终端
+【2】与科技沟通确认银联缴费业务当前业务现状`, {
+    messageTime: new Date('2026-07-27T09:00:00+08:00'),
+    timezone: 'Asia/Shanghai',
+  });
+
+  assert.equal(parsed.highConfidence, true);
+  assert.equal(parsed.reporterName, '王秀男');
+  assert.equal(parsed.reportDate, '2026-07-24');
+  assert.deepEqual(parsed.reportDates, ['2026-07-24', '2026-07-27']);
+  assert.equal(parsed.dateRange, '2026-07-24、2026-07-27');
+  assert.equal(parsed.reportType, '多日合并');
+});
+
+test('parses an em-dash date range and keeps the reporter name', () => {
+  const parsed = parseDailyReportText(`徐春昱7.28—29工作日报：
+1.审核收单商户进件18，信息修改、其他任务
+2.新增星海源门店`, {
+    messageTime: new Date('2026-07-29T09:00:00+08:00'),
+    timezone: 'Asia/Shanghai',
+  });
+
+  assert.equal(parsed.highConfidence, true);
+  assert.equal(parsed.reporterName, '徐春昱');
+  assert.equal(parsed.reportDate, '2026-07-28');
+  assert.deepEqual(parsed.reportDates, ['2026-07-28', '2026-07-29']);
+  assert.equal(parsed.dateRange, '2026-07-28~2026-07-29');
+  assert.equal(parsed.reportType, '多日合并');
+});
+
+test('strips a trailing status note from the report title name', () => {
+  const parsed = parseDailyReportText(`徐鑫鹤7.13工作日报（年假）
+1.处理网上支付工单4例`, {
+    messageTime: new Date('2026-07-13T09:00:00+08:00'),
+    timezone: 'Asia/Shanghai',
+  });
+
+  assert.equal(parsed.reporterName, '徐鑫鹤');
+  assert.equal(parsed.reportDate, '2026-07-13');
+  assert.equal(parsed.reportType, '单日');
+});
+
 test('uses title date instead of next-day message time', () => {
   const parsed = parseDailyReportText(`刘喜双6.30工作日报
 1、补发昨日数据提取进展`, {
@@ -215,6 +259,32 @@ test('uses title date instead of next-day message time', () => {
   assert.equal(parsed.reportDate, '2026-06-30');
   assert.deepEqual(parsed.reportDates, ['2026-06-30']);
   assert.equal(parsed.reportType, '单日');
+});
+
+test('splits two daily report blocks in one message', () => {
+  const parsed = parseDailyReportText(`刘喜双 8.5日工作日报
+1、配置聊城分行收单商户手续费额度包
+2、处理日常收单业务问题
+刘喜双 8.6 日工作日报
+1、解决市南支行收单系统机具中心云喇叭分拨报错问题
+2、处理日常收单业务问题`, {
+    messageTime: new Date('2026-08-06T23:00:00+08:00'),
+    timezone: 'Asia/Shanghai',
+  });
+
+  assert.equal(parsed.highConfidence, true);
+  assert.deepEqual(parsed.reportDates, ['2026-08-05', '2026-08-06']);
+  assert.equal(parsed.reports.length, 2);
+  assert.equal(parsed.reports[0].reportDate, '2026-08-05');
+  assert.deepEqual(parsed.reports[0].workItems, [
+    '配置聊城分行收单商户手续费额度包',
+    '处理日常收单业务问题',
+  ]);
+  assert.equal(parsed.reports[1].reportDate, '2026-08-06');
+  assert.deepEqual(parsed.reports[1].workItems, [
+    '解决市南支行收单系统机具中心云喇叭分拨报错问题',
+    '处理日常收单业务问题',
+  ]);
 });
 
 test('does not reinterpret backward date range as single-day report', () => {

@@ -116,6 +116,29 @@ test('normalizes chat raw and daily fact table configs', () => {
   assert.equal(group.dailyFactTable.fields.fieldSourceSnapshot, '字段来源快照');
 });
 
+test('chat daily replay is disabled by default and normalizes lookback settings', () => {
+  const defaults = normalizeConfig({ groups: [] });
+  assert.deepEqual(defaults.chatDailyReplay, {
+    enabled: false,
+    intervalMinutes: 1440,
+    lookbackMinutes: 1440,
+  });
+
+  const configured = normalizeConfig({
+    chatDailyReplay: {
+      enabled: true,
+      intervalMinutes: 10,
+      lookbackMinutes: 360,
+    },
+    groups: [],
+  });
+  assert.deepEqual(configured.chatDailyReplay, {
+    enabled: true,
+    intervalMinutes: 10,
+    lookbackMinutes: 360,
+  });
+});
+
 test('does not normalize group agileGroup as organization configuration', () => {
   const group = normalizeConfig({
     groups: [{ chatId: 'oc_test', agileGroup: '不应保留' }],
@@ -164,7 +187,7 @@ test('normalizes the weekly workflow configuration schema with disabled defaults
   assert.deepEqual(config.weeklyDraft, {
     enabled: false,
     dayOfWeek: 5,
-    time: '16:30',
+    time: '09:00',
     timezone: 'Asia/Shanghai',
   });
   assert.deepEqual(group.weeklyDelivery.smallTeams[0], {
@@ -173,6 +196,8 @@ test('normalizes the weekly workflow configuration schema with disabled defaults
     enabled: true,
     chatId: 'oc_test',
     sectionTargets: ['融羲项目组', '零售大众客群经营'],
+    sourceSupervisors: [],
+    posterSections: [],
   });
 });
 

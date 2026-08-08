@@ -122,6 +122,91 @@ test('publish stage sends department poster and filtered enabled small teams wit
   assert.notEqual(sent[0].key, sent[1].key);
 });
 
+test('publish stage renders one modular image poster for each configured small team', async () => {
+  const order = [];
+  const sent = [];
+  const services = fakeServices(order, {
+    poster: {
+      readSheet: async () => { order.push('read current Sheet'); return { sections: {} }; },
+      render: async () => { order.push('render deterministic poster'); return { outPath: '/tmp/department.png' }; },
+      renderTeam: async ({ target, summary }) => {
+        order.push(`render ${target.key} image`);
+        return { outPath: `/tmp/${target.key}.png`, sections: summary.sections };
+      },
+      validate: async ({ poster }) => {
+        assert.match(poster.outPath, /\.png$/);
+        order.push('validate image');
+      },
+      sendDepartment: async () => { order.push('send department image'); },
+      sendTeam: async (target, poster, key) => {
+        sent.push({ target, poster, key });
+        order.push(`send ${target.key}`);
+        return { imageKey: `img-${target.key}` };
+      },
+    },
+    smallTeam: {
+      generate: async ({ target }) => ({
+        target: target.key,
+        name: target.name,
+        sections: [{ key: 'cloud-pay', name: '云缴费', summaryText: '完成需求评审。' }],
+      }),
+    },
+  });
+  const group = {
+    project: '测试组',
+    weeklyDelivery: {
+      departmentChatId: 'oc_department',
+      smallTeams: [
+        {
+          key: 'team-a',
+          name: '公司板块',
+          enabled: true,
+          chatId: 'oc_team_a',
+          posterSections: [{ key: 'cloud-pay', name: '云缴费' }],
+        },
+        {
+          key: 'team-b',
+          name: '零售板块',
+          enabled: true,
+          chatId: 'oc_team_b',
+          posterSections: [{ key: 'retail', name: '零售大众客群经营' }],
+        },
+      ],
+    },
+  };
+
+  await runWeeklyWorkflowStage({
+    stage: 'publish',
+    group,
+    now: new Date('2026-07-26T04:00:00Z'),
+    services,
+  });
+
+  assert.equal(sent.length, 2);
+  assert.deepEqual(sent.map(item => item.target.key), ['team-a', 'team-b']);
+  assert.deepEqual(sent.map(item => item.poster.outPath), ['/tmp/team-a.png', '/tmp/team-b.png']);
+  assert.deepEqual(sent.map(item => item.key), [
+    'weekly-2026-07-31-publish-team-a',
+    'weekly-2026-07-31-publish-team-b',
+  ]);
+  assert.deepEqual(order, [
+    'read current Sheet',
+    'render deterministic poster',
+    'validate image',
+    'send department image',
+    'persist status',
+    'render team-a image',
+    'validate image',
+    'send team-a',
+    'persist status',
+    'render team-b image',
+    'validate image',
+    'send team-b',
+    'persist status',
+    'persist publish',
+  ]);
+});
+
 test('publish stage skips department and team sends already marked successful', async () => {
   const sent = [];
   const services = fakeServices([], {
@@ -162,6 +247,58 @@ test('publish stage skips department and team sends already marked successful', 
     now: new Date('2026-07-25T03:00:00Z'),
     services,
   });
+  assert.deepEqual(sent, []);
+});
+
+test('publish stage does not retry a small team already marked as having no content', async () => {
+  const sent = [];
+  const services = fakeServices([], {
+    instanceService: {
+      load: async () => ({
+        instance: {
+          instanceKey: '2026-W30',
+          sheetId: 'sheet_week',
+          sheetConfig: { enabled: true },
+          posterStatus: '已发送',
+          smallTeamPushDetails: [{
+            key: 'team-a',
+            status: '跳过',
+            idempotencyKey: 'weekly-2026-07-31-publish-team-a',
+            errorCode: 'no_content',
+          }],
+        },
+        targets: {},
+      }),
+    },
+    poster: {
+      readSheet: async () => ({ sections: {} }),
+      render: async sheet => sheet,
+      validate: async () => {},
+      sendDepartment: async () => sent.push('department'),
+      sendTeam: async target => sent.push(target.key),
+    },
+    smallTeam: {
+      generate: async () => { throw new Error('should not regenerate'); },
+    },
+  });
+
+  await runWeeklyWorkflowStage({
+    stage: 'publish',
+    group: {
+      project: '测试组',
+      weeklyDelivery: {
+        departmentChatId: 'oc_same',
+        smallTeams: [{
+          key: 'team-a',
+          enabled: true,
+          posterSections: [{ key: 'retail', name: '零售大众客群经营' }],
+        }],
+      },
+    },
+    now: new Date('2026-07-26T03:00:00Z'),
+    services,
+  });
+
   assert.deepEqual(sent, []);
 });
 

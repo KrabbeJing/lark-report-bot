@@ -103,50 +103,53 @@ export async function handleMessageEvent({
 
     const rawResult = await bitable.createChatDailyRawRecord(group, parsed, context);
     const rawRecordId = rawResult.record?.record_id || rawResult.record?.recordId || '';
-    const reportDates = (parsed.reportDates?.length ? parsed.reportDates : [parsed.reportDate])
-      .map(date => String(date || '').trim())
-      .filter(Boolean);
+    const reportEntries = parsed.reports?.length ? parsed.reports : [parsed];
     const factResults = [];
 
-    for (const reportDate of reportDates) {
-      const reporterName = contact?.teamMember || parsed.reporterName;
-      const memberOpenId = contact?.teamMemberId || senderOpenId;
-      const factInput = {
-        factKey: buildFactKey({
-          openId: memberOpenId,
-          name: reporterName,
+    for (const reportEntry of reportEntries) {
+      const reportDates = (reportEntry.reportDates?.length ? reportEntry.reportDates : [reportEntry.reportDate])
+        .map(date => String(date || '').trim())
+        .filter(Boolean);
+      for (const reportDate of reportDates) {
+        const reporterName = contact?.teamMember || reportEntry.reporterName || parsed.reporterName;
+        const memberOpenId = contact?.teamMemberId || senderOpenId;
+        const factInput = {
+          factKey: buildFactKey({
+            openId: memberOpenId,
+            name: reporterName,
+            reportDate,
+          }),
           reportDate,
-        }),
-        reportDate,
-        reporterName,
-        memberOpenId,
-        senderOpenId,
-        workSummaryText: parsed.workSummaryText,
-        tomorrowPlanItems: parsed.tomorrowPlanItems,
-        riskItems: parsed.riskItems,
-        source: 'chat',
-        messageId: message.message_id,
-        sourceRecordId: rawRecordId,
-        rawRecordId,
-        rawText: parsed.rawText,
-        chatId: message.chat_id,
-        project: contact?.teamName || '',
-        supervisor: contact?.supervisor || '',
-        supervisorOpenId: contact?.supervisorOpenId || '',
-        matchingStatus: contact?.matchingStatus || (contact ? '已匹配' : '未匹配'),
-        matchMethod: contact?.matchMethod || '',
-        reportType: parsed.reportType,
-        dateRange: parsed.dateRange,
-        messageTime: context.messageTimeText,
-        sourceTime: messageTime.getTime(),
-        contact,
-        values: {
-          workItems: parsed.workSummaryText || '',
-          tomorrowPlanItems: joinCandidateItems(parsed.tomorrowPlanItems),
-          riskItems: joinCandidateItems(parsed.riskItems),
-        },
-      };
-      factResults.push(await bitable.upsertDailyFactRecord(group, factInput));
+          reporterName,
+          memberOpenId,
+          senderOpenId,
+          workSummaryText: reportEntry.workSummaryText,
+          tomorrowPlanItems: reportEntry.tomorrowPlanItems,
+          riskItems: reportEntry.riskItems,
+          source: 'chat',
+          messageId: message.message_id,
+          sourceRecordId: rawRecordId,
+          rawRecordId,
+          rawText: reportEntry.rawText,
+          chatId: message.chat_id,
+          project: contact?.teamName || '',
+          supervisor: contact?.supervisor || '',
+          supervisorOpenId: contact?.supervisorOpenId || '',
+          matchingStatus: contact?.matchingStatus || (contact ? '已匹配' : '未匹配'),
+          matchMethod: contact?.matchMethod || '',
+          reportType: reportEntry.reportType,
+          dateRange: reportEntry.dateRange,
+          messageTime: context.messageTimeText,
+          sourceTime: messageTime.getTime(),
+          contact,
+          values: {
+            workItems: reportEntry.workSummaryText || '',
+            tomorrowPlanItems: joinCandidateItems(reportEntry.tomorrowPlanItems),
+            riskItems: joinCandidateItems(reportEntry.riskItems),
+          },
+        };
+        factResults.push(await bitable.upsertDailyFactRecord(group, factInput));
+      }
     }
 
     const result = {
@@ -156,7 +159,7 @@ export async function handleMessageEvent({
 
     console.log('[daily-report] chat raw/fact write result', {
       reportDate: parsed.reportDate,
-      reportDateCount: reportDates.length,
+      reportDateCount: parsed.reportDates?.length || reportEntries.length,
       rawCreated: Boolean(rawResult.created),
       factResultCount: factResults.length,
       workItemCount: parsed.workItems.length,

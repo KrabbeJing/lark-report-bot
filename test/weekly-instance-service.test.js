@@ -6,7 +6,7 @@ import {
   loadWeeklyInstanceForGroup,
 } from '../src/weekly-instance-service.js';
 
-test('copies, moves, validates, writes only report period, then registers instance', async () => {
+test('copies, moves, validates, writes natural-week period, then registers instance', async () => {
   const calls = [];
   const group = buildGroup();
   const result = await ensureWeeklyInstanceForGroup({
@@ -43,9 +43,11 @@ test('copies, moves, validates, writes only report period, then registers instan
   assert.equal(result.instanceKey, '2026-W30');
   assert.equal(calls[4][1].reportDate, '2026-07-24');
   assert.equal(calls[4][1].periodStart, '2026-07-17');
-  assert.equal(calls[4][1].periodEnd, '2026-07-23');
+  assert.equal(calls[4][1].periodEnd, '2026-07-24');
+  assert.equal(calls[4][1].weekStart, '2026-07-20');
+  assert.equal(calls[4][1].weekEnd, '2026-07-24');
   assert.deepEqual(calls.map(([name]) => name), ['copy', 'move', 'locate', 'write', 'register']);
-  assert.deepEqual(calls[3], ['write', 'week_29', { B2: '2026-07-17 至 2026-07-23' }]);
+  assert.deepEqual(calls[3], ['write', 'week_29', { B2: '2026年7月20日-7月24日' }]);
   assert.equal(calls[4][1].status, '已创建');
 });
 
