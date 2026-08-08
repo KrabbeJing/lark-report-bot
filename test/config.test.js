@@ -1,7 +1,107 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { normalizeConfig, parseBitableLink, parseWeeklySheetLink } from '../src/config.js';
+import * as configApi from '../src/config.js';
+
+const {
+  findGroupByChatId,
+  normalizeConfig,
+  parseBitableLink,
+  parseWeeklySheetLink,
+} = configApi;
+
+test('normalizes one shared reporting unit and two lightweight chat groups', () => {
+  const config = normalizeConfig({
+    sharedResources: {
+      key: 'digital-finance',
+      name: '数字金融部',
+      dailyTable: { appToken: 'bas_shared', tableId: 'tbl_daily' },
+      chatDailyRawTable: { appToken: 'bas_shared', tableId: 'tbl_raw' },
+      dailyFactTable: { appToken: 'bas_shared', tableId: 'tbl_fact' },
+    },
+    groups: [
+      { chatId: 'oc_a', name: '日报群A', project: '板块A', pushChatId: 'oc_test' },
+      { chatId: 'oc_b', name: '日报群B', project: '板块B', pushChatId: 'oc_test' },
+    ],
+  });
+
+  assert.ok(Array.isArray(config.chatGroups));
+  assert.equal(config.chatGroups.length, 2);
+  assert.equal(config.reportingUnits.length, 1);
+  assert.equal(config.reportingUnits[0].dailyFactTable.tableId, 'tbl_fact');
+  assert.equal(config.chatGroups[0].dailyFactTable, undefined);
+  assert.equal(config.groups[1].dailyFactTable.tableId, 'tbl_fact');
+  assert.equal(config.groups[1].project, '板块B');
+  assert.equal(config.groups[1].reportingUnitKey, 'digital-finance');
+  assert.equal(typeof configApi.getReportingUnits, 'function');
+  assert.deepEqual(configApi.getReportingUnits(config), config.reportingUnits);
+  assert.equal(findGroupByChatId(config, 'oc_b').chatId, 'oc_b');
+  assert.equal(findGroupByChatId(config, 'oc_test'), null);
+});
+
+test('omits disabled chat groups while validating duplicate chat ids across all raw groups', () => {
+  const config = normalizeConfig({
+    sharedResources: { key: 'shared', name: '共享单元' },
+    groups: [
+      { enabled: false, chatId: 'oc_disabled', name: '已停用群' },
+      { chatId: 'oc_enabled', name: '启用群' },
+    ],
+  });
+
+  assert.ok(Array.isArray(config.chatGroups));
+  assert.deepEqual(config.chatGroups.map(group => group.chatId), ['oc_enabled']);
+
+  assert.throws(
+    () => normalizeConfig({
+      sharedResources: { key: 'shared', name: '共享单元' },
+      groups: [
+        { enabled: false, chatId: 'oc_duplicate' },
+        { chatId: 'oc_duplicate' },
+      ],
+    }),
+    error => error.code === 'duplicate_chat_id',
+  );
+});
+
+test('rejects group-level shared resource overrides but allows shared push destinations', () => {
+  assert.throws(
+    () => normalizeConfig({
+      sharedResources: {
+        key: 'shared',
+        name: '共享单元',
+        dailyFactTable: { appToken: 'bas_shared', tableId: 'tbl_fact' },
+      },
+      groups: [{ chatId: 'oc_a', dailyFactTable: { appToken: 'bas_group', tableId: 'tbl_other' } }],
+    }),
+    error => error.code === 'group_shared_resource_override',
+  );
+
+  const config = normalizeConfig({
+    sharedResources: { key: 'shared', name: '共享单元' },
+    groups: [
+      { chatId: 'oc_a', pushChatId: 'oc_push' },
+      { chatId: 'oc_b', pushChatId: 'oc_push' },
+    ],
+  });
+  assert.deepEqual(config.chatGroups.map(group => group.pushChatId), ['oc_push', 'oc_push']);
+});
+
+test('keeps one legacy group as one chat and one reporting unit', () => {
+  const config = normalizeConfig({
+    groups: [{
+      chatId: 'oc_legacy',
+      name: '旧日报群',
+      project: '公司项目组',
+      dailyFactTable: { appToken: 'bas_legacy', tableId: 'tbl_fact' },
+    }],
+  });
+
+  assert.ok(Array.isArray(config.chatGroups));
+  assert.equal(config.chatGroups.length, 1);
+  assert.equal(config.reportingUnits.length, 1);
+  assert.equal(config.reportingUnits[0].dailyFactTable.tableId, 'tbl_fact');
+  assert.equal(findGroupByChatId(config, 'oc_legacy').project, '公司项目组');
+});
 
 test('parses weekly sheet wiki link', () => {
   const parsed = parseWeeklySheetLink('https://acncyn3n5k6i.feishu.cn/wiki/BaTOwZsM6ikYjJkhSqOc8e0Ynrh?sheet=4dcda2');

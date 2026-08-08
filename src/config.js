@@ -202,6 +202,21 @@ export const WEEKLY_SHEET_ENTITY_ALIASES = {
   },
 };
 
+export const SHARED_RESOURCE_KEYS = [
+  'dailyTable',
+  'chatDailyRawTable',
+  'dailyFactTable',
+  'contactTable',
+  'weeklyTable',
+  'weeklyInstanceTable',
+  'weeklySourceMappingTable',
+  'weeklySectionRuleTable',
+  'weeklyStyleExampleTable',
+  'coreMetricOwnerTable',
+  'weeklySheet',
+  'weeklyDelivery',
+];
+
 export function loadGroupConfig(configPath = process.env.GROUPS_CONFIG_PATH || DEFAULT_CONFIG_PATH) {
   if (!fs.existsSync(configPath)) {
     console.warn(`[config] groups config not found: ${configPath}`);
@@ -260,43 +275,29 @@ export function normalizeConfig(raw) {
     lookbackMinutes: Math.max(1, Number(raw.chatDailyReplay?.lookbackMinutes ?? raw.chatDailyReplay?.lookback_minutes ?? 1440)),
   };
 
-  const groups = (raw.groups || [])
-    .filter(group => group.enabled !== false)
-    .map(group => {
-      const { agileGroup: _agileGroup, ...normalizedGroup } = group;
-      return {
-      ...normalizedGroup,
-      pushChatId: group.pushChatId || group.chatId,
-      project: group.project || group.name || group.chatId,
-      dailyTable: normalizeTableConfig(group.dailyTable, DAILY_FIELD_KEYS),
-      chatDailyRawTable: normalizeTableConfig(group.chatDailyRawTable || group.chat_daily_raw_table, CHAT_DAILY_RAW_FIELD_KEYS),
-      dailyFactTable: normalizeTableConfig(group.dailyFactTable || group.daily_fact_table, DAILY_FACT_FIELD_KEYS),
-      contactTable: normalizeTableConfig(group.contactTable || raw.contactTable, CONTACT_FIELD_KEYS),
-      weeklyTable: normalizeTableConfig(group.weeklyTable, WEEKLY_FIELD_KEYS),
-      weeklyInstanceTable: normalizeTableConfig(
-        group.weeklyInstanceTable || raw.weeklyInstanceTable,
-        WEEKLY_INSTANCE_FIELD_KEYS,
-      ),
-      weeklySourceMappingTable: normalizeTableConfig(
-        group.weeklySourceMappingTable || raw.weeklySourceMappingTable,
-        WEEKLY_SOURCE_MAPPING_FIELD_KEYS,
-      ),
-      weeklySectionRuleTable: normalizeTableConfig(
-        group.weeklySectionRuleTable || raw.weeklySectionRuleTable,
-        WEEKLY_SECTION_RULE_FIELD_KEYS,
-      ),
-      weeklyStyleExampleTable: normalizeTableConfig(
-        group.weeklyStyleExampleTable || raw.weeklyStyleExampleTable,
-        WEEKLY_STYLE_EXAMPLE_FIELD_KEYS,
-      ),
-      coreMetricOwnerTable: normalizeTableConfig(
-        group.coreMetricOwnerTable || raw.coreMetricOwnerTable,
-        CORE_METRIC_OWNER_FIELD_KEYS,
-      ),
-      weeklySheet: normalizeWeeklySheetConfig(group.weeklySheet || raw.weeklySheet),
-      weeklyDelivery: normalizeWeeklyDelivery(group.weeklyDelivery || raw.weeklyDelivery),
-      };
-    });
+  const rawGroups = Array.isArray(raw.groups) ? raw.groups : [];
+  validateUniqueChatIds(rawGroups);
+
+  const hasSharedResources = raw.sharedResources && typeof raw.sharedResources === 'object';
+  let chatGroups;
+  let reportingUnits;
+  let groups;
+
+  if (hasSharedResources) {
+    validateSharedResourceOwnership(rawGroups);
+    const reportingUnit = normalizeReportingUnit(raw.sharedResources);
+    chatGroups = rawGroups
+      .filter(group => group.enabled !== false)
+      .map(normalizeChatGroup);
+    reportingUnits = [reportingUnit];
+    groups = chatGroups.map(chatGroup => mergeChatGroup(reportingUnit, chatGroup));
+  } else {
+    groups = rawGroups
+      .filter(group => group.enabled !== false)
+      .map(group => normalizeLegacyGroup(group, raw));
+    chatGroups = groups.map(normalizeChatGroup);
+    reportingUnits = groups.map(normalizeLegacyReportingUnit);
+  }
 
   return {
     timezone,
@@ -310,8 +311,147 @@ export function normalizeConfig(raw) {
     dailySupervisorPush,
     dailyFactSync,
     chatDailyReplay,
+    chatGroups,
+    reportingUnits,
     groups,
   };
+}
+
+export function getReportingUnits(config) {
+  return Array.isArray(config?.reportingUnits) ? config.reportingUnits : (config?.groups || []);
+}
+
+function normalizeLegacyGroup(group, raw) {
+  const { agileGroup: _agileGroup, ...normalizedGroup } = group;
+  return {
+    ...normalizedGroup,
+    pushChatId: group.pushChatId || group.chatId,
+    project: group.project || group.name || group.chatId,
+    ...normalizeResourceSet(group, {
+      contactTable: raw.contactTable,
+      weeklyInstanceTable: raw.weeklyInstanceTable,
+      weeklySourceMappingTable: raw.weeklySourceMappingTable,
+      weeklySectionRuleTable: raw.weeklySectionRuleTable,
+      weeklyStyleExampleTable: raw.weeklyStyleExampleTable,
+      coreMetricOwnerTable: raw.coreMetricOwnerTable,
+      weeklySheet: raw.weeklySheet,
+      weeklyDelivery: raw.weeklyDelivery,
+    }),
+  };
+}
+
+function normalizeReportingUnit(sharedResources) {
+  const key = String(sharedResources.key || sharedResources.name || 'default').trim();
+  const name = String(sharedResources.name || key).trim();
+  return {
+    key,
+    name,
+    project: String(sharedResources.project || name || key).trim(),
+    ...normalizeResourceSet(sharedResources),
+  };
+}
+
+function normalizeLegacyReportingUnit(group) {
+  const key = String(group.key || group.name || group.chatId || 'default').trim();
+  return {
+    key,
+    name: String(group.name || key).trim(),
+    project: String(group.project || group.name || key).trim(),
+    ...pickResourceSet(group),
+  };
+}
+
+function normalizeChatGroup(group) {
+  return {
+    enabled: group.enabled !== false,
+    chatId: group.chatId,
+    name: group.name || group.chatId,
+    project: group.project || group.name || group.chatId,
+    pushChatId: group.pushChatId || group.chatId,
+  };
+}
+
+function mergeChatGroup(reportingUnit, chatGroup) {
+  return {
+    ...reportingUnit,
+    ...chatGroup,
+    reportingUnitKey: reportingUnit.key,
+  };
+}
+
+function normalizeResourceSet(source, fallback = {}) {
+  return {
+    dailyTable: normalizeTableConfig(source.dailyTable, DAILY_FIELD_KEYS),
+    chatDailyRawTable: normalizeTableConfig(
+      source.chatDailyRawTable || source.chat_daily_raw_table,
+      CHAT_DAILY_RAW_FIELD_KEYS,
+    ),
+    dailyFactTable: normalizeTableConfig(
+      source.dailyFactTable || source.daily_fact_table,
+      DAILY_FACT_FIELD_KEYS,
+    ),
+    contactTable: normalizeTableConfig(source.contactTable || fallback.contactTable, CONTACT_FIELD_KEYS),
+    weeklyTable: normalizeTableConfig(source.weeklyTable, WEEKLY_FIELD_KEYS),
+    weeklyInstanceTable: normalizeTableConfig(
+      source.weeklyInstanceTable || fallback.weeklyInstanceTable,
+      WEEKLY_INSTANCE_FIELD_KEYS,
+    ),
+    weeklySourceMappingTable: normalizeTableConfig(
+      source.weeklySourceMappingTable || fallback.weeklySourceMappingTable,
+      WEEKLY_SOURCE_MAPPING_FIELD_KEYS,
+    ),
+    weeklySectionRuleTable: normalizeTableConfig(
+      source.weeklySectionRuleTable || fallback.weeklySectionRuleTable,
+      WEEKLY_SECTION_RULE_FIELD_KEYS,
+    ),
+    weeklyStyleExampleTable: normalizeTableConfig(
+      source.weeklyStyleExampleTable || fallback.weeklyStyleExampleTable,
+      WEEKLY_STYLE_EXAMPLE_FIELD_KEYS,
+    ),
+    coreMetricOwnerTable: normalizeTableConfig(
+      source.coreMetricOwnerTable || fallback.coreMetricOwnerTable,
+      CORE_METRIC_OWNER_FIELD_KEYS,
+    ),
+    weeklySheet: normalizeWeeklySheetConfig(source.weeklySheet || fallback.weeklySheet),
+    weeklyDelivery: normalizeWeeklyDelivery(source.weeklyDelivery || fallback.weeklyDelivery),
+  };
+}
+
+function pickResourceSet(source) {
+  return Object.fromEntries(SHARED_RESOURCE_KEYS.map(key => [key, source[key]]));
+}
+
+function validateUniqueChatIds(groups) {
+  const seen = new Set();
+  for (const group of groups) {
+    const chatId = String(group?.chatId || '').trim();
+    if (!chatId) continue;
+    if (seen.has(chatId)) {
+      throw configError('duplicate_chat_id', `duplicate chat id: ${chatId}`);
+    }
+    seen.add(chatId);
+  }
+}
+
+function validateSharedResourceOwnership(groups) {
+  for (const group of groups) {
+    const overriddenKey = SHARED_RESOURCE_KEYS.find(key => (
+      Object.hasOwn(group, key) || Object.hasOwn(group, camelToSnakeCase(key))
+    ));
+    if (overriddenKey) {
+      throw configError('group_shared_resource_override', `group cannot override shared resource: ${overriddenKey}`);
+    }
+  }
+}
+
+function camelToSnakeCase(value) {
+  return value.replace(/[A-Z]/g, character => `_${character.toLowerCase()}`);
+}
+
+function configError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
 }
 
 function normalizeWeeklySchedule(schedule, defaults) {
@@ -450,7 +590,7 @@ function mergeEntityAliases(defaultMap, overrideMap) {
 }
 
 export function findGroupByChatId(config, chatId) {
-  return config.groups.find(group => group.chatId === chatId || group.pushChatId === chatId) || null;
+  return (config?.groups || []).find(group => group.chatId === chatId) || null;
 }
 
 export function tableIsConfigured(table) {
