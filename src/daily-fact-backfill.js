@@ -1,3 +1,5 @@
+import { getReportingUnits } from './config.js';
+
 const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function isValidCalendarDate(value) {
@@ -39,7 +41,7 @@ export function parseDailyFactBackfillArgs(argv = []) {
 
 export async function runDailyFactBackfill({ config, bitable, options }) {
   const results = [];
-  for (const group of config.groups) {
+  for (const group of getReportingUnits(config)) {
     try {
       const result = await bitable.syncDailyFactRecordsForGroup(group, {
         startDate: options.startDate,
@@ -47,10 +49,16 @@ export async function runDailyFactBackfill({ config, bitable, options }) {
         repairOrganization: options.repairOrganization,
         timezone: config.dailyFactSync?.timezone || config.timezone,
       });
-      results.push({ group: group.project || group.chatId, ...result });
+      results.push({ group: reportingUnitScope(group), ...result });
     } catch (error) {
-      results.push({ group: group.project || group.chatId, failed: true, error });
+      results.push({ group: reportingUnitScope(group), failed: true, error });
     }
   }
   return results;
+}
+
+function reportingUnitScope(group) {
+  return group.name && group.name !== group.key
+    ? group.name
+    : group.project || group.key || group.chatId;
 }

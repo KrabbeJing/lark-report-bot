@@ -67,6 +67,27 @@ test('forwards explicit dates and repair policy to every group', async () => {
   assert.equal(calls[0].options.repairOrganization, true);
 });
 
+test('backfills one shared reporting unit once for multiple chats', async () => {
+  const calls = [];
+  const result = await runDailyFactBackfill({
+    config: normalizeConfig(sharedConfigWithTwoChats()),
+    bitable: {
+      syncDailyFactRecordsForGroup: async (unit, options) => {
+        calls.push({ unit, options });
+        return { created: 0, updated: 0, errors: [] };
+      },
+    },
+    options: {
+      startDate: '2026-08-07',
+      endDate: '2026-08-08',
+      repairOrganization: true,
+    },
+  });
+
+  assert.deepEqual(calls.map(call => call.unit.key), ['digital-finance']);
+  assert.equal(result.length, 1);
+});
+
 test('initializes facts from current content when source tables are unavailable', async () => {
   const config = normalizeConfig({
     groups: [{
@@ -134,3 +155,20 @@ test('initializes facts from current content when source tables are unavailable'
   assert.equal(updatePayload.data.fields['事实记录状态'], '忽略');
   assert.equal(JSON.parse(updatePayload.data.fields['字段来源快照']).workItems.ambiguous, true);
 });
+
+function sharedConfigWithTwoChats() {
+  return {
+    timezone: 'Asia/Shanghai',
+    sharedResources: {
+      key: 'digital-finance',
+      name: '数字金融部',
+      dailyTable: { appToken: 'bas_shared', tableId: 'tbl_daily' },
+      chatDailyRawTable: { appToken: 'bas_shared', tableId: 'tbl_raw' },
+      dailyFactTable: { appToken: 'bas_shared', tableId: 'tbl_fact' },
+    },
+    groups: [
+      { chatId: 'oc_a', name: '日报群A', project: '板块A', pushChatId: 'oc_test' },
+      { chatId: 'oc_b', name: '日报群B', project: '板块B', pushChatId: 'oc_test' },
+    ],
+  };
+}

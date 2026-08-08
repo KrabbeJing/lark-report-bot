@@ -1,4 +1,4 @@
-import { findGroupByChatId } from './config.js';
+import { findGroupByChatId, getReportingUnits } from './config.js';
 import { coerceLarkTimestamp, formatYmd } from './date-utils.js';
 import { parseDailyReportText } from './daily-report-parser.js';
 import { buildContentFingerprint } from './daily-record-utils.js';
@@ -47,6 +47,7 @@ export async function replayChatDailyReports({
   options,
   messenger = createSilentMessenger(),
   handleMessage = handleMessageEvent,
+  reconcileFacts = true,
 }) {
   const group = findGroupByChatId(config, options.chatId);
   if (!group) throw new Error(`群聊未配置：${options.chatId}`);
@@ -117,13 +118,15 @@ export async function replayChatDailyReports({
     replayed += 1;
   }
 
-  const syncResult = await bitable.syncDailyFactRecordsForGroup(group, {
-    startDate: options.reportStart,
-    endDate: options.reportEnd,
-    includeHistoricalChat: true,
-    repairOrganization: true,
-    timezone: config.timezone,
-  });
+  const syncResult = reconcileFacts
+    ? await bitable.syncDailyFactRecordsForGroup(group, {
+      startDate: options.reportStart,
+      endDate: options.reportEnd,
+      includeHistoricalChat: true,
+      repairOrganization: true,
+      timezone: config.timezone,
+    })
+    : null;
 
   return {
     group: group.project || group.chatId,
@@ -142,6 +145,7 @@ export async function replayRecentChatDailyReports({
   now = new Date(),
   lookbackMinutes = config.chatDailyReplay?.lookbackMinutes,
   logger = console,
+  replayChat = replayChatDailyReports,
 }) {
   const minutes = Math.max(1, Number(lookbackMinutes || 1440));
   const start = new Date(now.getTime() - minutes * 60_000);
@@ -152,17 +156,19 @@ export async function replayRecentChatDailyReports({
     reportStart: formatYmd(start, config.timezone),
     reportEnd: formatYmd(now, config.timezone),
   });
-  const results = [];
-  for (const group of config.groups) {
-    if (!group.chatDailyRawTable?.appToken || !group.chatDailyRawTable?.tableId) continue;
+  const chatResults = [];
+  for (const chatGroup of config.chatGroups || config.groups || []) {
+    const group = findGroupByChatId(config, chatGroup.chatId);
+    if (!group?.chatDailyRawTable?.appToken || !group.chatDailyRawTable?.tableId) continue;
     try {
-      const result = await replayChatDailyReports({
+      const result = await replayChat({
         client,
         bitable,
         config,
         options: optionsForGroup(group),
+        reconcileFacts: false,
       });
-      results.push({ group: group.project || group.chatId, ...result });
+      chatResults.push({ group: group.project || group.chatId, ...result });
       logger.log('[daily-chat-replay] group result', {
         group: group.project || group.chatId,
         messagesRead: result.messagesRead,
@@ -175,10 +181,32 @@ export async function replayRecentChatDailyReports({
         group: group.project || group.chatId,
         message: error?.message || String(error),
       });
-      results.push({ group: group.project || group.chatId, failed: true, error });
+      chatResults.push({ group: group.project || group.chatId, failed: true, error });
     }
   }
-  return results;
+
+  const reportingUnitSyncResults = [];
+  for (const unit of getReportingUnits(config)) {
+    const scope = unit.name || unit.project || unit.key;
+    try {
+      const syncResult = await bitable.syncDailyFactRecordsForGroup(unit, {
+        startDate: formatYmd(start, config.timezone),
+        endDate: formatYmd(now, config.timezone),
+        includeHistoricalChat: true,
+        repairOrganization: true,
+        timezone: config.timezone,
+      });
+      reportingUnitSyncResults.push({ group: scope, ...syncResult });
+    } catch (error) {
+      logger.error('[daily-chat-replay] reporting unit failed', {
+        group: scope,
+        message: error?.message || String(error),
+      });
+      reportingUnitSyncResults.push({ group: scope, failed: true, error });
+    }
+  }
+
+  return { chatResults, reportingUnitSyncResults };
 }
 
 async function listChatMessages(client, options) {

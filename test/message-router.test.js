@@ -62,6 +62,71 @@ test('routes high-confidence daily report into bitable service without logging i
   assert.equal(logs[1][1].factResultCount, 1);
 });
 
+test('routes shared-chat messages with chat metadata and shared resources', async () => {
+  const config = normalizeConfig({
+    sharedResources: {
+      key: 'digital-finance',
+      name: '数字金融部',
+      dailyTable: { appToken: 'bas_shared', tableId: 'tbl_daily' },
+      chatDailyRawTable: { appToken: 'bas_shared', tableId: 'tbl_raw' },
+      dailyFactTable: { appToken: 'bas_shared', tableId: 'tbl_fact' },
+    },
+    groups: [
+      { chatId: 'oc_a', name: '日报群A', project: '板块A' },
+      { chatId: 'oc_b', name: '日报群B', project: '板块B' },
+    ],
+  });
+  const receivedGroups = [];
+  const factInputs = [];
+
+  await handleMessageEvent({
+    data: {
+      sender: { sender_id: { open_id: 'ou_1' } },
+      message: {
+        message_id: 'om_shared_b',
+        chat_id: 'oc_b',
+        chat_type: 'group',
+        message_type: 'text',
+        create_time: String(new Date('2026-06-26T09:00:00+08:00').getTime()),
+        content: JSON.stringify({
+          text: '王治坤6.26日工作日报\n1.参加案例评审',
+        }),
+      },
+    },
+    client: {},
+    messenger: { replyText: async () => {} },
+    bitable: {
+      findTeamContact: async () => ({
+        teamName: '联系来源组织',
+        teamMember: '王治坤',
+        teamMemberId: 'ou_1',
+        matchingStatus: '已匹配',
+        matchMethod: 'open_id',
+      }),
+      createChatDailyRawRecord: async group => {
+        receivedGroups.push(group);
+        return { created: true, record: { record_id: 'rec_raw' } };
+      },
+      upsertDailyFactRecord: async (_group, input) => {
+        factInputs.push(input);
+        return { created: true, record: { record_id: 'rec_fact' } };
+      },
+    },
+    config,
+    aiProvider: {},
+    outDir: '/tmp',
+  });
+
+  assert.equal(receivedGroups.length, 1);
+  assert.equal(receivedGroups[0].chatId, 'oc_b');
+  assert.equal(receivedGroups[0].name, '日报群B');
+  assert.equal(receivedGroups[0].project, '板块B');
+  assert.equal(receivedGroups[0].chatDailyRawTable.tableId, 'tbl_raw');
+  assert.equal(receivedGroups[0].dailyFactTable.tableId, 'tbl_fact');
+  assert.equal(factInputs[0].project, '联系来源组织');
+  assert.notEqual(factInputs[0].project, receivedGroups[0].project);
+});
+
 test('strips bot mention before parsing mentioned daily report', async () => {
   const config = normalizeConfig({
     botNames: ['数金小助手'],

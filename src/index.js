@@ -8,7 +8,7 @@ import { syncDailyFactsForAllGroups } from './daily-fact-sync.js';
 import { pushDailyReportsToSupervisors } from './daily-supervisor-push.js';
 import { reportHandlerError, reportOperationalFailure } from './error-reporter.js';
 import { formatOperationalError } from './operational-log.js';
-import { loadGroupConfig } from './config.js';
+import { getReportingUnits, loadGroupConfig } from './config.js';
 import { buildLarkClientOptions } from './lark-client.js';
 import { LarkMessenger } from './lark-messenger.js';
 import { handleMessageEvent } from './message-router.js';
@@ -40,6 +40,7 @@ if (!APP_ID || !APP_SECRET) {
 }
 
 const config = loadGroupConfig();
+const reportingUnits = getReportingUnits(config);
 const larkClientOptions = buildLarkClientOptions({
   appId: APP_ID,
   appSecret: APP_SECRET,
@@ -139,7 +140,7 @@ startDailySupervisorScheduler({
   onRun: now => runGroupedWorkflow({
     task: '直属上级日报推送',
     stage: 'deliver_supervisor_digest',
-    groups: config.groups,
+    groups: reportingUnits,
     operation: group => pushDailyReportsToSupervisors({
       group,
       bitable,

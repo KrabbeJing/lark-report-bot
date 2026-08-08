@@ -1,4 +1,5 @@
 import { sanitizeOperationalText } from './error-reporter.js';
+import { getReportingUnits } from './config.js';
 
 export async function syncDailyFactsForAllGroups({
   config,
@@ -11,8 +12,8 @@ export async function syncDailyFactsForAllGroups({
   repairOrganization,
 }) {
   const results = [];
-  for (const group of config.groups) {
-    const scope = group.project || group.chatId;
+  for (const group of getReportingUnits(config)) {
+    const scope = reportingUnitScope(group);
     let alert;
     try {
       const result = await bitable.syncDailyFactRecordsForGroup(group, {
@@ -86,4 +87,10 @@ function sanitizeDailyFactScope(value) {
   return sanitizeOperationalText(value)
     .replace(/\b(?:base|sheet|wiki)[_-][A-Za-z0-9_-]+\b/gi, '[masked-id]')
     .replace(/\bwiki(?:node)?[A-Za-z0-9_-]{6,}\b/gi, '[masked-id]');
+}
+
+function reportingUnitScope(group) {
+  return group.name && group.name !== group.key
+    ? group.name
+    : group.project || group.key || group.chatId;
 }

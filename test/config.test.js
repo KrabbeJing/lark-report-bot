@@ -35,6 +35,8 @@ test('normalizes one shared reporting unit and two lightweight chat groups', () 
   assert.equal(config.groups[1].reportingUnitKey, 'digital-finance');
   assert.equal(typeof configApi.getReportingUnits, 'function');
   assert.deepEqual(configApi.getReportingUnits(config), config.reportingUnits);
+  assert.equal(configApi.getReportingUnits(config).length, 1);
+  assert.equal(configApi.getReportingUnits(config)[0].chatId, undefined);
   assert.equal(findGroupByChatId(config, 'oc_b').chatId, 'oc_b');
   assert.equal(findGroupByChatId(config, 'oc_test'), null);
 });

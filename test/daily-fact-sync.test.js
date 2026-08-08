@@ -47,6 +47,24 @@ test('syncs facts for each configured group', async () => {
   assert.equal(results[1].created, 1);
 });
 
+test('syncs one shared reporting unit once for multiple chats', async () => {
+  const calls = [];
+  const config = normalizeConfig(sharedConfigWithTwoChats());
+  const results = await syncDailyFactsForAllGroups({
+    config,
+    logger: { log() {}, error() {} },
+    bitable: {
+      syncDailyFactRecordsForGroup: async unit => {
+        calls.push(unit.key);
+        return { created: 0, updated: 0, errors: [] };
+      },
+    },
+  });
+
+  assert.deepEqual(calls, ['digital-finance']);
+  assert.equal(results.length, 1);
+});
+
 test('forwards an explicit inclusive range and repair policy', async () => {
   const calls = [];
   await syncDailyFactsForAllGroups({
@@ -220,3 +238,20 @@ test('continues after a terminal-error notification rejection and preserves the 
   assert.equal(results[1].created, 1);
   assert.deepEqual(warnings, ['[daily-fact-sync] failure notification failed']);
 });
+
+function sharedConfigWithTwoChats() {
+  return {
+    timezone: 'Asia/Shanghai',
+    sharedResources: {
+      key: 'digital-finance',
+      name: '数字金融部',
+      dailyTable: { appToken: 'bas_shared', tableId: 'tbl_daily' },
+      chatDailyRawTable: { appToken: 'bas_shared', tableId: 'tbl_raw' },
+      dailyFactTable: { appToken: 'bas_shared', tableId: 'tbl_fact' },
+    },
+    groups: [
+      { chatId: 'oc_a', name: '日报群A', project: '板块A', pushChatId: 'oc_test' },
+      { chatId: 'oc_b', name: '日报群B', project: '板块B', pushChatId: 'oc_test' },
+    ],
+  };
+}
