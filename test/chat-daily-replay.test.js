@@ -145,7 +145,7 @@ test('replays each enabled chat and reconciles shared facts once', async () => {
       key: 'digital-finance',
       name: '数字金融部',
       dailyTable: { appToken: 'bas_shared', tableId: 'tbl_daily' },
-      chatDailyRawTable: { appToken: 'bas_shared', tableId: 'tbl_raw' },
+      chatDailyRawTable: { wikiNodeToken: 'wiki_shared', tableId: 'tbl_raw' },
       dailyFactTable: { appToken: 'bas_shared', tableId: 'tbl_fact' },
     },
     groups: [

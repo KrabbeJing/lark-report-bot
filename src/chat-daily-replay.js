@@ -1,4 +1,4 @@
-import { findGroupByChatId, getReportingUnits } from './config.js';
+import { findGroupByChatId, getReportingUnits, tableIsConfigured } from './config.js';
 import { coerceLarkTimestamp, formatYmd } from './date-utils.js';
 import { parseDailyReportText } from './daily-report-parser.js';
 import { buildContentFingerprint } from './daily-record-utils.js';
@@ -159,7 +159,7 @@ export async function replayRecentChatDailyReports({
   const chatResults = [];
   for (const chatGroup of config.chatGroups || config.groups || []) {
     const group = findGroupByChatId(config, chatGroup.chatId);
-    if (!group?.chatDailyRawTable?.appToken || !group.chatDailyRawTable?.tableId) continue;
+    if (!tableIsConfigured(group?.chatDailyRawTable)) continue;
     try {
       const result = await replayChat({
         client,

@@ -9,7 +9,9 @@ export async function pushDailyReportsToSupervisors({
   logger = console,
 }) {
   const reportDate = formatYmd(now, timezone);
-  const reports = await bitable.listDailyReportsForDate(group, reportDate);
+  const reports = group.chatId
+    ? await bitable.listDailyReportsForDate(group, reportDate)
+    : await bitable.listAllDailyReportsForRange(group, reportDate, reportDate);
   const batches = groupReportsBySupervisor(reports);
   const results = [];
 

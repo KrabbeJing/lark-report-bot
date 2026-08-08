@@ -77,3 +77,47 @@ test('pushes one message per supervisor with open id', async () => {
   assert.equal(sent[0].openId, 'ou_mgr');
   assert.match(sent[0].uuid, /daily-supervisor/);
 });
+
+test('loads all effective facts for a shared reporting unit', async () => {
+  const calls = [];
+  const sent = [];
+  const result = await pushDailyReportsToSupervisors({
+    group: { key: 'digital-finance', name: '数字金融部', project: '数字金融部' },
+    timezone: 'Asia/Shanghai',
+    now: new Date('2026-06-29T09:00:00.000Z'),
+    bitable: {
+      listDailyReportsForDate: async () => {
+        throw new Error('reporting units must not use chat/project-filtered reads');
+      },
+      listAllDailyReportsForRange: async (_group, startDate, endDate) => {
+        calls.push({ startDate, endDate });
+        return [
+          {
+            project: '板块A',
+            supervisor: '张经理',
+            supervisorOpenId: 'ou_mgr',
+            reporterName: '成员甲',
+            workItems: ['完成事项A'],
+          },
+          {
+            project: '板块B',
+            supervisor: '张经理',
+            supervisorOpenId: 'ou_mgr',
+            reporterName: '成员乙',
+            workItems: ['完成事项B'],
+          },
+        ];
+      },
+    },
+    messenger: {
+      sendTextToOpenId: async (openId, text) => sent.push({ openId, text }),
+    },
+    logger: { warn() {}, error() {}, log() {} },
+  });
+
+  assert.deepEqual(calls, [{ startDate: '2026-06-29', endDate: '2026-06-29' }]);
+  assert.equal(result.totalReports, 2);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].text, /成员甲/);
+  assert.match(sent[0].text, /成员乙/);
+});
