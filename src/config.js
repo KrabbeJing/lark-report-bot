@@ -284,6 +284,7 @@ export function normalizeConfig(raw) {
   let groups;
 
   if (hasSharedResources) {
+    validateSharedTopology(raw.sharedResources, rawGroups);
     validateSharedResourceOwnership(rawGroups);
     const reportingUnit = normalizeReportingUnit(raw.sharedResources);
     chatGroups = rawGroups
@@ -341,8 +342,8 @@ function normalizeLegacyGroup(group, raw) {
 }
 
 function normalizeReportingUnit(sharedResources) {
-  const key = String(sharedResources.key || sharedResources.name || 'default').trim();
-  const name = String(sharedResources.name || key).trim();
+  const key = String(sharedResources.key).trim();
+  const name = String(sharedResources.name).trim();
   return {
     key,
     name,
@@ -362,12 +363,14 @@ function normalizeLegacyReportingUnit(group) {
 }
 
 function normalizeChatGroup(group) {
+  const chatId = String(group.chatId || '').trim();
+  const name = String(group.name || chatId).trim();
   return {
     enabled: group.enabled !== false,
-    chatId: group.chatId,
-    name: group.name || group.chatId,
-    project: group.project || group.name || group.chatId,
-    pushChatId: group.pushChatId || group.chatId,
+    chatId,
+    name,
+    project: String(group.project || name || chatId).trim(),
+    pushChatId: String(group.pushChatId || chatId).trim(),
   };
 }
 
@@ -430,6 +433,28 @@ function validateUniqueChatIds(groups) {
       throw configError('duplicate_chat_id', `duplicate chat id: ${chatId}`);
     }
     seen.add(chatId);
+  }
+}
+
+function validateSharedTopology(sharedResources, groups) {
+  if (!String(sharedResources.key || '').trim()) {
+    throw configError('missing_shared_resource_key', 'sharedResources.key is required');
+  }
+  if (!String(sharedResources.name || '').trim()) {
+    throw configError('missing_shared_resource_name', 'sharedResources.name is required');
+  }
+
+  for (const [index, group] of groups.entries()) {
+    if (group.enabled === false) continue;
+    for (const [field, code] of [
+      ['chatId', 'missing_group_chat_id'],
+      ['name', 'missing_group_name'],
+      ['project', 'missing_group_project'],
+    ]) {
+      if (!String(group[field] || '').trim()) {
+        throw configError(code, `groups[${index}].${field} is required`);
+      }
+    }
   }
 }
 

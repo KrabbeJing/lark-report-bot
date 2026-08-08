@@ -39,12 +39,56 @@ test('normalizes one shared reporting unit and two lightweight chat groups', () 
   assert.equal(findGroupByChatId(config, 'oc_test'), null);
 });
 
+test('requires shared resource identity and enabled chat metadata', () => {
+  for (const [raw, code] of [
+    [
+      { sharedResources: { name: '数字金融部' }, groups: [] },
+      'missing_shared_resource_key',
+    ],
+    [
+      { sharedResources: { key: 'digital-finance' }, groups: [] },
+      'missing_shared_resource_name',
+    ],
+    [
+      {
+        sharedResources: { key: 'digital-finance', name: '数字金融部' },
+        groups: [{ name: '日报群A', project: '板块A' }],
+      },
+      'missing_group_chat_id',
+    ],
+    [
+      {
+        sharedResources: { key: 'digital-finance', name: '数字金融部' },
+        groups: [{ chatId: 'oc_a', project: '板块A' }],
+      },
+      'missing_group_name',
+    ],
+    [
+      {
+        sharedResources: { key: 'digital-finance', name: '数字金融部' },
+        groups: [{ chatId: 'oc_a', name: '日报群A' }],
+      },
+      'missing_group_project',
+    ],
+  ]) {
+    assert.throws(
+      () => normalizeConfig(raw),
+      error => error.code === code,
+    );
+  }
+
+  assert.doesNotThrow(() => normalizeConfig({
+    sharedResources: { key: 'digital-finance', name: '数字金融部' },
+    groups: [{ enabled: false }],
+  }));
+});
+
 test('omits disabled chat groups while validating duplicate chat ids across all raw groups', () => {
   const config = normalizeConfig({
     sharedResources: { key: 'shared', name: '共享单元' },
     groups: [
       { enabled: false, chatId: 'oc_disabled', name: '已停用群' },
-      { chatId: 'oc_enabled', name: '启用群' },
+      { chatId: 'oc_enabled', name: '启用群', project: '启用板块' },
     ],
   });
 
@@ -71,7 +115,12 @@ test('rejects group-level shared resource overrides but allows shared push desti
         name: '共享单元',
         dailyFactTable: { appToken: 'bas_shared', tableId: 'tbl_fact' },
       },
-      groups: [{ chatId: 'oc_a', dailyFactTable: { appToken: 'bas_group', tableId: 'tbl_other' } }],
+      groups: [{
+        chatId: 'oc_a',
+        name: '日报群A',
+        project: '板块A',
+        dailyFactTable: { appToken: 'bas_group', tableId: 'tbl_other' },
+      }],
     }),
     error => error.code === 'group_shared_resource_override',
   );
@@ -79,8 +128,8 @@ test('rejects group-level shared resource overrides but allows shared push desti
   const config = normalizeConfig({
     sharedResources: { key: 'shared', name: '共享单元' },
     groups: [
-      { chatId: 'oc_a', pushChatId: 'oc_push' },
-      { chatId: 'oc_b', pushChatId: 'oc_push' },
+      { chatId: 'oc_a', name: '日报群A', project: '板块A', pushChatId: 'oc_push' },
+      { chatId: 'oc_b', name: '日报群B', project: '板块B', pushChatId: 'oc_push' },
     ],
   });
   assert.deepEqual(config.chatGroups.map(group => group.pushChatId), ['oc_push', 'oc_push']);
