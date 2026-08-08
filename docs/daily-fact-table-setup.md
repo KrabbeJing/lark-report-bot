@@ -82,6 +82,26 @@ GROUPS_CONFIG_PATH=config/groups.personal.json npm run tables:validate
 GROUPS_CONFIG_PATH=config/groups.personal.json npm start
 ```
 
+## 共享资源与多日报群配置
+
+同一部门的多个日报群共用一套 `sharedResources`。共享资源对象负责日报表、群聊原始表、统一事实表、通讯录、周报配置表、周报实例表、周报 Sheet 和投递配置；`groups` 只记录聊天入口和来源元数据。新增日报群时只需增加一项：
+
+```json
+{
+  "enabled": true,
+  "chatId": "oc_new_daily_chat",
+  "name": "新日报群",
+  "project": "来源板块名称",
+  "pushChatId": "oc_test_or_future_target"
+}
+```
+
+`chatId` 在配置中必须唯一；测试期间多个 group 可以共用 `pushChatId`。`project` 只表示消息来源板块，不决定事实表的组织归属；事实归属仍由通讯录匹配结果提供。不要在 group 内复制或覆盖共享表配置。
+
+群聊回放会分别读取每个启用的 chat，并把消息写入同一套共享原始表和事实表。事实重建、直属上级摘要、周报预览、周报实例、周报阶段任务和表结构校验都按一个 `sharedResources` reporting unit 执行一次，避免因群数量重复写入或发送通知。
+
+迁移后先做本地检查：每份配置应包含一个 `sharedResources`、每个 group 只保留五个聊天元数据字段、`chatId` 不重复，并保持所有自动调度为 `false`。单 group 的旧配置仍可在过渡版本读取；新配置应优先完成结构检查，再进行只读表结构校验和 dry-run。
+
 组织归属的唯一来源约定：
 
 - 群组配置没有敏捷小组值。不要在 group 配置中增加或依赖 `agileGroup`；群组只表达群聊和业务板块等运行范围。

@@ -8,26 +8,26 @@
   },
   "weeklyPush": {
     "enabled": false,
-    "dayOfWeek": 6,
-    "time": "11:00",
+    "dayOfWeek": 0,
+    "time": "12:00",
     "timezone": "Asia/Shanghai"
   },
   "weeklyDraft": {
     "enabled": false,
     "dayOfWeek": 5,
-    "time": "16:30",
+    "time": "09:00",
     "timezone": "Asia/Shanghai"
   },
   "weeklyOwnerReminder": {
     "enabled": false,
     "dayOfWeek": 5,
-    "time": "17:00",
+    "time": "16:00",
     "timezone": "Asia/Shanghai"
   },
   "weeklyRefresh": {
     "enabled": false,
-    "dayOfWeek": 6,
-    "time": "09:30",
+    "dayOfWeek": 0,
+    "time": "09:00",
     "timezone": "Asia/Shanghai"
   },
   "weeklyInstanceCreation": {
@@ -42,10 +42,137 @@
     "timezone": "Asia/Shanghai"
   },
   "dailyFactSync": {
-    "enabled": true,
+    "enabled": false,
     "time": "18:10",
     "timezone": "Asia/Shanghai",
     "lookbackDays": 7
+  },
+  "sharedResources": {
+    "key": "digital-finance",
+    "name": "数字金融部",
+    "dailyTable": {
+      "wikiNodeToken": "TOnDw6LUAiDNi4kc8yYcITpRnde",
+      "tableId": "tblVaTl5iD5bCXz5",
+      "viewId": "vewXSKRchw",
+      "fields": {
+        "reportDate": "日报日期",
+        "project": "所属板块",
+        "reporterName": "日报提交人",
+        "workItems": "今日工作总结",
+        "tomorrowPlanItems": "明日工作计划",
+        "riskItems": "遇到的问题",
+        "aiSummary": "AI汇总",
+        "supervisor": "直属上级"
+      }
+    },
+    "chatDailyRawTable": {
+      "wikiUrl": "https://acncyn3n5k6i.feishu.cn/wiki/TOnDw6LUAiDNi4kc8yYcITpRnde?fromScene=spaceOverview&table=tblBwFOi8DzPeXdb&view=vewlDsLhVE",
+      "fieldTypes": {
+        "messageTime": "datetime",
+        "receivedAt": "datetime"
+      }
+    },
+    "dailyFactTable": {
+      "wikiUrl": "https://acncyn3n5k6i.feishu.cn/wiki/TOnDw6LUAiDNi4kc8yYcITpRnde?fromScene=spaceOverview&table=tbl0JWIeyHu8WSCU&view=vewf9t6U5V",
+      "fieldTypes": {
+        "reportDate": "date",
+        "reporterName": "user",
+        "supervisor": "user",
+        "messageTime": "datetime",
+        "sourceTime": "datetime",
+        "syncedAt": "datetime"
+      }
+    },
+    "contactTable": {
+      "wikiUrl": "https://acncyn3n5k6i.feishu.cn/wiki/TOnDw6LUAiDNi4kc8yYcITpRnde?base_hp_from=larktab&table=tblivzutgDzJymmo&view=vewVnQxucW",
+      "fields": {
+        "teamName": "团队名称",
+        "teamMember": "团队成员",
+        "memberRealName": "成员真实姓名",
+        "teamRole": "团队身份",
+        "supervisor": "直属上级"
+      }
+    },
+    "weeklyTable": null,
+    "weeklyDelivery": {
+      "departmentChatId": "oc_127d0a4ec12a42a31de3110fdf9b51f3",
+      "smallTeams": [
+        {
+          "key": "team-a",
+          "name": "测试小团队A",
+          "enabled": true,
+          "chatId": "oc_127d0a4ec12a42a31de3110fdf9b51f3",
+          "sectionTargets": ["融羲项目组", "零售大众客群经营"],
+          "sourceSupervisors": [],
+          "posterSections": [
+            { "key": "rongxi", "name": "融羲项目组", "sourceTargets": ["融羲项目组"] },
+            { "key": "retail", "name": "零售大众客群经营", "sourceTargets": ["零售大众客群经营"] }
+          ]
+        },
+        {
+          "key": "team-b",
+          "name": "测试小团队B",
+          "enabled": true,
+          "chatId": "oc_127d0a4ec12a42a31de3110fdf9b51f3",
+          "sectionTargets": ["线上营业厅项目组", "收单项目组", "对公客群经营及场景建设"],
+          "sourceSupervisors": [],
+          "posterSections": [
+            { "key": "online-hall", "name": "线上营业厅", "sourceTargets": ["线上营业厅项目组"] },
+            { "key": "collection", "name": "收单项目", "sourceTargets": ["收单项目组"] },
+            { "key": "cloud-pay", "name": "云缴费", "sourceTargets": ["对公客群经营及场景建设"], "includeTopics": ["云缴费"] },
+            { "key": "cloud-recharge", "name": "云充值", "sourceTargets": ["对公客群经营及场景建设"], "includeTopics": ["云充值"] },
+            { "key": "netlink", "name": "网联前置", "sourceTargets": ["对公客群经营及场景建设"], "includeTopics": ["网联前置"] },
+            { "key": "unionpay", "name": "银联前置", "sourceTargets": ["对公客群经营及场景建设"], "includeTopics": ["银联前置"] },
+            { "key": "bank-enterprise", "name": "银企直联", "sourceTargets": ["对公客群经营及场景建设"], "includeTopics": ["银企直联"] },
+            { "key": "complaints", "name": "客诉", "sourceTargets": ["对公客群经营及场景建设"], "includeTopics": ["客诉"] },
+            { "key": "ecosystem", "name": "生态场景建设", "sourceTargets": ["对公客群经营及场景建设"], "includeTopics": ["生态", "场景建设"] }
+          ]
+        },
+        {
+          "key": "team-c",
+          "name": "测试小团队C",
+          "enabled": true,
+          "chatId": "oc_127d0a4ec12a42a31de3110fdf9b51f3",
+          "sectionTargets": ["手机银行项目组", "新核心项目组", "渠道创新建设", "业务风控合规"],
+          "sourceSupervisors": [],
+          "posterSections": [
+            { "key": "mobile-bank", "name": "手机银行项目组", "sourceTargets": ["手机银行项目组"] },
+            { "key": "new-core", "name": "新核心项目组", "sourceTargets": ["新核心项目组"] },
+            { "key": "channel", "name": "渠道创新建设", "sourceTargets": ["渠道创新建设"] },
+            { "key": "compliance", "name": "业务风控合规", "sourceTargets": ["业务风控合规"] }
+          ]
+        }
+      ]
+    },
+    "weeklySheet": {
+      "enabled": false,
+      "spreadsheetToken": "",
+      "wikiNodeToken": "AyekwGsr6iGxClkrMM1cb5YCn1d",
+      "spreadsheetUrl": "https://acncyn3n5k6i.feishu.cn/wiki/AyekwGsr6iGxClkrMM1cb5YCn1d?fromScene=spaceOverview&sheet=0Yytpw",
+      "templateSheetId": "R0qnOz",
+      "titlePattern": "数字金融部周报{{reportDateMMDD}}",
+      "copyTemplate": true,
+      "reportScope": "allDailyTable",
+      "reuseExisting": true,
+      "skipPushIfExisting": true
+    },
+    "weeklyInstanceTable": {
+      "wikiUrl": "https://acncyn3n5k6i.feishu.cn/wiki/TOnDw6LUAiDNi4kc8yYcITpRnde?fromScene=spaceOverview&table=tblYoZqsc1AIHJbf&view=vewv5SmrCH",
+      "fieldTypes": {
+        "reportDate": "date",
+        "periodStart": "date",
+        "periodEnd": "date",
+        "weekStart": "date",
+        "weekEnd": "date",
+        "sheetUrl": "url",
+        "aiInitialAt": "datetime",
+        "aiRefreshAt": "datetime",
+        "ownerNotificationAt": "datetime",
+        "posterSentAt": "datetime",
+        "createdAt": "datetime",
+        "updatedAt": "datetime"
+      }
+    }
   },
   "groups": [
     {
@@ -53,104 +180,7 @@
       "chatId": "oc_127d0a4ec12a42a31de3110fdf9b51f3",
       "name": "测试周报生成",
       "project": "公司项目组",
-      "pushChatId": "oc_127d0a4ec12a42a31de3110fdf9b51f3",
-      "dailyTable": {
-        "wikiUrl": "https://acncyn3n5k6i.feishu.cn/wiki/TOnDw6LUAiDNi4kc8yYcITpRnde?fromScene=spaceOverview&table=tblVaTl5iD5bCXz5&view=vewXSKRchw",
-        "fields": {
-          "reportDate": "日报日期",
-          "project": "所属板块",
-          "reporterName": "日报提交人",
-          "workItems": "今日工作总结",
-          "tomorrowPlanItems": "明日工作计划",
-          "riskItems": "遇到的问题",
-          "aiSummary": "AI汇总",
-          "supervisor": "直属上级"
-        }
-      },
-      "chatDailyRawTable": {
-        "wikiUrl": "https://acncyn3n5k6i.feishu.cn/wiki/TOnDw6LUAiDNi4kc8yYcITpRnde?fromScene=spaceOverview&table=tblBwFOi8DzPeXdb&view=vewlDsLhVE",
-        "fieldTypes": {
-          "messageTime": "datetime",
-          "receivedAt": "datetime"
-        }
-      },
-      "dailyFactTable": {
-        "wikiUrl": "https://acncyn3n5k6i.feishu.cn/wiki/TOnDw6LUAiDNi4kc8yYcITpRnde?fromScene=spaceOverview&table=tbl0JWIeyHu8WSCU&view=vewf9t6U5V",
-        "fieldTypes": {
-          "reportDate": "date",
-          "reporterName": "user",
-          "supervisor": "user",
-          "messageTime": "datetime",
-          "sourceTime": "datetime",
-          "syncedAt": "datetime"
-        }
-      },
-      "contactTable": {
-        "wikiUrl": "https://acncyn3n5k6i.feishu.cn/wiki/TOnDw6LUAiDNi4kc8yYcITpRnde?base_hp_from=larktab&table=tblivzutgDzJymmo&view=vewVnQxucW",
-        "fields": {
-          "teamName": "团队名称",
-          "teamMember": "团队成员",
-          "memberRealName": "成员真实姓名",
-          "teamRole": "团队身份",
-          "supervisor": "直属上级"
-        }
-      },
-      "weeklyTable": null,
-      "weeklyDelivery": {
-        "departmentChatId": "oc_127d0a4ec12a42a31de3110fdf9b51f3",
-        "smallTeams": [
-          {
-            "key": "team-a",
-            "name": "测试小团队A",
-            "enabled": true,
-            "chatId": "oc_127d0a4ec12a42a31de3110fdf9b51f3",
-            "sectionTargets": ["融羲项目组", "零售大众客群经营"]
-          },
-          {
-            "key": "team-b",
-            "name": "测试小团队B",
-            "enabled": true,
-            "chatId": "oc_127d0a4ec12a42a31de3110fdf9b51f3",
-            "sectionTargets": ["线上营业厅项目组", "收单项目组", "对公客群经营及场景建设"]
-          },
-          {
-            "key": "team-c",
-            "name": "测试小团队C",
-            "enabled": true,
-            "chatId": "oc_127d0a4ec12a42a31de3110fdf9b51f3",
-            "sectionTargets": ["手机银行项目组", "新核心项目组", "渠道创新建设", "业务风控合规"]
-          }
-        ]
-      },
-      "weeklySheet": {
-        "enabled": false,
-        "spreadsheetToken": "",
-        "wikiNodeToken": "AyekwGsr6iGxClkrMM1cb5YCn1d",
-        "spreadsheetUrl": "https://acncyn3n5k6i.feishu.cn/wiki/AyekwGsr6iGxClkrMM1cb5YCn1d?fromScene=spaceOverview&sheet=0Yytpw",
-        "templateSheetId": "R0qnOz",
-        "titlePattern": "数字金融部周报{{reportDateMMDD}}",
-        "copyTemplate": true,
-        "reportScope": "allDailyTable",
-        "reuseExisting": true,
-        "skipPushIfExisting": true
-      },
-      "weeklyInstanceTable": {
-        "wikiUrl": "https://acncyn3n5k6i.feishu.cn/wiki/TOnDw6LUAiDNi4kc8yYcITpRnde?fromScene=spaceOverview&table=tblYoZqsc1AIHJbf&view=vewv5SmrCH",
-        "fieldTypes": {
-          "reportDate": "date",
-          "periodStart": "date",
-          "periodEnd": "date",
-          "weekStart": "date",
-          "weekEnd": "date",
-          "sheetUrl": "url",
-          "aiInitialAt": "datetime",
-          "aiRefreshAt": "datetime",
-          "ownerNotificationAt": "datetime",
-          "posterSentAt": "datetime",
-          "createdAt": "datetime",
-          "updatedAt": "datetime"
-        }
-      }
+      "pushChatId": "oc_127d0a4ec12a42a31de3110fdf9b51f3"
     }
   ]
 }

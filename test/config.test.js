@@ -10,6 +10,21 @@ const {
   parseWeeklySheetLink,
 } = configApi;
 
+const SHARED_RESOURCE_KEYS_FOR_TEST = [
+  'dailyTable',
+  'chatDailyRawTable',
+  'dailyFactTable',
+  'contactTable',
+  'weeklyTable',
+  'weeklyInstanceTable',
+  'weeklySourceMappingTable',
+  'weeklySectionRuleTable',
+  'weeklyStyleExampleTable',
+  'coreMetricOwnerTable',
+  'weeklySheet',
+  'weeklyDelivery',
+];
+
 test('normalizes one shared reporting unit and two lightweight chat groups', () => {
   const config = normalizeConfig({
     sharedResources: {
@@ -219,6 +234,44 @@ test('all weekly title configurations use the Friday MMDD title pattern', () => 
       assert.equal(group.weeklySheet?.titlePattern, '数字金融部周报{{reportDateMMDD}}', filePath);
     }
   }
+});
+
+test('migrates all config files to one shared resource unit and lightweight groups', () => {
+  for (const filePath of [
+    'config/groups.json',
+    'config/groups.personal.json',
+    'config/groups.formal.example.json',
+    'config/groups.formal.json',
+  ]) {
+    const raw = JSON.parse(readFileSync(filePath, 'utf8'));
+    const config = normalizeConfig(raw);
+
+    assert.ok(raw.sharedResources, filePath);
+    assert.equal(config.reportingUnits.length, 1, filePath);
+    assert.ok(raw.groups.length >= 1, filePath);
+    for (const group of raw.groups) {
+      for (const key of SHARED_RESOURCE_KEYS_FOR_TEST) {
+        assert.equal(group[key], undefined, `${filePath} groups.${key}`);
+      }
+    }
+    for (const scheduleKey of [
+      'weeklyPush',
+      'weeklyDraft',
+      'weeklyOwnerReminder',
+      'weeklyRefresh',
+      'weeklyInstanceCreation',
+      'dailySupervisorPush',
+      'dailyFactSync',
+    ]) {
+      if (raw[scheduleKey]) assert.equal(raw[scheduleKey].enabled, false, `${filePath} ${scheduleKey}`);
+    }
+  }
+
+  const formalExample = JSON.parse(readFileSync('config/groups.formal.example.json', 'utf8'));
+  assert.equal(formalExample.groups[0].chatId, '正式组织日报群chatId');
+  assert.equal(formalExample.groups[0].pushChatId, '正式组织日报群chatId');
+  assert.equal(formalExample.sharedResources.weeklyInstanceTable.appToken, '');
+  assert.equal(formalExample.sharedResources.weeklyInstanceTable.tableId, '');
 });
 
 test('normalizes chat raw and daily fact table configs', () => {

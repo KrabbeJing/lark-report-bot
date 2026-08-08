@@ -17,6 +17,26 @@
 
 月报配置表和月报实例表不在本轮创建范围内，待周报流程验收后单独设计。
 
+## 共享资源拓扑与执行粒度
+
+配置文件将共享表和聊天入口分开管理。一个 `sharedResources` 对象对应一个 reporting unit，拥有本部门的日报表、群聊日报原始表、统一事实表、通讯录、周报配置表、周报实例表、周报 Sheet 和投递配置；`groups` 只保留 `enabled`、`chatId`、`name`、`project`、`pushChatId`。
+
+新增日报群不需要复制任何表配置，只需增加轻量 group：
+
+```json
+{
+  "enabled": true,
+  "chatId": "oc_new_daily_chat",
+  "name": "新日报群",
+  "project": "来源板块名称",
+  "pushChatId": "oc_test_or_future_target"
+}
+```
+
+群聊回放按 chat 分别读取并保留各自来源元数据；事实同步、直属上级摘要、周报预览、周报实例、周报阶段工作流和本 catalog 的 schema 校验按 reporting unit 各执行一次。`project` 仅是来源元数据，不是事实组织归属，事实表的所属板块和直属上级以通讯录匹配快照为准。`chatId` 必须唯一，`pushChatId` 可在测试时共享。
+
+迁移检查应确认：`sharedResources` 存在且资源配置只出现一次；原始 group 不包含共享资源字段；自动调度保持关闭；formal example 中 ChatID、Base token、Sheet token 等继续使用占位值或空值。已有单 group 配置保留一版兼容读取能力，完成迁移后再执行只读 schema 校验。
+
 ## 通用约定
 
 - 日期字段统一使用飞书“日期”。
