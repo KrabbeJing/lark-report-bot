@@ -11,6 +11,7 @@
     "daily-fact:backfill": "node scripts/backfill-daily-facts.js",
     "daily-chat:replay": "node scripts/replay-chat-daily-reports.js",
     "weekly:ai-preview": "node scripts/preview-weekly-ai.js",
+    "weekly:classification-eval": "node scripts/evaluate-weekly-classification.js",
     "weekly:workflow": "node scripts/run-weekly-workflow.js",
     "test": "node --test"
   },

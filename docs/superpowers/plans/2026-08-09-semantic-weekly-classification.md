@@ -660,7 +660,7 @@ git commit -m "fix: keep weekly AI drafts snapshot only"
 }
 ```
 
-- [ ] **Step 1: Add failing evaluator tests**
+- [x] **Step 1: Add failing evaluator tests**
 
 Test pure metric calculation with synthetic/non-sensitive cases:
 
@@ -669,7 +669,7 @@ Test pure metric calculation with synthetic/non-sensitive cases:
 - gate passes only when accuracy is at least 90%, unauthorized is zero, duplicate/multi-target is zero, and every low item is returned visibly;
 - secrets and full provider errors are absent from the report.
 
-- [ ] **Step 2: Run the evaluator test and verify RED**
+- [x] **Step 2: Run the evaluator test and verify RED**
 
 ```bash
 node --test test/weekly-classification-evaluation.test.js
@@ -677,7 +677,7 @@ node --test test/weekly-classification-evaluation.test.js
 
 Expected: evaluation module is missing.
 
-- [ ] **Step 3: Implement evaluation and CLI**
+- [x] **Step 3: Implement evaluation and CLI**
 
 Add:
 
@@ -696,7 +696,7 @@ npm run weekly:classification-eval -- \
 
 Require explicit input/output paths under the current working directory, reject existing/symlink outputs using the same safe-output policy as `weekly:ai-preview`, call only `classifyWeeklyCandidates`, and never write Feishu.
 
-- [ ] **Step 4: Write the verification runbook**
+- [x] **Step 4: Write the verification runbook**
 
 Document:
 
@@ -707,7 +707,7 @@ Document:
 5. Improve rule scope/examples/prompt when below target; do not add online self-learning or keyword hard gates.
 6. Run a read-only weekly preview and manually verify no invented numbers, dates, status, responsibility, or names.
 
-- [ ] **Step 5: Run all local verification**
+- [x] **Step 5: Run all local verification**
 
 ```bash
 node --test test/weekly-classification-evaluation.test.js
@@ -718,7 +718,7 @@ git status --short
 
 Expected: tests pass, tracked diff is limited to this task, and `AGENTS.md`/QR images remain untracked.
 
-- [ ] **Step 6: Commit the quality gate**
+- [x] **Step 6: Commit the quality gate**
 
 ```bash
 git add src/weekly-classification-evaluation.js scripts/evaluate-weekly-classification.js test/weekly-classification-evaluation.test.js package.json docs/superpowers/verification/2026-08-09-semantic-weekly-classification.md
@@ -729,7 +729,7 @@ git commit -m "test: add weekly classification quality gate"
 
 ## Final Acceptance Checkpoint
 
-- [ ] Run the complete local suite:
+- [x] Run the complete local suite:
 
 ```bash
 npm test
