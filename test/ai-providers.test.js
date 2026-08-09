@@ -51,6 +51,193 @@ function configuredProvider() {
   });
 }
 
+function classificationInput() {
+  return {
+    items: [
+      {
+        evidenceId: 'evidence-a',
+        factRecordId: 'rec_secret_a',
+        mappingRecordId: 'map_secret_a',
+        member: '张三',
+        memberOpenId: 'ou_secret_a',
+        date: '2026-07-28',
+        text: '完成收单接口联调',
+        allowedTargets: [{
+          targetId: 'target-a',
+          module: 'module2',
+          target: '收单项目组',
+          contentType: '本周重点事项说明',
+          cells: ['C26'],
+          owner: { openId: 'ou_owner_secret' },
+          businessScope: '收单业务建设',
+          includeTopics: ['收单'],
+          excludeTopics: ['云缴费'],
+          positiveExamples: ['完成收单接口联调'],
+          negativeExamples: ['处理云缴费工单'],
+        }],
+      },
+      {
+        evidenceId: 'evidence-b',
+        date: '2026-07-29',
+        text: '完成银企直联证书更新',
+        allowedTargets: [{
+          targetId: 'target-b',
+          module: 'module3',
+          target: '对公客群经营及场景建设',
+          contentType: '本周工作进展',
+          businessScope: '银企直联及场景建设',
+          includeTopics: ['银企直联'],
+          excludeTopics: [],
+          positiveExamples: ['完成证书更新并通过验证'],
+          negativeExamples: [],
+        }],
+      },
+    ],
+  };
+}
+
+test('semantic classification uses item-scoped sanitized JSON input at low temperature', async () => {
+  const originalFetch = globalThis.fetch;
+  let body;
+  globalThis.fetch = async (_url, options) => {
+    body = JSON.parse(options.body);
+    return {
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: JSON.stringify({
+        classifications: [{
+          evidenceId: 'evidence-a',
+          targetId: 'target-a',
+          confidence: 'high',
+          reason: '事项明确涉及收单接口',
+        }],
+      }) } }] }),
+    };
+  };
+
+  try {
+    const result = await configuredProvider().classifyWeeklyEvidence(classificationInput());
+    assert.equal(result.provider, 'openai-compatible');
+    assert.equal(result.model, 'glm-4-flash-250414');
+    assert.equal(result.classifications[0].targetId, 'target-a');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(body.temperature, 0.1);
+  assert.deepEqual(body.response_format, { type: 'json_object' });
+  const system = body.messages[0].content;
+  const prompt = body.messages[1].content;
+  assert.match(system, /allowedTargets.*唯一边界/s);
+  assert.match(system, /只能选择一个/);
+  assert.match(system, /主题词和正反例只是语义提示/);
+  assert.match(prompt, /high.*medium.*low/s);
+  const match = prompt.match(/待分类事项：\n([\s\S]*?)\n\n输出格式：/);
+  assert.ok(match);
+  const modelItems = JSON.parse(match[1]);
+  assert.deepEqual(modelItems[0].allowedTargets.map(item => item.targetId), ['target-a']);
+  assert.deepEqual(modelItems[1].allowedTargets.map(item => item.targetId), ['target-b']);
+  assert.equal(modelItems[0].date, '2026-07-28');
+  assert.equal(modelItems[0].text, '完成收单接口联调');
+  assert.doesNotMatch(prompt, /张三|ou_secret|ou_owner|rec_secret|map_secret|C26/);
+});
+
+test('semantic classification rejects strict JSON shape failures without fallback parsing', async () => {
+  const originalFetch = globalThis.fetch;
+  const contents = [
+    '```json\n{"classifications":[]}\n```',
+    JSON.stringify({ cells: {} }),
+    JSON.stringify({ classifications: {} }),
+  ];
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({ choices: [{ message: { content: contents.shift() } }] }),
+  });
+
+  try {
+    for (let index = 0; index < 3; index += 1) {
+      await assert.rejects(
+        configuredProvider().classifyWeeklyEvidence(classificationInput()),
+        error => {
+          assert.equal(error.message, 'AI classification returned invalid JSON');
+          assert.equal(error.retryable, false);
+          return true;
+        },
+      );
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('semantic classification converts HTTP and transport failures into safe errors', async () => {
+  const originalFetch = globalThis.fetch;
+  const failures = [
+    async () => ({ ok: false, status: 503, text: async () => 'secret response body' }),
+    async () => { throw new Error('Authorization: Bearer secret-token'); },
+  ];
+  globalThis.fetch = async (...args) => failures.shift()(...args);
+
+  try {
+    await assert.rejects(
+      configuredProvider().classifyWeeklyEvidence(classificationInput()),
+      error => {
+        assert.equal(error.message, 'AI classification request failed: status=503');
+        assert.equal(error.retryable, true);
+        assert.doesNotMatch(error.message, /secret response body|test-key/);
+        return true;
+      },
+    );
+    await assert.rejects(
+      configuredProvider().classifyWeeklyEvidence(classificationInput()),
+      error => {
+        assert.equal(error.message, 'AI classification request failed');
+        assert.equal(error.retryable, true);
+        assert.doesNotMatch(error.message, /secret-token|Authorization/);
+        return true;
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('semantic classification converts aborts into a safe timeout error', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    throw Object.assign(new Error('private timeout detail'), { name: 'AbortError' });
+  };
+
+  try {
+    await assert.rejects(
+      configuredProvider().classifyWeeklyEvidence(classificationInput()),
+      error => {
+        assert.equal(error.message, 'AI classification request timed out');
+        assert.equal(error.retryable, true);
+        assert.doesNotMatch(error.message, /private timeout detail|AbortError/);
+        return true;
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('semantic classification treats a missing API key as a non-retryable configuration error', async () => {
+  const provider = new OpenAICompatibleProvider({
+    AI_BASE_URL: 'https://open.bigmodel.cn/api/paas/v4',
+    AI_MODEL: 'glm-4-flash-250414',
+  });
+
+  await assert.rejects(
+    provider.classifyWeeklyEvidence(classificationInput()),
+    error => {
+      assert.equal(error.message, 'AI_API_KEY missing');
+      assert.equal(error.retryable, false);
+      return true;
+    },
+  );
+});
+
 test('strict preview rejects missing API key instead of using template fallback', async () => {
   const provider = new OpenAICompatibleProvider({
     AI_BASE_URL: 'https://open.bigmodel.cn/api/paas/v4',

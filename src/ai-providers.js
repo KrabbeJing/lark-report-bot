@@ -125,6 +125,55 @@ export class OpenAICompatibleProvider {
     };
   }
 
+  async classifyWeeklyEvidence(input) {
+    if (!this.apiKey) throw classificationError('AI_API_KEY missing', false);
+
+    let res;
+    try {
+      res = await this.requestChatCompletion({
+        system: [
+          '你是企业周报事项分类器。来源映射给出的 allowedTargets 是唯一边界。',
+          '你必须逐条判断，且每条只能选择一个 allowed target。主题词和正反例只是语义提示。',
+          '不得拆分、合并、改写事项，不得输出人员信息，只输出严格 JSON。',
+        ].join('\n'),
+        user: buildWeeklyClassificationPrompt(input),
+        jsonMode: true,
+        temperature: 0.1,
+      });
+    } catch (error) {
+      if (isAbortError(error)) {
+        throw classificationError('AI classification request timed out', true);
+      }
+      throw classificationError('AI classification request failed', true);
+    }
+
+    if (!res.ok) {
+      try { await res.text(); } catch {}
+      throw classificationError(`AI classification request failed: status=${res.status}`, true);
+    }
+
+    let json;
+    try {
+      json = await res.json();
+    } catch (error) {
+      if (isAbortError(error)) {
+        throw classificationError('AI classification request timed out', true);
+      }
+      throw classificationError('AI classification returned invalid JSON', false);
+    }
+    const content = json?.choices?.[0]?.message?.content;
+    const parsed = parseStrictJsonObject(content);
+    if (!parsed || !Array.isArray(parsed.classifications)) {
+      throw classificationError('AI classification returned invalid JSON', false);
+    }
+
+    return {
+      classifications: parsed.classifications,
+      provider: this.name,
+      model: this.model,
+    };
+  }
+
   async generateWeeklySheetPreview(input) {
     if (!this.apiKey) throw new Error('AI_API_KEY missing');
 
@@ -170,7 +219,7 @@ export class OpenAICompatibleProvider {
     };
   }
 
-  async requestChatCompletion({ system, user, jsonMode = false }) {
+  async requestChatCompletion({ system, user, jsonMode = false, temperature = 0.2 }) {
     return fetch(`${this.baseUrl.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -180,7 +229,7 @@ export class OpenAICompatibleProvider {
       signal: AbortSignal.timeout(this.timeoutMs),
       body: JSON.stringify({
         model: this.model,
-        temperature: 0.2,
+        temperature,
         ...(jsonMode ? { response_format: { type: 'json_object' } } : {}),
         messages: [
           { role: 'system', content: system },
@@ -198,6 +247,10 @@ function parseTimeoutMs(value) {
 
 function isAbortError(error) {
   return error?.name === 'TimeoutError' || error?.name === 'AbortError';
+}
+
+function classificationError(message, retryable) {
+  return Object.assign(new Error(message), { retryable });
 }
 
 function buildPrompt(input, fallbackText) {
@@ -253,6 +306,44 @@ function buildWeeklySheetPrompt(input, fallbackValues) {
     '',
     '本地规则生成的参考值：',
     JSON.stringify(fallbackValues, null, 2),
+  ].join('\n');
+}
+
+function buildWeeklyClassificationPrompt(input = {}) {
+  const items = (input.items || []).map(item => ({
+    evidenceId: String(item?.evidenceId || '').trim(),
+    date: String(item?.date || '').trim(),
+    text: String(item?.text || '').trim(),
+    allowedTargets: (item?.allowedTargets || []).map(target => ({
+      targetId: String(target?.targetId || '').trim(),
+      module: String(target?.module || '').trim(),
+      target: String(target?.target || '').trim(),
+      contentType: String(target?.contentType || '').trim(),
+      businessScope: String(target?.businessScope || '').trim(),
+      includeTopics: toStringArray(target?.includeTopics),
+      excludeTopics: toStringArray(target?.excludeTopics),
+      positiveExamples: toStringArray(target?.positiveExamples),
+      negativeExamples: toStringArray(target?.negativeExamples),
+    })),
+  }));
+  const outputShape = {
+    classifications: [{
+      evidenceId: '与输入完全一致',
+      targetId: '该事项 allowedTargets 中的一个 targetId',
+      confidence: 'high | medium | low',
+      reason: '简短分类理由',
+    }],
+  };
+  return [
+    '待分类事项：',
+    JSON.stringify(items),
+    '',
+    `输出格式：${JSON.stringify(outputShape)}`,
+    '必须为每条输入返回且只返回一个结果。',
+    'targetId 必须来自该条事项自己的 allowedTargets，不能使用其他事项独有的目标。',
+    'confidence 只能是 high、medium 或 low。',
+    'high 表示存在明确业务、系统、项目或可识别对象；medium 表示完整语义足以合理确定；low 表示只能判断最可能目标或信息不足。',
+    '包含主题、排除主题、分类正例和分类反例只用于理解语义，不是关键词硬匹配规则。',
   ].join('\n');
 }
 
@@ -331,6 +422,12 @@ function toCellArray(value) {
   return (Array.isArray(value) ? value : [value])
     .filter(Boolean)
     .map(item => String(item).trim())
+    .filter(Boolean);
+}
+
+function toStringArray(value) {
+  return (Array.isArray(value) ? value : value == null ? [] : [value])
+    .map(item => String(item || '').trim())
     .filter(Boolean);
 }
 
