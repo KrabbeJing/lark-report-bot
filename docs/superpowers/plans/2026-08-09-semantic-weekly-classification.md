@@ -536,7 +536,7 @@ git commit -m "feat: summarize semantically classified weekly evidence"
 
 **Behavior:** Friday draft and Sunday refresh may read current Cells to avoid preparing drafts for completed targets. They persist AI draft/evidence/classification metadata, but never write or annotate a business Cell. Only the later owner-card callback may write after explicit approval.
 
-- [ ] **Step 1: Replace write assertions with failing no-write tests**
+- [x] **Step 1: Replace write assertions with failing no-write tests**
 
 Use spies that throw if called:
 
@@ -557,7 +557,7 @@ Assert:
 - low-confidence classifications are preserved as metadata for owner cards without full duplicate daily bodies;
 - workflow `draft`/`refresh` performs zero `writeCells` calls.
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
 ```bash
 node --test test/weekly-draft-service.test.js test/weekly-workflow.test.js
@@ -565,7 +565,7 @@ node --test test/weekly-draft-service.test.js test/weekly-workflow.test.js
 
 Expected: current service writes and marks AI Cells.
 
-- [ ] **Step 3: Refactor the service to persist snapshots only**
+- [x] **Step 3: Refactor the service to persist snapshots only**
 
 Keep `writeInitialWeeklyDraft` and `refreshWeeklyDraft` names for callers, but remove both Sheet write calls. Read current Cell values, normalize preview entries, and build:
 
@@ -608,7 +608,7 @@ The future owner-card service will reload display text from the fact table by `e
 
 Do not write the `AI总结生成，仅供参考` note to the Sheet. That label belongs in the future owner card.
 
-- [ ] **Step 4: Run focused and full tests**
+- [x] **Step 4: Run focused and full tests**
 
 ```bash
 node --test test/weekly-draft-service.test.js test/weekly-owner-notifier.test.js test/weekly-workflow.test.js

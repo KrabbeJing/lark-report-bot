@@ -1,7 +1,5 @@
 import { createHash } from 'node:crypto';
 
-const AI_NOTE = 'AI总结生成，仅供参考';
-
 export async function writeInitialWeeklyDraft({ instance, preview, writer, bitable, now = new Date() }) {
   return writeWeeklyDraft({
     instance,
@@ -29,54 +27,36 @@ async function writeWeeklyDraft({ instance, preview, writer, bitable, now, mode 
   const sheetId = instance.sheetId;
   if (!sheetConfig || !sheetId) throw new Error('周报实例缺少工作表配置或 SheetID');
 
-  const entries = normalizePreviewCells(preview?.cells);
+  const entries = normalizePreviewCells(preview?.cells, preview?.classifications);
   const cells = Object.keys(entries);
   const currentValues = cells.length
     ? await writer.readCells(sheetConfig, sheetId, cells)
     : {};
-  const previousSnapshot = normalizeSnapshot(instance.aiDraftSnapshot);
-  const writtenCells = {};
-  const lockedCells = [];
+  const preparedCells = {};
+  const completedCells = [];
   const skippedCells = [];
 
   for (const [cell, entry] of Object.entries(entries)) {
     const current = normalizeText(currentValues[cell]);
-    const allowed = mode === 'initial'
-      ? !current
-      : Boolean(previousSnapshot[cell]?.text)
-        && current === normalizeText(previousSnapshot[cell].text);
-    if (!entry.text || !allowed) {
-      (allowed ? skippedCells : lockedCells).push(cell);
+    if (current) {
+      completedCells.push(cell);
       continue;
     }
-    writtenCells[cell] = {
+    if (!entry.text) {
+      skippedCells.push(cell);
+      continue;
+    }
+    preparedCells[cell] = {
       text: entry.text,
       hash: hashText(entry.text),
-      writtenAt: now.getTime(),
+      generatedAt: now.getTime(),
       evidenceIds: entry.evidenceIds,
+      targetId: entry.targetId,
     };
   }
 
-  const valuesToWrite = Object.fromEntries(
-    Object.entries(writtenCells).map(([cell, value]) => [cell, value.text]),
-  );
-  if (Object.keys(valuesToWrite).length) {
-    await writer.writeCells(sheetConfig, sheetId, valuesToWrite);
-    if (typeof writer.markAiCells === 'function') {
-      await writer.markAiCells(sheetConfig, sheetId, valuesToWrite, AI_NOTE);
-    }
-  }
-
-  const snapshot = {
-    ...previousSnapshot,
-    ...writtenCells,
-  };
-  const evidenceSnapshot = {
-    ...normalizeSnapshot(instance.aiEvidenceSnapshot),
-  };
-  for (const [cell, value] of Object.entries(writtenCells)) {
-    evidenceSnapshot[cell] = value.evidenceIds;
-  }
+  const snapshot = preparedCells;
+  const evidenceSnapshot = buildEvidenceSnapshot(preview, preparedCells);
 
   const status = mode === 'initial' ? '已生成' : '已刷新';
   await persistInstancePatch(bitable, instance, {
@@ -87,9 +67,11 @@ async function writeWeeklyDraft({ instance, preview, writer, bitable, now, mode 
   }, now);
 
   return {
-    writtenCells,
+    preparedCells,
+    completedCells,
     skippedCells,
-    lockedCells,
+    writtenCells: {},
+    lockedCells: completedCells,
     snapshot,
     evidenceSnapshot,
     aiGenerationStatus: status,
@@ -110,28 +92,46 @@ async function persistInstancePatch(bitable, instance, patch, now) {
   return null;
 }
 
-function normalizePreviewCells(cells) {
+function normalizePreviewCells(cells, classifications = []) {
   const result = {};
+  const targetIdsByEvidence = new Map((classifications || [])
+    .map(item => [normalizeText(item?.evidenceId), normalizeText(item?.targetId)]));
   for (const [cell, raw] of Object.entries(cells || {})) {
-    const entry = Array.isArray(raw) ? raw[0] : raw;
-    const text = normalizeText(entry?.text ?? entry);
-    const evidenceIds = [...new Set((entry?.evidenceIds || []).map(value => String(value).trim()).filter(Boolean))];
-    result[cell] = { text, evidenceIds };
+    if (!Array.isArray(raw) && (!raw || typeof raw !== 'object')) continue;
+    const entries = Array.isArray(raw) ? raw : [raw];
+    const text = entries.map(entry => normalizeText(entry?.text)).filter(Boolean).join('\n');
+    const evidenceIds = [...new Set(entries.flatMap(entry => entry?.evidenceIds || [])
+      .map(normalizeText)
+      .filter(Boolean))];
+    const targetIds = [...new Set([
+      ...entries.map(entry => normalizeText(entry?.targetId)),
+      ...evidenceIds.map(evidenceId => targetIdsByEvidence.get(evidenceId)),
+    ].filter(Boolean))];
+    result[cell] = { text, evidenceIds, targetId: targetIds.length === 1 ? targetIds[0] : '' };
   }
   return result;
 }
 
-function normalizeSnapshot(value) {
-  if (!value) return {};
-  if (typeof value === 'string') {
-    try {
-      const parsed = JSON.parse(value);
-      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
-    } catch {
-      return {};
-    }
-  }
-  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+function buildEvidenceSnapshot(preview, preparedCells) {
+  return {
+    version: 2,
+    cells: Object.fromEntries(Object.entries(preparedCells)
+      .map(([cell, entry]) => [cell, entry.evidenceIds])),
+    classifications: (preview?.classifications || []).map(item => evidenceMetadata(item, 'accepted')),
+    pendingOwnerReview: (preview?.pendingOwnerReview || [])
+      .map(item => evidenceMetadata(item, 'pending_owner_review')),
+  };
+}
+
+function evidenceMetadata(item, status) {
+  return {
+    evidenceId: normalizeText(item?.evidenceId),
+    targetId: normalizeText(item?.targetId),
+    confidence: normalizeText(item?.confidence),
+    reason: normalizeText(item?.reason),
+    evidenceHash: normalizeText(item?.evidenceHash),
+    status,
+  };
 }
 
 function normalizeText(value) {

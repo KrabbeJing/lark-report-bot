@@ -17,7 +17,7 @@ function fakeServices(order, overrides = {}) {
     configRepository: { load: async () => { order.push('load config'); return { mappings: [], rules: [], styleExamples: [], metricOwners: [] }; } },
     sourceRouter: { route: async () => { throw new Error('legacy department router must not run'); } },
     ai: { generate: async () => { order.push('generate'); return { cells: {}, evidence: {}, routing: { buckets: [], diagnostics: [] } }; } },
-    draftService: { writeInitial: async () => { order.push('write protected cells'); return { writtenCells: {} }; }, refresh: async () => { order.push('refresh eligible cells'); return { writtenCells: {} }; } },
+    draftService: { writeInitial: async () => { order.push('persist draft snapshot'); return { preparedCells: {}, writtenCells: {} }; }, refresh: async () => { order.push('refresh draft snapshot'); return { preparedCells: {}, writtenCells: {} }; } },
     bitable: { updateWeeklyInstance: async (_instance, patch) => { order.push(`persist ${patch.stage || patch.status || 'status'}`); } },
     ownerNotifier: { owners: async () => { order.push('notify weekly owners'); }, metrics: async () => { order.push('notify blank metrics'); } },
     poster: { readSheet: async () => { order.push('read current Sheet'); return {}; }, render: async () => { order.push('render deterministic poster'); return '/tmp/poster.png'; }, validate: async () => { order.push('validate image'); }, sendDepartment: async () => { order.push('send department image'); }, sendTeam: async target => { order.push(`send ${target.key}`); } },
@@ -31,7 +31,7 @@ test('draft stage executes the required operations in order', async () => {
     stage: 'draft', group: { project: '测试组' }, now: new Date('2026-07-24T08:30:00+08:00'),
     services: fakeServices(order),
   });
-  assert.deepEqual(order, ['ensure instance', 'sync facts', 'load config', 'generate', 'write protected cells', 'persist draft']);
+  assert.deepEqual(order, ['ensure instance', 'sync facts', 'load config', 'generate', 'persist draft snapshot', 'persist draft']);
 });
 
 test('notify stage consolidates owner and blank metric notifications before persisting', async () => {
@@ -59,7 +59,7 @@ test('draft stage unwraps ensured instance results and passes discovered metric 
       }),
     },
     draftService: {
-      writeInitial: async args => { draftInstance = args.instance; order.push('write protected cells'); return {}; },
+      writeInitial: async args => { draftInstance = args.instance; order.push('persist draft snapshot'); return {}; },
       refresh: async () => ({}),
     },
     ownerNotifier: {
@@ -91,7 +91,7 @@ test('refresh stage syncs and refreshes only eligible cells', async () => {
     stage: 'refresh', group: { project: '测试组' }, now: new Date('2026-07-25T01:30:00Z'),
     services: fakeServices(order),
   });
-  assert.deepEqual(order, ['sync facts', 'load config', 'generate', 'refresh eligible cells', 'persist refresh']);
+  assert.deepEqual(order, ['sync facts', 'load config', 'generate', 'refresh draft snapshot', 'persist refresh']);
 });
 
 test('publish stage sends department poster and filtered enabled small teams with distinct keys', async () => {

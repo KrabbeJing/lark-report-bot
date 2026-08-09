@@ -7,22 +7,37 @@ import {
 import { BitableService } from '../src/bitable-service.js';
 import { normalizeConfig } from '../src/config.js';
 
-test('writes Friday AI drafts only into blank cells and persists exact ownership snapshots', async () => {
-  const writes = [];
-  const marks = [];
+test('prepares Friday AI drafts for blank cells without writing or marking Sheet cells', async () => {
   const updates = [];
   const result = await writeInitialWeeklyDraft({
     instance: buildInstance(),
     preview: {
       cells: {
-        C26: [{ text: 'AI draft', evidenceIds: ['fact-1'] }],
+        C26: [{ text: 'AI draft', evidenceIds: ['fact-1'], targetId: 'target-1' }],
         C27: [{ text: 'AI must not overwrite', evidenceIds: ['fact-2'] }],
       },
+      classifications: [{
+        evidenceId: 'fact-1',
+        targetId: 'target-1',
+        confidence: 'high',
+        reason: 'classified',
+        evidenceHash: 'hash-1',
+        status: 'accepted',
+      }],
+      pendingOwnerReview: [{
+        evidenceId: 'fact-low',
+        targetId: 'target-2',
+        confidence: 'low',
+        reason: 'too broad',
+        evidenceHash: 'hash-low',
+        status: 'pending_owner_review',
+        text: 'daily body must not be persisted',
+      }],
     },
     writer: {
       readCells: async () => ({ C26: '', C27: 'manual value' }),
-      writeCells: async (_config, _sheetId, values) => writes.push(values),
-      markAiCells: async (_config, _sheetId, values) => marks.push(values),
+      writeCells: async () => { throw new Error('must_not_write'); },
+      markAiCells: async () => { throw new Error('must_not_mark'); },
     },
     bitable: {
       updateWeeklyInstance: async (_instance, patch) => updates.push(patch),
@@ -30,40 +45,60 @@ test('writes Friday AI drafts only into blank cells and persists exact ownership
     now: new Date('2026-07-24T08:30:00+08:00'),
   });
 
-  assert.deepEqual(writes, [{ C26: 'AI draft' }]);
-  assert.deepEqual(marks, [{ C26: 'AI draft' }]);
-  assert.equal(result.writtenCells.C26.text, 'AI draft');
-  assert.equal(result.writtenCells.C26.evidenceIds[0], 'fact-1');
-  assert.match(result.writtenCells.C26.hash, /^[a-f0-9]{64}$/);
+  assert.deepEqual(result.writtenCells, {});
+  assert.equal(result.preparedCells.C26.text, 'AI draft');
+  assert.equal(result.preparedCells.C26.evidenceIds[0], 'fact-1');
+  assert.equal(result.preparedCells.C26.targetId, 'target-1');
+  assert.match(result.preparedCells.C26.hash, /^[a-f0-9]{64}$/);
+  assert.deepEqual(result.completedCells, ['C27']);
   assert.deepEqual(updates[0].aiDraftSnapshot, result.snapshot);
-  assert.deepEqual(updates[0].aiEvidenceSnapshot, { C26: ['fact-1'] });
+  assert.deepEqual(updates[0].aiEvidenceSnapshot, {
+    version: 2,
+    cells: { C26: ['fact-1'] },
+    classifications: [{
+      evidenceId: 'fact-1',
+      targetId: 'target-1',
+      confidence: 'high',
+      reason: 'classified',
+      evidenceHash: 'hash-1',
+      status: 'accepted',
+    }],
+    pendingOwnerReview: [{
+      evidenceId: 'fact-low',
+      targetId: 'target-2',
+      confidence: 'low',
+      reason: 'too broad',
+      evidenceHash: 'hash-low',
+      status: 'pending_owner_review',
+    }],
+  });
+  assert.equal(JSON.stringify(updates[0].aiEvidenceSnapshot).includes('daily body'), false);
   assert.equal(updates[0].aiGenerationStatus, '已生成');
   assert.equal(updates[0].aiInitialAt, 1784853000000);
 });
 
-test('Saturday refresh updates only unchanged AI cells and keeps edited or cleared cells locked', async () => {
-  const writes = [];
+test('Sunday refresh replaces only still-blank drafts and drops completed or empty targets', async () => {
   const updates = [];
   const result = await refreshWeeklyDraft({
     instance: {
       ...buildInstance(),
       aiDraftSnapshot: {
-        C26: { text: 'Friday AI', hash: 'old', evidenceIds: ['fact-1'] },
+        C26: { text: 'Friday AI', hash: 'old', evidenceIds: ['fact-1'], targetId: 'target-1' },
         C27: { text: 'Friday edited later', hash: 'old', evidenceIds: ['fact-2'] },
         C28: { text: 'Friday cleared later', hash: 'old', evidenceIds: ['fact-3'] },
       },
     },
     preview: {
       cells: {
-        C26: [{ text: 'Saturday AI', evidenceIds: ['fact-4'] }],
+        C26: [{ text: 'Sunday AI', evidenceIds: ['fact-4'], targetId: 'target-1' }],
         C27: [{ text: 'Must stay edited', evidenceIds: ['fact-5'] }],
-        C28: [{ text: 'Must stay cleared', evidenceIds: ['fact-6'] }],
+        C28: [],
       },
     },
     writer: {
-      readCells: async () => ({ C26: 'Friday AI', C27: 'Human edit', C28: '' }),
-      writeCells: async (_config, _sheetId, values) => writes.push(values),
-      markAiCells: async () => {},
+      readCells: async () => ({ C26: '', C27: 'Human edit', C28: '' }),
+      writeCells: async () => { throw new Error('must_not_write'); },
+      markAiCells: async () => { throw new Error('must_not_mark'); },
     },
     bitable: {
       updateWeeklyInstance: async (_instance, patch) => updates.push(patch),
@@ -71,11 +106,42 @@ test('Saturday refresh updates only unchanged AI cells and keeps edited or clear
     now: new Date('2026-07-25T09:30:00+08:00'),
   });
 
-  assert.deepEqual(writes, [{ C26: 'Saturday AI' }]);
-  assert.deepEqual(Object.keys(result.writtenCells), ['C26']);
+  assert.deepEqual(result.writtenCells, {});
+  assert.deepEqual(Object.keys(result.preparedCells), ['C26']);
   assert.equal(updates[0].aiGenerationStatus, '已刷新');
-  assert.equal(result.snapshot.C27.text, 'Friday edited later');
-  assert.equal(result.snapshot.C28.text, 'Friday cleared later');
+  assert.equal(result.snapshot.C26.text, 'Sunday AI');
+  assert.equal(result.snapshot.C27, undefined);
+  assert.equal(result.snapshot.C28, undefined);
+  assert.deepEqual(result.completedCells, ['C27']);
+  assert.deepEqual(result.skippedCells, ['C28']);
+});
+
+test('keeps every module two summary entry and infers one trusted target id in the snapshot', async () => {
+  const result = await writeInitialWeeklyDraft({
+    instance: buildInstance(),
+    preview: {
+      cells: {
+        C26: [
+          { text: 'First outcome', evidenceIds: ['fact-1'] },
+          { text: 'Second outcome', evidenceIds: ['fact-2', 'fact-1'] },
+        ],
+      },
+      classifications: [
+        { evidenceId: 'fact-1', targetId: 'target-1', confidence: 'high' },
+        { evidenceId: 'fact-2', targetId: 'target-1', confidence: 'medium' },
+      ],
+    },
+    writer: {
+      readCells: async () => ({ C26: '' }),
+      writeCells: async () => { throw new Error('must_not_write'); },
+      markAiCells: async () => { throw new Error('must_not_mark'); },
+    },
+    now: new Date('2026-07-24T08:30:00+08:00'),
+  });
+
+  assert.equal(result.snapshot.C26.text, 'First outcome\nSecond outcome');
+  assert.deepEqual(result.snapshot.C26.evidenceIds, ['fact-1', 'fact-2']);
+  assert.equal(result.snapshot.C26.targetId, 'target-1');
 });
 
 test('persists a draft through the real BitableService instance update overload', async () => {
@@ -104,8 +170,8 @@ test('persists a draft through the real BitableService instance update overload'
     preview: { cells: { C26: [{ text: 'AI draft', evidenceIds: ['fact-1'] }] } },
     writer: {
       readCells: async () => ({ C26: '' }),
-      writeCells: async () => {},
-      markAiCells: async () => {},
+      writeCells: async () => { throw new Error('must_not_write'); },
+      markAiCells: async () => { throw new Error('must_not_mark'); },
     },
     bitable,
     now: new Date('2026-07-24T08:30:00+08:00'),
