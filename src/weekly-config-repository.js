@@ -16,6 +16,13 @@ function texts(value) {
   return value.map(text).filter(Boolean);
 }
 
+function lines(value) {
+  return texts(value)
+    .flatMap(item => item.split(/\r?\n/))
+    .map(item => item.trim())
+    .filter(Boolean);
+}
+
 function people(value) {
   return (Array.isArray(value) ? value : value ? [value] : [])
     .map(item => ({ openId: String(item?.id || ''), name: String(item?.name || '') }))
@@ -67,10 +74,10 @@ export function normalizeWeeklySectionRule(record, table) {
     target: text(raw(record, table, 'target')),
     contentType: text(raw(record, table, 'contentType')),
     businessScope: text(raw(record, table, 'businessScope')),
-    includeTopics: texts(raw(record, table, 'includeTopics')),
-    excludeTopics: texts(raw(record, table, 'excludeTopics')),
-    positiveExamples: texts(raw(record, table, 'positiveExamples')),
-    negativeExamples: texts(raw(record, table, 'negativeExamples')),
+    includeTopics: lines(raw(record, table, 'includeTopics')),
+    excludeTopics: lines(raw(record, table, 'excludeTopics')),
+    positiveExamples: lines(raw(record, table, 'positiveExamples')),
+    negativeExamples: lines(raw(record, table, 'negativeExamples')),
     owners: people(raw(record, table, 'owners')),
     remindOwners: Boolean(raw(record, table, 'remindOwners')),
     order: Number(text(raw(record, table, 'order')) || 0),

@@ -159,6 +159,26 @@ test('normalizes multiple weekly owners to public people objects', () => {
   assert.deepEqual(metricOwner.owners, [{ openId: 'ou_3', name: '指标负责人' }]);
 });
 
+test('splits multiline weekly rule hints and examples into trimmed entries', () => {
+  const rule = normalizeWeeklySectionRule(record('rec_rule_lines', {
+    规则唯一键: '模块二-收单项目组-本周重点事项说明',
+    模块: '模块二',
+    周报板块: '收单项目组',
+    内容类型: '本周重点事项说明',
+    业务范围说明: '收单业务',
+    包含主题: '收单\r\n 商户进件 \n\nD0订单',
+    排除主题: '云缴费\n 云充值 ',
+    分类正例: '完成商户进件流程优化\nD0订单完成核对',
+    分类反例: '云缴费工单\r\n 银企直联证书更新 ',
+    是否启用: true,
+  }), createGroup().weeklySectionRuleTable);
+
+  assert.deepEqual(rule.includeTopics, ['收单', '商户进件', 'D0订单']);
+  assert.deepEqual(rule.excludeTopics, ['云缴费', '云充值']);
+  assert.deepEqual(rule.positiveExamples, ['完成商户进件流程优化', 'D0订单完成核对']);
+  assert.deepEqual(rule.negativeExamples, ['云缴费工单', '银企直联证书更新']);
+});
+
 test('normalizes style examples without exposing Base records', () => {
   const example = normalizeWeeklyStyleExample(record('rec_style', {
     模块: '模块三',
