@@ -28,6 +28,76 @@ const MEETING_OUTCOME_PATTERNS = [
   /(?:上线|发布|落地|交付)(?:完成|成功)/,
 ];
 
+export function buildWeeklyClassificationCandidates({
+  facts = [],
+  mappings = [],
+  rules = [],
+  cellMap = {},
+  period = {},
+} = {}) {
+  const targetSpecs = buildTargetSpecs(cellMap);
+  const ruleIndex = buildSemanticRuleIndex(rules);
+  const periodComponents = buildMappingIdentityComponents(
+    mappings.filter(mapping => isMappingRelevantToPeriod(mapping, period)),
+  );
+  const resolvedFacts = facts
+    .filter(fact => isEligibleFact(fact, period))
+    .sort(compareFacts)
+    .map(fact => {
+      const activeComponents = activeComponentViews(periodComponents, fact.reportDate);
+      const memberResolution = findMemberMappings(fact, activeComponents);
+      return {
+        fact,
+        memberResolution,
+        memberKeys: memberResolution.aliasKeys,
+      };
+    });
+  const blockedMemberKeys = new Set(resolvedFacts
+    .filter(({ memberResolution, memberKeys }) => memberKeys.length && memberResolution.mappings.length > 1)
+    .flatMap(({ memberKeys }) => memberKeys));
+  const candidates = [];
+  const diagnostics = [];
+
+  for (const { fact, memberResolution, memberKeys } of resolvedFacts) {
+    for (const [itemIndex, rawText] of toTextArray(fact.workItems).entries()) {
+      const source = toSource(fact, rawText, itemIndex);
+      if (!source.text) continue;
+
+      const diagnosticCode = classificationMemberDiagnostic({
+        memberResolution,
+        memberKeys,
+        blockedMemberKeys,
+      });
+      if (diagnosticCode) {
+        diagnostics.push(diagnostic(source, diagnosticCode));
+        continue;
+      }
+
+      const allowedTargets = buildAllowedClassificationTargets({
+        mappings: memberResolution.mappings,
+        ruleIndex,
+        targetSpecs,
+      });
+      if (allowedTargets.diagnostic) {
+        diagnostics.push(diagnostic(source, allowedTargets.diagnostic.code, allowedTargets.diagnostic.details));
+        continue;
+      }
+      if (!allowedTargets.targets.length) {
+        diagnostics.push(diagnostic(source, 'no_allowed_target'));
+        continue;
+      }
+
+      candidates.push({ ...source, allowedTargets: allowedTargets.targets });
+    }
+  }
+
+  return {
+    candidates: candidates.sort(compareClassificationCandidates),
+    diagnostics,
+  };
+}
+
+// Legacy small-team routing: department previews must use bounded semantic candidates above.
 export function routeWeeklyFacts({
   facts = [],
   mappings = [],
@@ -160,9 +230,151 @@ function addRoute({ source, module, target, targetSpecs, bucketsByKey, evidence 
 
 function buildTargetSpecs(cellMap) {
   return {
-    [MODULE_TWO]: collectTargetSpecs(cellMap.agileProjects),
-    [MODULE_THREE]: collectTargetSpecs(cellMap.management),
+    [MODULE_TWO]: collectTargetSpecs(cellMap?.agileProjects),
+    [MODULE_THREE]: collectTargetSpecs(cellMap?.management),
   };
+}
+
+function buildSemanticRuleIndex(rules) {
+  const enabledRules = rules.filter(rule => rule?.enabled !== false);
+  const rulesByTargetId = new Map();
+  const rulesByNaturalKey = new Map();
+  for (const rule of enabledRules) {
+    const targetId = normalized(rule.targetId);
+    const module = moduleKey(rule.module);
+    const target = normalized(rule.target);
+    const contentType = normalized(rule.contentType);
+    const naturalKey = `${module}:${target}:${contentType}`;
+    addIndexedRule(rulesByTargetId, targetId, rule);
+    addIndexedRule(rulesByNaturalKey, naturalKey, rule);
+  }
+
+  return {
+    rulesByTargetId,
+    rulesByNaturalKey,
+    duplicateTargetIds: duplicateIndexKeys(rulesByTargetId),
+    duplicateNaturalKeys: duplicateIndexKeys(rulesByNaturalKey),
+  };
+}
+
+function addIndexedRule(index, key, rule) {
+  if (!key) return;
+  if (!index.has(key)) index.set(key, []);
+  index.get(key).push(rule);
+}
+
+function duplicateIndexKeys(index) {
+  return new Set([...index.entries()]
+    .filter(([, rules]) => rules.length > 1)
+    .map(([key]) => key));
+}
+
+function classificationMemberDiagnostic({ memberResolution, memberKeys, blockedMemberKeys }) {
+  if (memberKeys.some(memberKey => blockedMemberKeys.has(memberKey))) return 'duplicate_active_mapping';
+  if (memberResolution.diagnosticCode) return memberResolution.diagnosticCode;
+  if (!memberResolution.mappings.length) return 'unmapped_member';
+  if (memberResolution.mappings.length > 1) return 'duplicate_active_mapping';
+  return '';
+}
+
+function buildAllowedClassificationTargets({ mappings, ruleIndex, targetSpecs }) {
+  const allowedPairs = new Map();
+  for (const mapping of mappings) {
+    for (const target of toTextArray(mapping.module2Targets)) {
+      allowedPairs.set(`${MODULE_TWO}:${target}`, { module: MODULE_TWO, target });
+    }
+    const module3Target = normalized(mapping.module3Target);
+    if (module3Target) {
+      allowedPairs.set(`${MODULE_THREE}:${module3Target}`, {
+        module: MODULE_THREE,
+        target: module3Target,
+      });
+    }
+  }
+
+  const targets = [];
+  for (const pair of allowedPairs.values()) {
+    const ruleResult = resolveSemanticRule(pair, ruleIndex);
+    if (ruleResult.diagnostic) return ruleResult;
+    const spec = targetSpecs[pair.module]?.get(normalized(pair.target));
+    if (!spec) {
+      return {
+        diagnostic: {
+          code: 'target_not_in_cell_map',
+          details: { module: pair.module, target: pair.target },
+        },
+      };
+    }
+    const rule = ruleResult.rule;
+    targets.push({
+      targetId: normalized(rule.targetId),
+      module: pair.module,
+      target: normalized(rule.target),
+      contentType: normalized(rule.contentType),
+      cells: [...spec.current],
+      businessScope: normalized(rule.businessScope),
+      includeTopics: toTopicArray(rule.includeTopics),
+      excludeTopics: toTopicArray(rule.excludeTopics),
+      positiveExamples: toTopicArray(rule.positiveExamples),
+      negativeExamples: toTopicArray(rule.negativeExamples),
+      order: numericOrder(rule.order),
+    });
+  }
+
+  targets.sort((left, right) => (
+    left.order - right.order
+    || left.targetId.localeCompare(right.targetId, 'zh-Hans-CN')
+  ));
+  return { targets: targets.map(({ order, ...target }) => target) };
+}
+
+function resolveSemanticRule({ module, target }, ruleIndex) {
+  const naturalKey = `${module}:${normalized(target)}:`;
+  const matchingRules = [...ruleIndex.rulesByNaturalKey.entries()]
+    .filter(([key]) => key.startsWith(naturalKey))
+    .flatMap(([, rules]) => rules);
+  if (!matchingRules.length) {
+    return {
+      diagnostic: {
+        code: 'missing_target_rule',
+        details: { module, target },
+      },
+    };
+  }
+  if (matchingRules.length !== 1) {
+    return {
+      diagnostic: {
+        code: 'duplicate_target_rule',
+        details: { module, target },
+      },
+    };
+  }
+
+  const rule = matchingRules[0];
+  const targetId = normalized(rule.targetId);
+  const exactNaturalKey = `${module}:${normalized(rule.target)}:${normalized(rule.contentType)}`;
+  if (!targetId
+    || ruleIndex.duplicateTargetIds.has(targetId)
+    || ruleIndex.duplicateNaturalKeys.has(exactNaturalKey)
+    || ruleIndex.rulesByTargetId.get(targetId)?.length !== 1) {
+    return {
+      diagnostic: {
+        code: 'duplicate_target_rule',
+        details: { module, target },
+      },
+    };
+  }
+  return { rule };
+}
+
+function numericOrder(value) {
+  const order = Number(value);
+  return Number.isFinite(order) ? order : 0;
+}
+
+function compareClassificationCandidates(left, right) {
+  return normalized(left.date).localeCompare(normalized(right.date))
+    || normalized(left.evidenceId).localeCompare(normalized(right.evidenceId));
 }
 
 function collectTargetSpecs(entries = {}) {

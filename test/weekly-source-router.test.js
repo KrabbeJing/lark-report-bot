@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { routeWeeklyFacts } from '../src/weekly-source-router.js';
+import {
+  buildWeeklyClassificationCandidates,
+  routeWeeklyFacts,
+} from '../src/weekly-source-router.js';
 
 const period = { start: '2026-07-17', end: '2026-07-23' };
 const cellMap = {
@@ -45,6 +48,32 @@ function rule(module, target, includeTopics, overrides = {}) {
     excludeTopics: [],
     ...overrides,
   };
+}
+
+function semanticRule(module, target, contentType, overrides = {}) {
+  const moduleName = module === 'module2' ? '模块二' : '模块三';
+  return {
+    recordId: `rec_rule_${module}_${target}`,
+    targetId: `${moduleName}-${target}-${contentType}`,
+    module: moduleName,
+    target,
+    contentType,
+    businessScope: `${target}业务范围说明`,
+    includeTopics: ['不会命中的主题'],
+    excludeTopics: ['不会命中的排除主题'],
+    positiveExamples: ['正例'],
+    negativeExamples: ['反例'],
+    order: module === 'module2' ? 10 : 20,
+    enabled: true,
+    ...overrides,
+  };
+}
+
+function semanticRules(overrides = {}) {
+  return [
+    semanticRule('module2', '收单项目组', '本周重点事项说明', overrides.module2),
+    semanticRule('module3', '对公客群经营及场景建设', '本周工作进展', overrides.module3),
+  ];
 }
 
 function texts(result, target) {
@@ -1054,4 +1083,158 @@ test('returns empty routing naturally when facts are empty', () => {
     evidence: {},
     diagnostics: [],
   });
+});
+
+test('builds every mapped target without keyword admission and preserves semantic hints', () => {
+  const result = buildWeeklyClassificationCandidates({
+    facts: [fact({ workItems: ['协调查明银联代付短款原因'] })],
+    mappings: [mapping({ module3Target: '对公客群经营及场景建设' })],
+    rules: semanticRules({
+      module2: { includeTopics: ['不匹配主题'], excludeTopics: ['银联'] },
+      module3: { includeTopics: ['另一个不匹配主题'], excludeTopics: ['短款'] },
+    }),
+    cellMap,
+    period,
+  });
+
+  assert.equal(result.candidates.length, 1);
+  assert.deepEqual(
+    result.candidates[0].allowedTargets.map(target => target.targetId),
+    [
+      '模块二-收单项目组-本周重点事项说明',
+      '模块三-对公客群经营及场景建设-本周工作进展',
+    ],
+  );
+  assert.deepEqual(result.candidates[0].allowedTargets[0], {
+    targetId: '模块二-收单项目组-本周重点事项说明',
+    module: 'module2',
+    target: '收单项目组',
+    contentType: '本周重点事项说明',
+    cells: ['C26'],
+    businessScope: '收单项目组业务范围说明',
+    includeTopics: ['不匹配主题'],
+    excludeTopics: ['银联'],
+    positiveExamples: ['正例'],
+    negativeExamples: ['反例'],
+  });
+  assert.equal(result.diagnostics.some(item => item.code === 'no_topic_match'), false);
+});
+
+test('returns unmapped_member without building a candidate', () => {
+  const result = buildWeeklyClassificationCandidates({
+    facts: [fact()],
+    mappings: [],
+    rules: semanticRules(),
+    cellMap,
+    period,
+  });
+
+  assert.deepEqual(result.candidates, []);
+  assert.deepEqual(result.diagnostics.map(item => item.code), ['unmapped_member']);
+});
+
+test('blocks every item for a canonical member after a duplicate active mapping', () => {
+  const result = buildWeeklyClassificationCandidates({
+    facts: [
+      fact({ recordId: 'rec_monday', reportDate: '2026-07-20', workItems: ['周一完成收单接口联调'] }),
+      fact({ recordId: 'rec_tuesday', reportDate: '2026-07-21', workItems: ['周二完成收单接口联调'] }),
+    ],
+    mappings: [
+      mapping({ recordId: 'rec_mapping_monday', effectiveFrom: '2026-07-20', effectiveTo: '2026-07-20' }),
+      mapping({ recordId: 'rec_mapping_current', effectiveFrom: '2026-07-20', effectiveTo: '2026-07-23' }),
+    ],
+    rules: semanticRules(),
+    cellMap,
+    period,
+  });
+
+  assert.deepEqual(result.candidates, []);
+  assert.deepEqual(result.diagnostics.map(item => [item.evidenceId, item.code]), [
+    ['rec_monday:current:workItems:0', 'duplicate_active_mapping'],
+    ['rec_tuesday:current:workItems:0', 'duplicate_active_mapping'],
+  ]);
+});
+
+test('returns missing_target_rule when a mapped target has no enabled rule', () => {
+  const result = buildWeeklyClassificationCandidates({
+    facts: [fact()],
+    mappings: [mapping()],
+    rules: [semanticRule('module3', '对公客群经营及场景建设', '本周工作进展')],
+    cellMap,
+    period,
+  });
+
+  assert.deepEqual(result.candidates, []);
+  assert.deepEqual(result.diagnostics.map(item => item.code), ['missing_target_rule']);
+});
+
+test('returns duplicate_target_rule for duplicate enabled target ids', () => {
+  const baseRule = semanticRule('module2', '收单项目组', '本周重点事项说明');
+  const result = buildWeeklyClassificationCandidates({
+    facts: [fact()],
+    mappings: [mapping({ module3Target: '' })],
+    rules: [baseRule, { ...baseRule, recordId: 'rec_rule_duplicate' }],
+    cellMap,
+    period,
+  });
+
+  assert.deepEqual(result.candidates, []);
+  assert.deepEqual(result.diagnostics.map(item => item.code), ['duplicate_target_rule']);
+});
+
+test('returns duplicate_target_rule for duplicate module target content rules', () => {
+  const result = buildWeeklyClassificationCandidates({
+    facts: [fact()],
+    mappings: [mapping({ module3Target: '' })],
+    rules: [
+      semanticRule('module2', '收单项目组', '本周重点事项说明', { targetId: 'rule-a' }),
+      semanticRule('module2', '收单项目组', '本周重点事项说明', { targetId: 'rule-b' }),
+    ],
+    cellMap,
+    period,
+  });
+
+  assert.deepEqual(result.candidates, []);
+  assert.deepEqual(result.diagnostics.map(item => item.code), ['duplicate_target_rule']);
+});
+
+test('returns target_not_in_cell_map when an enabled rule has no current Cell', () => {
+  const result = buildWeeklyClassificationCandidates({
+    facts: [fact()],
+    mappings: [mapping({ module2Targets: ['未发现板块'], module3Target: '' })],
+    rules: [semanticRule('module2', '未发现板块', '本周重点事项说明')],
+    cellMap,
+    period,
+  });
+
+  assert.deepEqual(result.candidates, []);
+  assert.deepEqual(result.diagnostics.map(item => item.code), ['target_not_in_cell_map']);
+});
+
+test('keeps reporter identity out of allowed target metadata', () => {
+  const result = buildWeeklyClassificationCandidates({
+    facts: [fact({ reporterName: '张三', memberOpenId: 'ou_a' })],
+    mappings: [mapping()],
+    rules: semanticRules(),
+    cellMap,
+    period,
+  });
+
+  const serializedTargets = JSON.stringify(result.candidates[0].allowedTargets);
+  assert.equal(serializedTargets.includes('张三'), false);
+  assert.equal(serializedTargets.includes('ou_a'), false);
+  assert.equal(serializedTargets.includes('rec_mapping_1'), false);
+});
+
+test('retains routine meeting and coordination items for semantic classification', () => {
+  const result = buildWeeklyClassificationCandidates({
+    facts: [fact({ workItems: ['参加项目协调会'] })],
+    mappings: [mapping()],
+    rules: semanticRules(),
+    cellMap,
+    period,
+  });
+
+  assert.deepEqual(result.candidates.map(candidate => candidate.text), ['参加项目协调会']);
+  assert.deepEqual(result.diagnostics, []);
 });
