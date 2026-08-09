@@ -85,6 +85,19 @@ test('weekly source mapping uses a single person field for member identity', () 
   assert.equal(field.kind, 'user');
 });
 
+test('weekly section rules require semantic scope and classify examples as long text', () => {
+  const table = buildReportTableSchemaCatalog().weeklySectionRuleTable;
+
+  for (const fieldName of ['业务范围说明', '分类正例', '分类反例']) {
+    const field = findField(table, fieldName);
+    assert.equal(field.kind, 'longText', fieldName);
+  }
+  assert.equal(findField(table, '业务范围说明').required, true);
+  assert.equal(findField(table, '分类正例').required, false);
+  assert.equal(findField(table, '分类反例').required, false);
+  assert.equal(findField(table, '包含主题').required, true);
+});
+
 test('validator accepts compatible date, person, url, and multiselect fields', () => {
   const catalog = buildReportTableSchemaCatalog();
   const actual = fieldsFor(catalog.weeklyInstanceTable, {

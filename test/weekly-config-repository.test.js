@@ -27,11 +27,15 @@ function createGroup(overrides = {}) {
       enabled: '是否启用',
     }, 'mapping'),
     weeklySectionRuleTable: table({
+      ruleKey: '规则唯一键',
       module: '模块',
       target: '周报板块',
       contentType: '内容类型',
+      businessScope: '业务范围说明',
       includeTopics: '包含主题',
       excludeTopics: '排除主题',
+      positiveExamples: '分类正例',
+      negativeExamples: '分类反例',
       owners: '周报负责人',
       remindOwners: '负责人提醒',
       order: '排序',
@@ -111,22 +115,40 @@ test('normalizes Base millisecond mapping dates in Asia Shanghai while retaining
 
 test('normalizes multiple weekly owners to public people objects', () => {
   const rule = normalizeWeeklySectionRule(record('rec_rule', {
-    模块: '模块二',
-    周报板块: '项目A',
-    内容类型: '进展',
-    包含主题: ['主题1'],
-    排除主题: [],
+    规则唯一键: '模块三-对公客群经营及场景建设-本周工作进展',
+    模块: '模块三',
+    周报板块: '对公客群经营及场景建设',
+    内容类型: '本周工作进展',
+    业务范围说明: '负责云缴费、云充值和银企直联等对公客群经营事项',
+    包含主题: ['云缴费', '银企直联'],
+    排除主题: ['收单项目阶段成果'],
+    分类正例: ['完成银企直联证书更新并通过验证'],
+    分类反例: ['收单商户进件属于收单项目组'],
     周报负责人: [{ id: 'ou_1', name: '负责人甲' }, { id: 'ou_2', name: '负责人乙' }],
     负责人提醒: true,
-    排序: '3',
+    排序: '10',
     是否启用: true,
   }), createGroup().weeklySectionRuleTable);
 
-  assert.deepEqual(rule.owners, [
-    { openId: 'ou_1', name: '负责人甲' },
-    { openId: 'ou_2', name: '负责人乙' },
-  ]);
-  assert.equal(rule.order, 3);
+  assert.deepEqual(rule, {
+    recordId: 'rec_rule',
+    targetId: '模块三-对公客群经营及场景建设-本周工作进展',
+    module: '模块三',
+    target: '对公客群经营及场景建设',
+    contentType: '本周工作进展',
+    businessScope: '负责云缴费、云充值和银企直联等对公客群经营事项',
+    includeTopics: ['云缴费', '银企直联'],
+    excludeTopics: ['收单项目阶段成果'],
+    positiveExamples: ['完成银企直联证书更新并通过验证'],
+    negativeExamples: ['收单商户进件属于收单项目组'],
+    owners: [
+      { openId: 'ou_1', name: '负责人甲' },
+      { openId: 'ou_2', name: '负责人乙' },
+    ],
+    remindOwners: true,
+    order: 10,
+    enabled: true,
+  });
 
   const metricOwner = normalizeCoreMetricOwner(record('rec_metric', {
     指标名称: '月活',

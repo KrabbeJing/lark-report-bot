@@ -8,6 +8,7 @@ const {
   normalizeConfig,
   parseBitableLink,
   parseWeeklySheetLink,
+  WEEKLY_SECTION_RULE_FIELD_KEYS,
 } = configApi;
 
 const SHARED_RESOURCE_KEYS_FOR_TEST = [
@@ -190,6 +191,24 @@ test('normalizes weeklySheet from wiki url', () => {
 
   assert.equal(group.weeklySheet.wikiNodeToken, 'BaTOwZsM6ikYjJkhSqOc8e0Ynrh');
   assert.equal(group.weeklySheet.templateSheetId, '4dcda2');
+});
+
+test('exposes semantic weekly rule field mappings', () => {
+  assert.deepEqual({
+    ruleKey: WEEKLY_SECTION_RULE_FIELD_KEYS.ruleKey,
+    businessScope: WEEKLY_SECTION_RULE_FIELD_KEYS.businessScope,
+    includeTopics: WEEKLY_SECTION_RULE_FIELD_KEYS.includeTopics,
+    excludeTopics: WEEKLY_SECTION_RULE_FIELD_KEYS.excludeTopics,
+    positiveExamples: WEEKLY_SECTION_RULE_FIELD_KEYS.positiveExamples,
+    negativeExamples: WEEKLY_SECTION_RULE_FIELD_KEYS.negativeExamples,
+  }, {
+    ruleKey: '规则唯一键',
+    businessScope: '业务范围说明',
+    includeTopics: '包含主题',
+    excludeTopics: '排除主题',
+    positiveExamples: '分类正例',
+    negativeExamples: '分类反例',
+  });
 });
 
 test('normalizes weekly instance schedule, table, and semantic aliases without cell coordinates', () => {

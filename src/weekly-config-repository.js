@@ -62,11 +62,15 @@ export function normalizeWeeklySourceMapping(record, table) {
 export function normalizeWeeklySectionRule(record, table) {
   return {
     recordId: record.record_id,
+    targetId: text(raw(record, table, 'ruleKey')),
     module: text(raw(record, table, 'module')),
     target: text(raw(record, table, 'target')),
     contentType: text(raw(record, table, 'contentType')),
+    businessScope: text(raw(record, table, 'businessScope')),
     includeTopics: texts(raw(record, table, 'includeTopics')),
     excludeTopics: texts(raw(record, table, 'excludeTopics')),
+    positiveExamples: texts(raw(record, table, 'positiveExamples')),
+    negativeExamples: texts(raw(record, table, 'negativeExamples')),
     owners: people(raw(record, table, 'owners')),
     remindOwners: Boolean(raw(record, table, 'remindOwners')),
     order: Number(text(raw(record, table, 'order')) || 0),
