@@ -1,7 +1,9 @@
+import { createHash } from 'node:crypto';
 import { getReportingUnits, tableIsConfigured } from './config.js';
 import { formatNaturalWeekPeriod } from './date-utils.js';
 import { loadWeeklyConfiguration } from './weekly-config-repository.js';
-import { routeWeeklyFacts } from './weekly-source-router.js';
+import { buildWeeklyClassificationCandidates } from './weekly-source-router.js';
+import { classifyWeeklyCandidates } from './weekly-semantic-classifier.js';
 
 const VALID_FACT_STATUS = '有效';
 const MODULE_TWO = 'module2';
@@ -89,22 +91,44 @@ export async function runWeeklyAiPreview({
       group.weeklySheet?.templateSheetId,
       { aliasMap: group.weeklySheet?.entityAliases },
     );
-    const routing = routeWeeklyFacts({
+    const period = {
+      start: normalizedOptions.startDate,
+      end: normalizedOptions.endDate,
+    };
+    const candidateResult = buildWeeklyClassificationCandidates({
       facts,
       mappings: weeklyConfiguration.mappings,
       rules: weeklyConfiguration.rules,
       cellMap,
-      period: {
-        start: normalizedOptions.startDate,
-        end: normalizedOptions.endDate,
-      },
-      includeRoutineMeetingEvidence: true,
+      period,
     });
+    const knownNames = collectKnownNames(facts, candidateResult);
+    const prepared = redactClassificationCandidates(candidateResult.candidates, knownNames);
+    const classified = await classifyWeeklyCandidates({
+      candidates: prepared.candidates,
+      aiProvider,
+    });
+    const classifications = classified.accepted.map(item => (
+      classificationOutput(item, knownNames)
+    ));
+    const pendingOwnerReview = classified.pendingOwnerReview.map(item => (
+      pendingReviewOutput(item, knownNames)
+    ));
+    const routing = buildClassifiedWeeklyRouting(classified.accepted, [
+      ...candidateResult.diagnostics.map(sanitizeCandidateDiagnostic),
+      ...prepared.diagnostics,
+      ...classified.diagnostics,
+    ]);
     const result = await previewGroup({
       group,
       cellMap,
       facts,
       routing,
+      classifications,
+      pendingOwnerReview,
+      knownNames,
+      classificationProvider: classified.provider,
+      classificationModel: classified.model,
       weeklyConfiguration,
       aiProvider,
       options: normalizedOptions,
@@ -131,6 +155,9 @@ export async function runWeeklyAiPreview({
     groups: groupResults,
     cells: singleGroup?.cells || {},
     evidence: singleGroup?.evidence || {},
+    classifications: singleGroup?.classifications || [],
+    pendingOwnerReview: singleGroup?.pendingOwnerReview || [],
+    routing: singleGroup?.routing || { buckets: [], diagnostics: [] },
     warnings: singleGroup?.warnings || (multipleGroups
       ? ['Multiple groups were previewed; use groups[].cells/evidence/warnings/diagnostics/provider/model because top-level cells and evidence are empty.']
       : []),
@@ -187,6 +214,11 @@ async function previewGroup({
   cellMap,
   facts,
   routing,
+  classifications,
+  pendingOwnerReview,
+  knownNames,
+  classificationProvider,
+  classificationModel,
   weeklyConfiguration,
   aiProvider,
   options,
@@ -195,9 +227,8 @@ async function previewGroup({
   const evidence = {};
   const warnings = [...weeklyConfiguration.warnings];
   const diagnostics = [...routing.diagnostics];
-  let provider = aiProvider?.name || '';
-  let model = aiProvider?.model || '';
-  const knownNames = collectKnownNames(facts, routing);
+  let provider = classificationProvider || aiProvider?.name || '';
+  let model = classificationModel || aiProvider?.model || '';
 
   for (const bucket of routing.buckets) {
     const targetContext = buildTargetContext({
@@ -268,6 +299,9 @@ async function previewGroup({
     bucketCount: routing.buckets.length,
     cells,
     evidence,
+    classifications,
+    pendingOwnerReview,
+    routing,
     warnings,
     diagnostics,
     provider,
@@ -572,12 +606,108 @@ function hasLeadingListMarker(text) {
   return /^\s*(?:[0-9０-９]+[.．。、)）]|[(（][0-9０-９]+[)）])\s*/u.test(String(text || ''));
 }
 
-function collectKnownNames(facts, routing) {
+function redactClassificationCandidates(candidates, knownNames) {
+  const prepared = [];
+  const diagnostics = [];
+  for (const candidate of candidates || []) {
+    const text = redactKnownNames(candidate.text, knownNames);
+    if (!normalized(text)) {
+      diagnostics.push({
+        evidenceId: candidate.evidenceId,
+        factRecordId: candidate.factRecordId,
+        code: 'empty_evidence_after_redaction',
+      });
+      continue;
+    }
+    prepared.push({ ...candidate, text });
+  }
+  return { candidates: prepared, diagnostics };
+}
+
+function buildClassifiedWeeklyRouting(accepted, diagnostics = []) {
+  const buckets = new Map();
+  const evidence = {};
+  for (const item of accepted || []) {
+    const selectedTarget = item.selectedTarget;
+    const key = `${selectedTarget.module}:${selectedTarget.targetId}`;
+    if (!buckets.has(key)) {
+      buckets.set(key, {
+        module: selectedTarget.module,
+        target: selectedTarget.target,
+        targets: { current: [...selectedTarget.cells] },
+        sources: { current: [] },
+      });
+    }
+    const source = {
+      evidenceId: item.evidenceId,
+      factRecordId: item.factRecordId,
+      category: item.category,
+      sourceField: item.sourceField,
+      itemIndex: item.itemIndex,
+      date: item.date,
+      text: item.text,
+    };
+    buckets.get(key).sources.current.push(source);
+    evidence[item.evidenceId] = {
+      ...source,
+      module: selectedTarget.module,
+      target: selectedTarget.target,
+    };
+  }
+  return {
+    buckets: [...buckets.values()].sort(compareClassifiedBuckets),
+    evidence,
+    diagnostics,
+  };
+}
+
+function compareClassifiedBuckets(left, right) {
+  return normalized(left.module).localeCompare(normalized(right.module))
+    || normalized(left.target).localeCompare(normalized(right.target), 'zh-Hans-CN');
+}
+
+function classificationOutput(item, knownNames) {
+  return {
+    evidenceId: item.evidenceId,
+    targetId: item.selectedTarget.targetId,
+    module: item.selectedTarget.module,
+    target: item.selectedTarget.target,
+    confidence: item.classification.confidence,
+    reason: redactKnownNames(item.classification.reason, knownNames),
+    evidenceHash: hashClassifierEvidence(item.date, item.text),
+    status: 'accepted',
+  };
+}
+
+function pendingReviewOutput(item, knownNames) {
+  return {
+    evidenceId: item.evidenceId,
+    targetId: item.selectedTarget.targetId,
+    module: item.selectedTarget.module,
+    target: item.selectedTarget.target,
+    confidence: 'low',
+    reason: redactKnownNames(item.classification.reason, knownNames),
+    date: normalized(item.date),
+    text: normalized(item.text),
+    evidenceHash: hashClassifierEvidence(item.date, item.text),
+  };
+}
+
+function hashClassifierEvidence(date, text) {
+  return createHash('sha256')
+    .update(`${normalized(date)}\n${normalized(text)}`, 'utf8')
+    .digest('hex');
+}
+
+function sanitizeCandidateDiagnostic(diagnostic) {
+  const { text: _text, member: _member, ...safe } = diagnostic || {};
+  return safe;
+}
+
+function collectKnownNames(facts, candidateResult) {
   return [...new Set([
     ...(facts || []).flatMap(fact => [fact?.reporterName, fact?.memberName]),
-    ...(routing?.buckets || []).flatMap(bucket => (
-      (bucket.sources?.current || []).map(source => source.member)
-    )),
+    ...(candidateResult?.candidates || []).map(candidate => candidate.member),
   ].map(normalized).filter(Boolean))]
     .sort((left, right) => right.length - left.length || left.localeCompare(right));
 }

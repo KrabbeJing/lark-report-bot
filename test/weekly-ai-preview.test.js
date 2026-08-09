@@ -1,10 +1,41 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizeConfig } from '../src/config.js';
-import { parseWeeklyAiPreviewArgs, runWeeklyAiPreview } from '../src/weekly-ai-preview.js';
+import {
+  parseWeeklyAiPreviewArgs,
+  runWeeklyAiPreview as runWeeklyAiPreviewImplementation,
+} from '../src/weekly-ai-preview.js';
 import { runWeeklyAiPreviewCli } from '../src/weekly-ai-preview-cli.js';
 
 const options = { startDate: '2026-07-13', endDate: '2026-07-17', outputPath: '' };
+
+function semanticProvider(provider = {}) {
+  return {
+    name: 'fake',
+    model: 'fake-model',
+    classifyWeeklyEvidence: async ({ items }) => ({
+      classifications: items.map(item => {
+        const matched = item.allowedTargets.find(target => (
+          target.includeTopics.some(topic => item.text.includes(topic))
+        ));
+        return {
+          evidenceId: item.evidenceId,
+          targetId: (matched || item.allowedTargets[0]).targetId,
+          confidence: 'high',
+          reason: 'test classification',
+        };
+      }),
+    }),
+    ...provider,
+  };
+}
+
+function runWeeklyAiPreview(args) {
+  return runWeeklyAiPreviewImplementation({
+    ...args,
+    aiProvider: semanticProvider(args.aiProvider),
+  });
+}
 
 const cellMap = {
   reportPeriod: 'B2',
@@ -41,10 +72,14 @@ function createGroup() {
       tableId: 'tbl_rules',
       fields: {
         module: '模块',
+        ruleKey: '规则唯一键',
         target: '周报板块',
         contentType: '内容类型',
+        businessScope: '业务范围说明',
         includeTopics: '包含主题',
         excludeTopics: '排除主题',
+        positiveExamples: '正向示例',
+        negativeExamples: '反向示例',
         owners: '周报负责人',
         remindOwners: '负责人提醒',
         order: '排序',
@@ -143,14 +178,19 @@ function ruleRecord(recordId, {
   target,
   contentType,
   includeTopics,
+  targetId = `target-${recordId}`,
   order = 1,
 }) {
   return configRecord(recordId, {
     模块: module,
+    规则唯一键: targetId,
     周报板块: target,
     内容类型: contentType,
+    业务范围说明: `${target}相关业务`,
     包含主题: includeTopics,
     排除主题: [],
+    正向示例: [`${target}取得阶段成果`],
+    反向示例: [`与${target}无关的事项`],
     周报负责人: [],
     负责人提醒: false,
     排序: order,
@@ -757,6 +797,183 @@ test('loads facts and weekly configuration before generating target-scoped curre
   assert.deepEqual(result.groups[0].cells, result.cells);
   assert.deepEqual(result.groups[0].evidence, result.evidence);
   assert.deepEqual(result.groups[0].diagnostics, result.diagnostics);
+});
+
+test('classifies no-keyword evidence inside its mapping boundary before summarization', async () => {
+  const calls = [];
+  const result = await runWeeklyAiPreview({
+    config: { groups: [createGroup()] },
+    bitable: createBitable({
+      facts: [report({
+        recordId: 'fact_semantic',
+        memberOpenId: 'ou_1',
+        workItems: ['完成生产参数生成并交付验证'],
+      })],
+    }),
+    sheetWriter: { discoverTemplateTargets: async () => cellMap },
+    aiProvider: {
+      classifyWeeklyEvidence: async ({ items }) => {
+        calls.push({ stage: 'classify', items });
+        return {
+          classifications: [{
+            evidenceId: items[0].evidenceId,
+            targetId: items[0].allowedTargets[0].targetId,
+            confidence: 'medium',
+            reason: '语义属于该成员允许的收单板块',
+          }],
+        };
+      },
+      generateWeeklySheetPreview: async input => {
+        calls.push({ stage: 'summarize', input });
+        return {
+          cells: {
+            D30: [{
+              text: '完成生产参数生成并交付验证',
+              evidenceIds: [input.evidence[0].evidenceId],
+            }],
+          },
+        };
+      },
+    },
+    options,
+  });
+
+  assert.deepEqual(calls.map(call => call.stage), ['classify', 'summarize']);
+  assert.equal(result.classifications.length, 1);
+  assert.equal(result.classifications[0].status, 'accepted');
+  assert.match(result.classifications[0].evidenceHash, /^[a-f0-9]{64}$/);
+  assert.equal(Object.hasOwn(result.classifications[0], 'text'), false);
+  assert.deepEqual(result.pendingOwnerReview, []);
+  assert.deepEqual(result.cells.D30[0].evidenceIds, ['fact_semantic:current:workItems:0']);
+  assert.doesNotMatch(result.diagnostics.map(item => item.code).join('\n'), /no_topic_match/);
+});
+
+test('keeps low-confidence evidence visible for owner review but out of summaries', async () => {
+  let summaryCalls = 0;
+  const result = await runWeeklyAiPreview({
+    config: { groups: [createGroup()] },
+    bitable: createBitable({
+      facts: [report({
+        recordId: 'fact_low',
+        memberOpenId: 'ou_1',
+        reporterName: '张三',
+        workItems: ['张三参与业务现状沟通'],
+      })],
+    }),
+    sheetWriter: { discoverTemplateTargets: async () => cellMap },
+    aiProvider: {
+      classifyWeeklyEvidence: async ({ items }) => ({
+        classifications: [{
+          evidenceId: items[0].evidenceId,
+          targetId: items[0].allowedTargets[0].targetId,
+          confidence: 'low',
+          reason: '信息不足，需负责人判断',
+        }],
+      }),
+      generateWeeklySheetPreview: async () => {
+        summaryCalls += 1;
+        return { cells: {} };
+      },
+    },
+    options,
+  });
+
+  assert.equal(summaryCalls, 0);
+  assert.deepEqual(result.cells.D30, []);
+  assert.deepEqual(result.classifications, []);
+  assert.equal(result.pendingOwnerReview.length, 1);
+  assert.equal(result.pendingOwnerReview[0].text, '参与业务现状沟通');
+  assert.equal(JSON.stringify(result.pendingOwnerReview).includes('张三'), false);
+});
+
+test('isolates an unauthorized classification while accepted evidence still summarizes once', async () => {
+  let summaryEvidence = [];
+  const result = await runWeeklyAiPreview({
+    config: { groups: [createGroup()] },
+    bitable: createBitable({
+      facts: [report({
+        recordId: 'fact_mixed',
+        memberOpenId: 'ou_1',
+        workItems: ['完成参数配置', '完成生产验证'],
+      })],
+    }),
+    sheetWriter: { discoverTemplateTargets: async () => cellMap },
+    aiProvider: {
+      classifyWeeklyEvidence: async ({ items }) => ({
+        classifications: items.map((item, index) => ({
+          evidenceId: item.evidenceId,
+          targetId: index === 0 ? 'not-allowed' : item.allowedTargets[0].targetId,
+          confidence: 'high',
+          reason: '测试分类',
+        })),
+      }),
+      generateWeeklySheetPreview: async input => {
+        summaryEvidence = input.evidence;
+        return {
+          cells: {
+            D30: [{ text: '完成生产验证', evidenceIds: [input.evidence[0].evidenceId] }],
+          },
+        };
+      },
+    },
+    options,
+  });
+
+  assert.deepEqual(summaryEvidence.map(item => item.evidenceId), ['fact_mixed:current:workItems:1']);
+  assert.equal(result.classifications.length, 1);
+  assert.equal(result.groups[0].bucketCount, 1);
+  assert.match(result.diagnostics.map(item => item.code).join('\n'), /classification_unauthorized_target/);
+});
+
+test('places one evidence item in only the single target selected by classification', async () => {
+  const configuration = defaultConfiguration();
+  configuration.mappings = [mappingRecord('mapping_dual', {
+    memberOpenId: 'ou_1',
+    memberName: '张三',
+    module2Targets: ['收单项目组'],
+    module3Target: '渠道创新建设',
+  })];
+  const summarizedTargets = [];
+  const result = await runWeeklyAiPreview({
+    config: { groups: [createGroup()] },
+    bitable: createBitable({
+      configuration,
+      facts: [report({
+        recordId: 'fact_one_target',
+        memberOpenId: 'ou_1',
+        workItems: ['完成业务流程优化'],
+      })],
+    }),
+    sheetWriter: { discoverTemplateTargets: async () => cellMap },
+    aiProvider: {
+      classifyWeeklyEvidence: async ({ items }) => ({
+        classifications: [{
+          evidenceId: items[0].evidenceId,
+          targetId: items[0].allowedTargets.find(target => target.module === 'module3').targetId,
+          confidence: 'high',
+          reason: '属于渠道管理工作',
+        }],
+      }),
+      generateWeeklySheetPreview: async input => {
+        summarizedTargets.push(input.target.target);
+        return {
+          cells: {
+            D40: [{
+              text: '完成业务流程优化',
+              evidenceIds: [input.evidence[0].evidenceId],
+            }],
+          },
+        };
+      },
+    },
+    options,
+  });
+
+  assert.deepEqual(summarizedTargets, ['渠道创新建设']);
+  assert.equal(result.groups[0].bucketCount, 1);
+  assert.equal(result.classifications.length, 1);
+  assert.deepEqual(result.cells.D30, []);
+  assert.equal(result.cells.D40.length, 1);
 });
 
 test('requires dailyFactTable before any preview reads and never falls back to dailyTable', async () => {

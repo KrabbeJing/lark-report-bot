@@ -15,8 +15,8 @@ function fakeServices(order, overrides = {}) {
     instanceService: { ensure: async () => { order.push('ensure instance'); return instance; } },
     factSync: { sync: async () => { order.push('sync facts'); return { synced: true }; } },
     configRepository: { load: async () => { order.push('load config'); return { mappings: [], rules: [], styleExamples: [], metricOwners: [] }; } },
-    sourceRouter: { route: async () => { order.push('route'); return { buckets: [] }; } },
-    ai: { generate: async () => { order.push('generate'); return { cells: {}, evidence: {} }; } },
+    sourceRouter: { route: async () => { throw new Error('legacy department router must not run'); } },
+    ai: { generate: async () => { order.push('generate'); return { cells: {}, evidence: {}, routing: { buckets: [], diagnostics: [] } }; } },
     draftService: { writeInitial: async () => { order.push('write protected cells'); return { writtenCells: {} }; }, refresh: async () => { order.push('refresh eligible cells'); return { writtenCells: {} }; } },
     bitable: { updateWeeklyInstance: async (_instance, patch) => { order.push(`persist ${patch.stage || patch.status || 'status'}`); } },
     ownerNotifier: { owners: async () => { order.push('notify weekly owners'); }, metrics: async () => { order.push('notify blank metrics'); } },
@@ -31,7 +31,7 @@ test('draft stage executes the required operations in order', async () => {
     stage: 'draft', group: { project: '测试组' }, now: new Date('2026-07-24T08:30:00+08:00'),
     services: fakeServices(order),
   });
-  assert.deepEqual(order, ['ensure instance', 'sync facts', 'load config', 'route', 'generate', 'write protected cells', 'persist draft']);
+  assert.deepEqual(order, ['ensure instance', 'sync facts', 'load config', 'generate', 'write protected cells', 'persist draft']);
 });
 
 test('notify stage consolidates owner and blank metric notifications before persisting', async () => {
@@ -91,7 +91,7 @@ test('refresh stage syncs and refreshes only eligible cells', async () => {
     stage: 'refresh', group: { project: '测试组' }, now: new Date('2026-07-25T01:30:00Z'),
     services: fakeServices(order),
   });
-  assert.deepEqual(order, ['sync facts', 'load config', 'route', 'generate', 'refresh eligible cells', 'persist refresh']);
+  assert.deepEqual(order, ['sync facts', 'load config', 'generate', 'refresh eligible cells', 'persist refresh']);
 });
 
 test('publish stage sends department poster and filtered enabled small teams with distinct keys', async () => {

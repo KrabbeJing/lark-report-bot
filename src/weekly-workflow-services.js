@@ -24,24 +24,6 @@ export function createWeeklyWorkflowServices({ config, bitable, sheetWriter, aiP
     configRepository: {
       load: ({ group, period }) => loadWeeklyConfiguration({ group, bitable, period }),
     },
-    sourceRouter: {
-      route: async ({ group, period, configuration }) => {
-        const facts = await bitable.listAllDailyReportsForRange(group, period.start, period.end);
-        const cellMap = await sheetWriter.discoverTemplateTargets(
-          group.weeklySheet,
-          group.weeklySheet?.templateSheetId,
-          { aliasMap: group.weeklySheet?.entityAliases },
-        );
-        return routeWeeklyFacts({
-          facts,
-          mappings: configuration.mappings,
-          rules: configuration.rules,
-          cellMap,
-          period,
-          includeRoutineMeetingEvidence: true,
-        });
-      },
-    },
     ai: {
       generate: ({ group, period }) => runWeeklyAiPreview({
         config: { groups: [group] },

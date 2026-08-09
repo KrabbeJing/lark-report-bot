@@ -23,8 +23,8 @@ async function runDraft(context) {
   ));
   if (!dryRun) await syncFacts(context);
   const configuration = await loadConfiguration(context);
-  const routing = await routeFacts(context, configuration);
-  const preview = await generate(context, configuration, routing);
+  const preview = await generate(context, configuration);
+  const routing = preview.routing || { buckets: [], diagnostics: [] };
   const draft = dryRun ? { skipped: true, preview } : await call(services.draftService, 'writeInitial', {
     ...context, instance, configuration, routing, preview,
   });
@@ -55,8 +55,8 @@ async function runRefresh(context) {
   const instance = normalizeInstanceResult(await loadInstance(context));
   if (!dryRun) await syncFacts(context);
   const configuration = await loadConfiguration(context);
-  const routing = await routeFacts(context, configuration);
-  const preview = await generate(context, configuration, routing);
+  const preview = await generate(context, configuration);
+  const routing = preview.routing || { buckets: [], diagnostics: [] };
   const refresh = dryRun ? { skipped: true, preview } : await call(services.draftService, 'refresh', {
     ...context, instance, configuration, routing, preview,
   });
@@ -205,14 +205,13 @@ async function loadConfiguration(context) {
   return service ? call(service, 'load', context) : { mappings: [], rules: [], styleExamples: [], metricOwners: [] };
 }
 
-async function routeFacts(context, configuration) {
-  const service = context.services.sourceRouter;
-  return service ? call(service, 'route', { ...context, configuration }) : { buckets: [], diagnostics: [] };
-}
-
-async function generate(context, configuration, routing) {
+async function generate(context, configuration) {
   const service = context.services.ai;
-  return service ? call(service, 'generate', { ...context, configuration, routing }) : { cells: {}, evidence: {} };
+  return service ? call(service, 'generate', { ...context, configuration }) : {
+    cells: {},
+    evidence: {},
+    routing: { buckets: [], diagnostics: [] },
+  };
 }
 
 async function readDraft(context, instance) {

@@ -56,7 +56,7 @@
 }
 ```
 
-- [ ] **Step 1: Add failing normalization and schema tests**
+- [x] **Step 1: Add failing normalization and schema tests**
 
 Extend the rule fixture in `test/weekly-config-repository.test.js` and assert:
 
@@ -81,7 +81,7 @@ assert.deepEqual(normalizeWeeklySectionRule(record, table), {
 
 In schema tests, require `业务范围说明`, `分类正例`, and `分类反例` as `longText`. Keep `包含主题` required for useful hints, but do not describe it as a routing condition.
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
 ```bash
 node --test test/config.test.js test/weekly-config-repository.test.js test/report-table-schema.test.js
@@ -89,7 +89,7 @@ node --test test/config.test.js test/weekly-config-repository.test.js test/repor
 
 Expected: failures for missing field keys and normalized properties.
 
-- [ ] **Step 3: Add field keys and normalized values**
+- [x] **Step 3: Add field keys and normalized values**
 
 Extend `WEEKLY_SECTION_RULE_FIELD_KEYS`:
 
@@ -114,7 +114,7 @@ export const WEEKLY_SECTION_RULE_FIELD_KEYS = {
 
 Update `normalizeWeeklySectionRule` so `targetId` comes only from `ruleKey`, long-text example fields are split with the existing `texts()` helper, and empty values remain empty rather than being inferred.
 
-- [ ] **Step 4: Update formal mapping and table catalog**
+- [x] **Step 4: Update formal mapping and table catalog**
 
 Add the three exact field mappings to `config/groups.formal.json`. Update Table 6 in the catalog:
 
@@ -126,7 +126,7 @@ Add the three exact field mappings to `config/groups.formal.json`. Update Table 
 
 Change `包含主题` wording to “高置信度语义提示”. Do not add another Base table.
 
-- [ ] **Step 5: Run focused and full tests**
+- [x] **Step 5: Run focused and full tests**
 
 ```bash
 node --test test/config.test.js test/weekly-config-repository.test.js test/report-table-schema.test.js
@@ -135,7 +135,7 @@ npm test
 
 Expected: all tests pass with no cancelled tests.
 
-- [ ] **Step 6: Commit the semantic rule schema**
+- [x] **Step 6: Commit the semantic rule schema**
 
 ```bash
 git add src/config.js src/weekly-config-repository.js scripts/validate-report-table-schema.js config/groups.formal.json docs/report-agent-table-catalog.md test/config.test.js test/weekly-config-repository.test.js test/report-table-schema.test.js
@@ -186,7 +186,7 @@ Each candidate has internal source data and a model-safe target list:
 }
 ```
 
-- [ ] **Step 1: Add failing candidate-construction tests**
+- [x] **Step 1: Add failing candidate-construction tests**
 
 Cover these behaviors:
 
@@ -221,7 +221,7 @@ assert.deepEqual(
 assert.ok(!result.diagnostics.some(item => item.code === 'no_topic_match'));
 ```
 
-- [ ] **Step 2: Run router tests and verify RED**
+- [x] **Step 2: Run router tests and verify RED**
 
 ```bash
 node --test test/weekly-source-router.test.js
@@ -229,7 +229,7 @@ node --test test/weekly-source-router.test.js
 
 Expected: `buildWeeklyClassificationCandidates` is not exported.
 
-- [ ] **Step 3: Extract candidate construction around existing identity logic**
+- [x] **Step 3: Extract candidate construction around existing identity logic**
 
 Reuse `isEligibleFact`, `buildMappingIdentityComponents`, `activeComponentViews`, `findMemberMappings`, `toSource`, and duplicate-period blocking. Add deterministic rule indexes keyed by both `targetId` and `${module}:${target}:${contentType}`.
 
@@ -246,7 +246,7 @@ const allowed = [
 
 Resolve exactly one enabled rule and exactly one current Cell specification for each allowed pair. Sort candidates by date/evidenceId and targets by rule order/targetId for reproducible prompts.
 
-- [ ] **Step 4: Run focused and full tests**
+- [x] **Step 4: Run focused and full tests**
 
 ```bash
 node --test test/weekly-source-router.test.js
@@ -255,7 +255,7 @@ npm test
 
 Expected: old small-team routing tests and new candidate tests both pass.
 
-- [ ] **Step 5: Commit candidate construction**
+- [x] **Step 5: Commit candidate construction**
 
 ```bash
 git add src/weekly-source-router.js test/weekly-source-router.test.js
@@ -293,7 +293,7 @@ await classifyWeeklyCandidates({
 // => { accepted, pendingOwnerReview, diagnostics, provider, model }
 ```
 
-- [ ] **Step 1: Add failing provider prompt tests**
+- [x] **Step 1: Add failing provider prompt tests**
 
 Capture the request body and prove:
 
@@ -326,7 +326,7 @@ function toModelItem(candidate) {
 }
 ```
 
-- [ ] **Step 2: Add failing classifier validation tests**
+- [x] **Step 2: Add failing classifier validation tests**
 
 Test deterministic batches with `maxItems=2`, then cover:
 
@@ -340,7 +340,7 @@ Test deterministic batches with `maxItems=2`, then cover:
 - an item whose serialized model input exceeds `maxCharacters` returns `classification_input_too_large` without a model call;
 - results and diagnostics are deterministic regardless of provider return order.
 
-- [ ] **Step 3: Run focused tests and verify RED**
+- [x] **Step 3: Run focused tests and verify RED**
 
 ```bash
 node --test test/ai-providers.test.js test/weekly-semantic-classifier.test.js
@@ -348,7 +348,7 @@ node --test test/ai-providers.test.js test/weekly-semantic-classifier.test.js
 
 Expected: missing provider method and classifier module.
 
-- [ ] **Step 4: Implement the strict provider method**
+- [x] **Step 4: Implement the strict provider method**
 
 Add optional `temperature` to `requestChatCompletion`; preserve `0.2` for current summary calls and use `0.1` only for classification. Parse only a strict top-level object with a `classifications` array. Return structural data to the classifier; do not validate target authorization in the provider.
 
@@ -360,7 +360,7 @@ Use a classification system message equivalent to:
 不得拆分、合并、改写事项，不得输出人员信息，只输出严格 JSON。
 ```
 
-- [ ] **Step 5: Implement batching, retry, and authorization validation**
+- [x] **Step 5: Implement batching, retry, and authorization validation**
 
 In `weekly-semantic-classifier.js`:
 
@@ -374,7 +374,7 @@ In `weekly-semantic-classifier.js`:
 
 Do not retry deterministic JSON/authorization failures because the same response is already complete and retrying can hide quality problems.
 
-- [ ] **Step 6: Run focused and full tests**
+- [x] **Step 6: Run focused and full tests**
 
 ```bash
 node --test test/ai-providers.test.js test/weekly-semantic-classifier.test.js
@@ -383,7 +383,7 @@ npm test
 
 Expected: all tests pass; mock fetch/provider only, no network calls.
 
-- [ ] **Step 7: Commit semantic classification**
+- [x] **Step 7: Commit semantic classification**
 
 ```bash
 git add src/ai-providers.js src/weekly-semantic-classifier.js test/ai-providers.test.js test/weekly-semantic-classifier.test.js
@@ -429,7 +429,7 @@ git commit -m "feat: classify weekly evidence semantically"
 }
 ```
 
-- [ ] **Step 1: Replace preview fixtures with a two-stage provider**
+- [x] **Step 1: Replace preview fixtures with a two-stage provider**
 
 Update the main preview test provider:
 
@@ -451,7 +451,7 @@ const aiProvider = {
 
 Assert classification calls happen before summary calls and summary evidence contains only accepted high/medium items.
 
-- [ ] **Step 2: Add failing integration cases**
+- [x] **Step 2: Add failing integration cases**
 
 Cover:
 
@@ -464,7 +464,7 @@ Cover:
 7. `no_topic_match` never appears in department preview diagnostics.
 8. Existing name redaction, 3–5 final style examples, protected numbers/dates/status, no next plan, module II shape, and module III three-item limit still pass.
 
-- [ ] **Step 3: Run focused tests and verify RED**
+- [x] **Step 3: Run focused tests and verify RED**
 
 ```bash
 node --test test/weekly-ai-preview.test.js test/weekly-workflow.test.js
@@ -472,7 +472,7 @@ node --test test/weekly-ai-preview.test.js test/weekly-workflow.test.js
 
 Expected: preview still calls `routeWeeklyFacts` and has no classifications.
 
-- [ ] **Step 4: Build target buckets only from accepted classifications**
+- [x] **Step 4: Build target buckets only from accepted classifications**
 
 In `runWeeklyAiPreview`:
 
@@ -499,7 +499,7 @@ const routing = buildClassifiedWeeklyRouting(classified.accepted);
 
 This redaction must happen before classification, not only before summarization. Drop candidates whose text becomes empty after redaction with `empty_evidence_after_redaction`. Calculate `evidenceHash` with SHA-256 over the exact normalized date/redacted-text classifier input. Keep classifications deterministic by sorting by evidenceId.
 
-- [ ] **Step 5: Remove department workflow dependence on legacy routing**
+- [x] **Step 5: Remove department workflow dependence on legacy routing**
 
 The `ai.generate` service already reloads facts/configuration inside `runWeeklyAiPreview`; keep that single authoritative path. In `src/weekly-workflow.js`, remove `routeFacts(...)` from `runDraft` and `runRefresh`. Generate the preview directly and, only for backward-compatible return shape, expose `routing: preview.routing || { buckets: [], diagnostics: [] }`. Update workflow tests so the expected order no longer includes `route`.
 
@@ -507,7 +507,7 @@ Remove the department-level `sourceRouter` service from `createWeeklyWorkflowSer
 
 Do not pass the legacy routing result into department preview as a fallback.
 
-- [ ] **Step 6: Run focused and full tests**
+- [x] **Step 6: Run focused and full tests**
 
 ```bash
 node --test test/weekly-source-router.test.js test/weekly-semantic-classifier.test.js test/weekly-ai-preview.test.js test/weekly-workflow.test.js
