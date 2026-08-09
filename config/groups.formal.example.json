@@ -51,7 +51,7 @@
     "key": "digital-finance",
     "name": "数字金融部",
     "dailyTable": {
-      "wikiUrl": "https://scnbvf7ldg2u.feishu.cn/wiki/WNumwlQuKi8ucak6ZEBcYiYtnH8?table=tblT1DtMmxmHx3cs&view=vewXSKRchw",
+      "wikiUrl": "正式组织表单日报表wiki链接，需带table和view参数",
       "fields": {
         "reportDate": "日报日期",
         "project": "所属板块",
@@ -103,8 +103,8 @@
         {
           "key": "team-a",
           "name": "测试小团队A",
-          "enabled": true,
-          "chatId": "oc_127d0a4ec12a42a31de3110fdf9b51f3",
+          "enabled": false,
+          "chatId": "",
           "sectionTargets": ["融羲项目组", "零售大众客群经营"],
           "sourceSupervisors": [],
           "posterSections": [
@@ -115,8 +115,8 @@
         {
           "key": "team-b",
           "name": "测试小团队B",
-          "enabled": true,
-          "chatId": "oc_127d0a4ec12a42a31de3110fdf9b51f3",
+          "enabled": false,
+          "chatId": "",
           "sectionTargets": ["线上营业厅项目组", "收单项目组", "对公客群经营及场景建设"],
           "sourceSupervisors": [],
           "posterSections": [
@@ -134,8 +134,8 @@
         {
           "key": "team-c",
           "name": "测试小团队C",
-          "enabled": true,
-          "chatId": "oc_127d0a4ec12a42a31de3110fdf9b51f3",
+          "enabled": false,
+          "chatId": "",
           "sectionTargets": ["手机银行项目组", "新核心项目组", "渠道创新建设", "业务风控合规"],
           "sourceSupervisors": [],
           "posterSections": [

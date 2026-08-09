@@ -262,6 +262,7 @@ test('migrates all config files to one shared resource unit and lightweight grou
       'weeklyInstanceCreation',
       'dailySupervisorPush',
       'dailyFactSync',
+      'chatDailyReplay',
     ]) {
       if (raw[scheduleKey]) assert.equal(raw[scheduleKey].enabled, false, `${filePath} ${scheduleKey}`);
     }
@@ -272,6 +273,14 @@ test('migrates all config files to one shared resource unit and lightweight grou
   assert.equal(formalExample.groups[0].pushChatId, '正式组织日报群chatId');
   assert.equal(formalExample.sharedResources.weeklyInstanceTable.appToken, '');
   assert.equal(formalExample.sharedResources.weeklyInstanceTable.tableId, '');
+  const serializedFormalExample = JSON.stringify(formalExample);
+  assert.doesNotMatch(serializedFormalExample, /https?:\/\//);
+  assert.doesNotMatch(serializedFormalExample, /\b(?:oc|ou|om)_[A-Za-z0-9_-]{8,}\b/);
+  assert.doesNotMatch(serializedFormalExample, /\b(?:tbl|vew)[A-Za-z0-9_-]{8,}\b/);
+  assert.doesNotMatch(serializedFormalExample, /\bWNum[A-Za-z0-9_-]+\b/);
+  assert.ok(formalExample.sharedResources.weeklyDelivery.smallTeams.every(team => (
+    team.enabled === false && team.chatId === ''
+  )));
 });
 
 test('normalizes chat raw and daily fact table configs', () => {
