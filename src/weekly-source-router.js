@@ -1,6 +1,10 @@
 const VALID_FACT_STATUS = '有效';
 const MODULE_TWO = 'module2';
 const MODULE_THREE = 'module3';
+const CURRENT_CONTENT_TYPE_BY_MODULE = {
+  [MODULE_TWO]: '本周重点事项说明',
+  [MODULE_THREE]: '本周工作进展',
+};
 const EXPLICIT_MEETING_WORDS = /会议|例会|项目会|评审会|周会|协调会|座谈会|碰头会|沟通会|讨论会|汇报会/;
 const BARE_PROCESS_MEETINGS = /沟通|讨论|汇报/;
 const MEETING_ACTIONS = /参加|召开|组织|出席|列席|主持/;
@@ -329,15 +333,14 @@ function buildAllowedClassificationTargets({ mappings, ruleIndex, targetSpecs })
 }
 
 function resolveSemanticRule({ module, target }, ruleIndex) {
-  const naturalKey = `${module}:${normalized(target)}:`;
-  const matchingRules = [...ruleIndex.rulesByNaturalKey.entries()]
-    .filter(([key]) => key.startsWith(naturalKey))
-    .flatMap(([, rules]) => rules);
+  const expectedContentType = CURRENT_CONTENT_TYPE_BY_MODULE[module] || '';
+  const naturalKey = `${module}:${normalized(target)}:${expectedContentType}`;
+  const matchingRules = ruleIndex.rulesByNaturalKey.get(naturalKey) || [];
   if (!matchingRules.length) {
     return {
       diagnostic: {
         code: 'missing_target_rule',
-        details: { module, target },
+        details: { module, target, expectedContentType },
       },
     };
   }
@@ -352,10 +355,9 @@ function resolveSemanticRule({ module, target }, ruleIndex) {
 
   const rule = matchingRules[0];
   const targetId = normalized(rule.targetId);
-  const exactNaturalKey = `${module}:${normalized(rule.target)}:${normalized(rule.contentType)}`;
   if (!targetId
     || ruleIndex.duplicateTargetIds.has(targetId)
-    || ruleIndex.duplicateNaturalKeys.has(exactNaturalKey)
+    || ruleIndex.duplicateNaturalKeys.has(naturalKey)
     || ruleIndex.rulesByTargetId.get(targetId)?.length !== 1) {
     return {
       diagnostic: {

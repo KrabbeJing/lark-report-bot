@@ -1198,6 +1198,45 @@ test('returns duplicate_target_rule for duplicate module target content rules', 
   assert.deepEqual(result.diagnostics.map(item => item.code), ['duplicate_target_rule']);
 });
 
+test('selects the module-appropriate current-content rule by its exact natural key', () => {
+  const result = buildWeeklyClassificationCandidates({
+    facts: [fact()],
+    mappings: [mapping({ module3Target: '' })],
+    rules: [
+      semanticRule('module2', '收单项目组', '本周工作进展', {
+        targetId: '模块二-收单项目组-错误内容类型',
+      }),
+      semanticRule('module2', '收单项目组', '本周重点事项说明'),
+    ],
+    cellMap,
+    period,
+  });
+
+  assert.deepEqual(result.diagnostics, []);
+  assert.deepEqual(result.candidates[0].allowedTargets.map(item => item.targetId), [
+    '模块二-收单项目组-本周重点事项说明',
+  ]);
+});
+
+test('fails closed when a mapped target only has the wrong module content type', () => {
+  const result = buildWeeklyClassificationCandidates({
+    facts: [fact()],
+    mappings: [mapping({ module3Target: '' })],
+    rules: [semanticRule('module2', '收单项目组', '本周工作进展')],
+    cellMap,
+    period,
+  });
+
+  assert.deepEqual(result.candidates, []);
+  assert.deepEqual(result.diagnostics.map(item => ({
+    code: item.code,
+    expectedContentType: item.expectedContentType,
+  })), [{
+    code: 'missing_target_rule',
+    expectedContentType: '本周重点事项说明',
+  }]);
+});
+
 test('returns target_not_in_cell_map when an enabled rule has no current Cell', () => {
   const result = buildWeeklyClassificationCandidates({
     facts: [fact()],
