@@ -1,28 +1,89 @@
-# Semantic Weekly Classification Verification
+# 周报语义分类验证手册
 
-## Scope
+## 验证目标
 
-This runbook verifies the department weekly-report path:
+本验证只评估“单条日报事项应该归入哪个周报板块”，不评价日报写得好不好，也不直接评价最终周报文案质量。
 
-1. source mapping limits allowed module II/III targets;
-2. AI classifies within that boundary without keyword admission gates;
-3. only high/medium classifications enter target summarization;
-4. low-confidence items remain visible for owner review;
-5. Friday/Sunday jobs persist snapshots only and never write business Cells.
+部门周报链路应满足：
 
-The local evaluator never reads or writes Feishu. Real label files and evaluation output belong under ignored `out/` and must not be committed.
+1. 周报来源映射表限定成员允许进入的模块二、模块三板块；
+2. 关键词只提供提示，不作为准入门槛；
+3. AI 只能在允许板块内选择一个最合适的板块；
+4. 高、中置信度事项进入后续总结，低置信度事项保留给负责人判断；
+5. 周五、周日任务只保存草稿快照，不直接写周报业务 Cell。
 
-## Prepare Labels
+评测工具不会读写飞书。真实样本和结果必须保存在已被 Git 忽略的 `out/` 目录，禁止提交仓库。
 
-Manually label about 50 real, non-sensitive work items in `out/weekly-classification-labels.json`. Include explicit topics, abbreviations, no-keyword semantics, routine work orders, communication/coordination work, and module II/III ambiguity. Each item must contain `evidenceId`, `date`, `text`, `allowedTargets`, and one `expectedTargetId` present in `allowedTargets`.
+## 合格样本标准
 
-Do not add automatic self-learning or hard keyword admission rules. When labels expose errors, improve `业务范围说明`, positive/negative examples, or the classifier prompt and rerun the same frozen label set.
+一条合格样本应满足：
 
-## Run Quality Gate
+- **单一事项：** 一行只放一条工作事项，不能把某人整天的 8 条日报合成一条。
+- **保留原意：** 尽量保留日报原文，不为了方便 AI 判断而补关键词、改写结果或删减业务对象。
+- **来源有效：** 来自日报统一事实表中“事实记录状态=有效”的工作总结，不使用明日/下周计划。
+- **边界明确：** 根据该成员的周报来源映射，能够列出其允许进入的板块。
+- **人工可判定：** 熟悉业务的人能够从允许板块中确定一个最合适的板块。
+- **避免重复：** 同一事项的表单版、群聊版或复制文本只保留一条。
 
-External AI approval is required before running:
+真正无法判断、多个板块同样合理或信息严重不足的事项，不要勉强指定答案。先放入“待讨论样本”，由两名业务人员达成一致后再进入正式评测集。
 
-Configure `AI_PROVIDER`, `AI_BASE_URL`, `AI_API_KEY`, and `AI_MODEL` in the local ignored `.env`, then run:
+注意：当前评测的是“归入哪个板块”，不是“是否值得写进周报”。普通推进、沟通、工单等事项仍可用于分类测试；后续总结模型可以决定是否提炼或省略。
+
+## 建议的 50 条构成
+
+| 类型 | 建议数量 | 示例特征 |
+| --- | ---: | --- |
+| 明确业务词 | 8 | 直接出现“收单、银企直联、云缴费”等 |
+| 缩写或内部叫法 | 7 | D0、FTP、EAST、URM+、某平台简称 |
+| 无关键词但语义明确 | 10 | “完成生产参数生成并交付验证” |
+| 日常运营或工单 | 7 | 商户进件、客户工单、数据核对、报表报送 |
+| 沟通、讨论、协调 | 8 | 有明确业务对象，但未直接写阶段成果 |
+| 同一成员可进入多个板块 | 10 | 模块二/三均允许，必须结合事项语义选择一个 |
+
+应同时覆盖模块二和模块三，并尽量覆盖所有已启用板块。不要只挑最容易判断、关键词最明显的事项。
+
+## 你需要填写什么
+
+你可以直接编辑 `out/weekly-classification-labels-template.csv`，每行填写：
+
+- `样本编号`：例如 `case-001`，不能重复；
+- `日报日期`：`YYYY-MM-DD`；
+- `日报事项原文`：一条原子事项；
+- `日报提交人`：用于匹配来源映射，最终不会写入评测输出；
+- `人工正确板块`：从该成员允许板块中选择一个；
+- `人工判断备注`：简短说明为什么属于该板块，可空；
+- `复核状态`：填写`已确认`后才进入正式评测。
+
+你不需要手写 `allowedTargets`、`targetId`、业务范围、正反例等 JSON。后续由程序根据周报来源映射表、周报板块规则表生成正式的 `out/weekly-classification-labels.json`。
+
+## 标注示例
+
+```text
+case-001,2026-07-28,完成银企直联证书更新并通过验证,张三,对公客群经营及场景建设,属于银企直联业务,已确认
+case-002,2026-07-29,完成生产参数生成并交付验证,李四,收单项目组,提交人为收单来源且事项语义对应收单生产接入,已确认
+```
+
+错误示例：
+
+- 把“沟通项目进展”改成“沟通收单项目进展”以便 AI 命中；
+- 人工正确板块不在该成员的来源映射范围内；
+- 同一事项以表单、群聊两个版本重复出现；
+- 一条样本包含整天多项工作；
+- 因为事项“不够重要”而随意归到模块三。
+
+## 生成评测 JSON
+
+CSV 完成人工复核后，再由程序补齐允许目标和规则信息。最终 JSON 每条记录包含：
+
+- `evidenceId`、`date`、`text`；
+- 来源映射限定的 `allowedTargets`；
+- 人工答案 `expectedTargetId`。
+
+其中 `expectedTargetId` 必须是 `allowedTargets` 中的一项，否则样本无效。
+
+## 运行质量门禁
+
+调用外部 AI 前必须获得明确批准。先在本地忽略的 `.env` 中配置 `AI_PROVIDER`、`AI_BASE_URL`、`AI_API_KEY` 和 `AI_MODEL`，再执行：
 
 ```bash
 npm run weekly:classification-eval -- \
@@ -30,22 +91,30 @@ npm run weekly:classification-eval -- \
   --output out/weekly-classification-evaluation.json
 ```
 
-The output path must not already exist. A passing result requires:
+输出文件不能预先存在。通过标准为：
 
-- accuracy at least 90%;
-- zero unauthorized targets;
-- zero duplicate/multi-target results;
-- every low-confidence result visible in `pendingOwnerReview`.
+- 分类准确率不低于 90%；
+- 越权目标为 0；
+- 重复或多目标分类为 0；
+- 所有低置信度事项都进入待负责人判断清单。
 
-## Read-Only Preview
+若未通过，优先优化板块的`业务范围说明`、分类正反例或提示词，不增加在线自学习，也不恢复关键词硬门槛。每次调整后使用同一份冻结样本重新评测。
 
-After the gate passes, run one approved external-AI preview and inspect module II/III outputs for invented numbers, dates, status, responsibility, or names. Confirm no next-plan content appears and module III contains no more than three items.
+## 只读周报预览
 
-Do not enable Friday/Sunday schedules during this verification. Do not send messages, deploy, write a Sheet, or modify a Base beyond the separately approved formal schema validation.
+质量门禁通过后，再运行一次经批准的只读 AI Preview，人工检查：
 
-## Local Evidence
+- 没有编造数字、日期、状态、责任人或姓名；
+- 不生成下周工作计划；
+- 模块二能合并重复日报并提炼阶段性成果；
+- 模块三不超过三条；
+- 无依据时保持空白。
 
-- Focused evaluator tests: 5 passed, 0 failed.
-- Full local suite: 484 passed, 0 failed, 0 cancelled, 0 skipped.
-- External AI quality run: not run; requires user approval and a manually labeled local file.
-- Formal Base schema validation: pending final acceptance checkpoint.
+验证期间不启用周五、周日调度，不发送消息、不部署、不写周报 Sheet。
+
+## 当前验证记录
+
+- 评测器聚焦测试：5 项通过，0 项失败；
+- 全量本地测试：484 项通过，0 项失败、取消或跳过；
+- 外部 AI 质量评测：尚未运行，等待人工样本和明确批准；
+- 正式 Base 表结构校验：等待最终验收。
