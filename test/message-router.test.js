@@ -592,6 +592,109 @@ test('writes one fact record per report date with raw source record id', async (
   );
 });
 
+test('writes separate facts for a Chinese-comma date list', async () => {
+  const config = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      project: '支付平台',
+      chatDailyRawTable: { appToken: 'bas', tableId: 'tbl_chat_raw' },
+      dailyFactTable: { appToken: 'bas', tableId: 'tbl_fact' },
+    }],
+  });
+  const factInputs = [];
+
+  await handleMessageEvent({
+    data: {
+      sender: { sender_id: { open_id: 'ou_hu' } },
+      message: {
+        message_id: 'om_hu_0819_0820',
+        chat_id: 'oc_test',
+        chat_type: 'group',
+        message_type: 'text',
+        create_time: String(new Date('2026-08-20T18:00:00+08:00').getTime()),
+        content: JSON.stringify({
+          text: `胡仁庆8.19，8.20工作日报
+1.整理商户支付合同，并且进行标号处理。
+2.参加与聊城分行的线上会议，沟通校园托管相关业。
+3.了解青岛中小学课后服务平台解决方案。
+4.解决即东酒店支付码牌问题
+5.参与慧馨特超市项目会谈`,
+        }),
+      },
+    },
+    client: {},
+    messenger: { replyText: async () => {} },
+    bitable: {
+      createChatDailyRawRecord: async () => ({ created: true, record: { record_id: 'rec_hu_raw' } }),
+      upsertDailyFactRecord: async (_group, input) => {
+        factInputs.push(input);
+        return { created: true, record: { record_id: `rec_hu_${factInputs.length}` } };
+      },
+    },
+    config,
+    aiProvider: {},
+    outDir: '/tmp',
+  });
+
+  assert.deepEqual(factInputs.map(input => input.reportDate), ['2026-08-19', '2026-08-20']);
+  assert.deepEqual(factInputs.map(input => input.sourceRecordId), ['rec_hu_raw', 'rec_hu_raw']);
+  assert.ok(factInputs.every(input => input.workSummaryText.includes('整理商户支付合同')));
+});
+
+test('writes separate facts with isolated content for consecutive report blocks', async () => {
+  const config = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      project: '支付平台',
+      chatDailyRawTable: { appToken: 'bas', tableId: 'tbl_chat_raw' },
+      dailyFactTable: { appToken: 'bas', tableId: 'tbl_fact' },
+    }],
+  });
+  const factInputs = [];
+
+  await handleMessageEvent({
+    data: {
+      sender: { sender_id: { open_id: 'ou_bai' } },
+      message: {
+        message_id: 'om_bai_0820_0821',
+        chat_id: 'oc_test',
+        chat_type: 'group',
+        message_type: 'text',
+        create_time: String(new Date('2026-08-21T18:00:00+08:00').getTime()),
+        content: JSON.stringify({
+          text: `白欧8.20日工作日报
+1、与零售部耿总沟通银联前置业务分工问题。
+2、与数办沟通银联前置其他银行的分工问题。
+3、组内讨论银联前置外围系统开发变化内容。
+4、协调西海岸实验中学数据迁移问题。
+5、组内沟通聊城分行校园课后辅导问题。
+白欧8.21工作日报
+1、继续协调西海岸实验中学数据迁移问题，找到数据重复原因。
+2、与测试中心沟通银联前置applepay，刷脸付，碳排放，收单商户入账，EAST,反洗钱测试情况。
+3、与运管部沟通ATM机本代他转账手续费收益问题。`,
+        }),
+      },
+    },
+    client: {},
+    messenger: { replyText: async () => {} },
+    bitable: {
+      createChatDailyRawRecord: async () => ({ created: true, record: { record_id: 'rec_bai_raw' } }),
+      upsertDailyFactRecord: async (_group, input) => {
+        factInputs.push(input);
+        return { created: true, record: { record_id: `rec_bai_${factInputs.length}` } };
+      },
+    },
+    config,
+    aiProvider: {},
+    outDir: '/tmp',
+  });
+
+  assert.deepEqual(factInputs.map(input => input.reportDate), ['2026-08-20', '2026-08-21']);
+  assert.match(factInputs[0].workSummaryText, /银联前置业务分工/);
+  assert.doesNotMatch(factInputs[0].workSummaryText, /数据重复原因/);
+  assert.match(factInputs[1].workSummaryText, /数据重复原因/);
+});
+
 test('does not log scope identifiers when a parsed daily report is sent from an unconfigured group', async t => {
   const logs = [];
   const warnings = [];

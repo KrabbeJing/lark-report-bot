@@ -221,6 +221,24 @@ test('parses a non-contiguous Chinese date list and keeps the reporter name', ()
   assert.equal(parsed.reportType, '多日合并');
 });
 
+test('parses a dotted date list separated by a Chinese comma', () => {
+  const parsed = parseDailyReportText(`胡仁庆8.19，8.20工作日报
+1.整理商户支付合同，并且进行标号处理。
+2.参加与聊城分行的线上会议，沟通校园托管相关业。
+3.了解青岛中小学课后服务平台解决方案。
+4.解决即东酒店支付码牌问题
+5.参与慧馨特超市项目会谈`, {
+    messageTime: new Date('2026-08-20T18:00:00+08:00'),
+    timezone: 'Asia/Shanghai',
+  });
+
+  assert.equal(parsed.highConfidence, true);
+  assert.equal(parsed.reporterName, '胡仁庆');
+  assert.deepEqual(parsed.reportDates, ['2026-08-19', '2026-08-20']);
+  assert.equal(parsed.reportType, '多日合并');
+  assert.equal(parsed.workItems.length, 5);
+});
+
 test('parses an em-dash date range and keeps the reporter name', () => {
   const parsed = parseDailyReportText(`徐春昱7.28—29工作日报：
 1.审核收单商户进件18，信息修改、其他任务
@@ -285,6 +303,31 @@ test('splits two daily report blocks in one message', () => {
     '解决市南支行收单系统机具中心云喇叭分拨报错问题',
     '处理日常收单业务问题',
   ]);
+});
+
+test('splits consecutive Bai Ou daily report blocks with optional day suffix', () => {
+  const parsed = parseDailyReportText(`白欧8.20日工作日报
+1、与零售部耿总沟通银联前置业务分工问题。
+2、与数办沟通银联前置其他银行的分工问题。
+3、组内讨论银联前置外围系统开发变化内容。
+4、协调西海岸实验中学数据迁移问题。
+5、组内沟通聊城分行校园课后辅导问题。
+白欧8.21工作日报
+1、继续协调西海岸实验中学数据迁移问题，找到数据重复原因。
+2、与测试中心沟通银联前置applepay，刷脸付，碳排放，收单商户入账，EAST,反洗钱测试情况。
+3、与运管部沟通ATM机本代他转账手续费收益问题。`, {
+    messageTime: new Date('2026-08-21T18:00:00+08:00'),
+    timezone: 'Asia/Shanghai',
+  });
+
+  assert.deepEqual(parsed.reportDates, ['2026-08-20', '2026-08-21']);
+  assert.equal(parsed.reportType, '多段日报');
+  assert.equal(parsed.reports.length, 2);
+  assert.equal(parsed.reports[0].workItems.length, 5);
+  assert.equal(parsed.reports[1].workItems.length, 3);
+  assert.match(parsed.reports[0].workSummaryText, /银联前置业务分工/);
+  assert.doesNotMatch(parsed.reports[0].workSummaryText, /数据重复原因/);
+  assert.match(parsed.reports[1].workSummaryText, /数据重复原因/);
 });
 
 test('does not reinterpret backward date range as single-day report', () => {
