@@ -2591,6 +2591,94 @@ test('syncs main chat raw records into fact table for each report date', async (
   assert.equal(creates[0].data.fields['日期覆盖范围'], '2026-07-01~2026-07-02');
 });
 
+test('syncs consecutive chat report blocks with date-isolated content', async () => {
+  const group = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      project: '支付平台',
+      dailyTable: { appToken: 'bas_test', tableId: 'tbl_source' },
+      chatDailyRawTable: { appToken: 'bas_test', tableId: 'tbl_chat_raw' },
+      dailyFactTable: {
+        appToken: 'bas_test',
+        tableId: 'tbl_fact',
+        fieldTypes: { reportDate: 'date' },
+      },
+    }],
+  }).groups[0];
+  const rawText = `白欧8.20日工作日报
+1、与零售部耿总沟通银联前置业务分工问题。
+2、与数办沟通银联前置其他银行的分工问题。
+3、组内讨论银联前置外围系统开发变化内容。
+4、协调西海岸实验中学数据迁移问题。
+5、组内沟通聊城分行校园课后辅导问题。
+白欧8.21工作日报
+1、继续协调西海岸实验中学数据迁移问题，找到数据重复原因。
+2、与测试中心沟通银联前置applepay，刷脸付，碳排放，收单商户入账，EAST,反洗钱测试情况。
+3、与运管部沟通ATM机本代他转账手续费收益问题。`;
+  const creates = [];
+  const service = new BitableService({
+    bitable: {
+      appTableRecord: {
+        list: async ({ path }) => {
+          if (path.table_id === 'tbl_source' || path.table_id === 'tbl_fact') {
+            return { data: { items: [] } };
+          }
+          if (path.table_id === 'tbl_chat_raw') {
+            return {
+              data: {
+                items: [{
+                  record_id: 'rec_bai_raw',
+                  fields: {
+                    消息ID: 'om_bai',
+                    群ID: 'oc_test',
+                    发送人OpenID: 'ou_bai',
+                    标题姓名: '白欧',
+                    日报日期范围: '2026-08-20、2026-08-21',
+                    拆分日期列表: '2026-08-20\n2026-08-21',
+                    原始消息文本: rawText,
+                    解析后工作总结: rawText.split('\n').slice(1).join('\n'),
+                    消息时间: '2026-08-21 18:00:00',
+                    原始记录状态: '主版本',
+                  },
+                }],
+              },
+            };
+          }
+          return { data: { items: [] } };
+        },
+        create: async payload => {
+          creates.push(payload);
+          return {
+            data: {
+              data: {
+                record: {
+                  record_id: `rec_fact_${creates.length}`,
+                  fields: payload.data.fields,
+                },
+              },
+            },
+          };
+        },
+      },
+    },
+  });
+
+  const result = await service.syncDailyFactRecordsForGroup(group, {
+    startDate: '2026-08-20',
+    endDate: '2026-08-21',
+    timezone: 'Asia/Shanghai',
+  });
+
+  assert.equal(result.created, 2);
+  assert.equal(creates.length, 2);
+  assert.match(creates[0].data.fields['今日工作总结'], /银联前置业务分工/);
+  assert.doesNotMatch(creates[0].data.fields['今日工作总结'], /数据重复原因/);
+  assert.match(creates[1].data.fields['今日工作总结'], /数据重复原因/);
+  assert.doesNotMatch(creates[1].data.fields['今日工作总结'], /零售部耿总/);
+  assert.equal(creates[0].data.fields['日报类型'], '单日');
+  assert.equal(creates[1].data.fields['日报类型'], '单日');
+});
+
 test('syncs chat raw facts with reporter real name from contact table', async () => {
   const group = normalizeConfig({
     groups: [{

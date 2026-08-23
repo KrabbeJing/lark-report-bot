@@ -8,6 +8,7 @@ import {
   normalizeContentForFingerprint,
 } from './daily-record-utils.js';
 import { rebuildDailyFactFields, resolveDailyFactFields } from './daily-fact-resolution.js';
+import { parseDailyReportText } from './daily-report-parser.js';
 import { sanitizeOperationalText } from './error-reporter.js';
 import { resolveOrganizationSnapshot } from './organization-snapshot.js';
 
@@ -464,87 +465,92 @@ export class BitableService {
         continue;
       }
 
-      const reportDates = raw.reportDates.length ? raw.reportDates : [raw.reportDate].filter(Boolean);
-      if (!reportDates.length) {
-        filtered += 1;
-        continue;
-      }
-
-      for (const reportDate of reportDates) {
-        if (!reportDate || reportDate < startDate || reportDate > endDate) {
-          filtered += 1;
-          continue;
-        }
-        if (!selectedChatEntries.has(buildChatEntryId(rawRecord.record_id, reportDate))) {
+      const rawEntries = expandChatRawReportEntries(raw, timezone);
+      for (const rawEntry of rawEntries) {
+        const reportDates = rawEntry.reportDates.length
+          ? rawEntry.reportDates
+          : [rawEntry.reportDate].filter(Boolean);
+        if (!reportDates.length) {
           filtered += 1;
           continue;
         }
 
-        try {
-          const contact = await this.findTeamContactForReport(group, {
-            reporterName: raw.reporterName,
-            senderOpenId: raw.senderOpenId,
-          }, rawRecord.record_id);
-          const reporterName = contact?.teamMember || raw.reporterName;
-          const memberOpenId = contact?.teamMemberId || raw.senderOpenId;
-          const input = {
-            factKey: buildFactKey({
-              openId: memberOpenId,
-              name: reporterName,
-              reportDate,
-            }),
-            sourceRecordId: rawRecord.record_id || '',
-            messageId: raw.messageId,
-            source: 'chat',
-            reportDate,
-            reporterName,
-            memberOpenId,
-            senderOpenId: raw.senderOpenId,
-            workSummaryText: raw.workSummaryText,
-            values: {
-              workItems: normalizeCandidateText(raw.workSummaryText),
-              tomorrowPlanItems: '',
-              riskItems: '',
-            },
-            rawText: raw.rawText,
-            chatId: raw.chatId,
-            project: contact?.teamName || '',
-            supervisor: contact?.supervisor || '',
-            supervisorOpenId: contact?.supervisorOpenId || '',
-            matchingStatus: contact?.matchingStatus || (contact ? '已匹配' : '未匹配'),
-            matchMethod: contact?.matchMethod || '',
-            reportType: raw.reportType,
-            dateRange: raw.dateRange,
-            messageTime: raw.messageTime,
-            sourceTime: normalizeSourceTimestamp(raw.messageTime),
-            contact,
-            syncedAt: formatDateTime(now, timezone),
-          };
-          const collection = collectDailyFactRebuildCandidate({
-            rebuildGroups,
-            targetByFactKey,
-            targetBySourceIdentity,
-            targetByReporterDate,
-            weakGroupsByReporterDate,
-            input,
-          });
-          if (collection?.conflict) {
-            for (const record of collection.conflict.records) {
-              if (record?.record_id) blockedTargetRecordIds.add(record.record_id);
-            }
-            conflicts += 1;
-            errors.push(buildStrongTargetConflictError(input));
+        for (const reportDate of reportDates) {
+          if (!reportDate || reportDate < startDate || reportDate > endDate) {
+            filtered += 1;
             continue;
           }
-          sourceCounts.chatFacts += 1;
-        } catch (err) {
-          errors.push({
-            source: 'chat',
-            sourceRecordId: rawRecord.record_id,
-            messageId: raw.messageId,
-            reportDate,
-            message: err?.message || String(err),
-          });
+          if (!selectedChatEntries.has(buildChatEntryId(rawRecord.record_id, reportDate))) {
+            filtered += 1;
+            continue;
+          }
+
+          try {
+            const contact = await this.findTeamContactForReport(group, {
+              reporterName: rawEntry.reporterName,
+              senderOpenId: rawEntry.senderOpenId,
+            }, rawRecord.record_id);
+            const reporterName = contact?.teamMember || rawEntry.reporterName;
+            const memberOpenId = contact?.teamMemberId || rawEntry.senderOpenId;
+            const input = {
+              factKey: buildFactKey({
+                openId: memberOpenId,
+                name: reporterName,
+                reportDate,
+              }),
+              sourceRecordId: rawRecord.record_id || '',
+              messageId: rawEntry.messageId,
+              source: 'chat',
+              reportDate,
+              reporterName,
+              memberOpenId,
+              senderOpenId: rawEntry.senderOpenId,
+              workSummaryText: rawEntry.workSummaryText,
+              values: {
+                workItems: normalizeCandidateText(rawEntry.workSummaryText),
+                tomorrowPlanItems: '',
+                riskItems: '',
+              },
+              rawText: rawEntry.rawText,
+              chatId: rawEntry.chatId,
+              project: contact?.teamName || '',
+              supervisor: contact?.supervisor || '',
+              supervisorOpenId: contact?.supervisorOpenId || '',
+              matchingStatus: contact?.matchingStatus || (contact ? '已匹配' : '未匹配'),
+              matchMethod: contact?.matchMethod || '',
+              reportType: rawEntry.reportType,
+              dateRange: rawEntry.dateRange,
+              messageTime: rawEntry.messageTime,
+              sourceTime: normalizeSourceTimestamp(rawEntry.messageTime),
+              contact,
+              syncedAt: formatDateTime(now, timezone),
+            };
+            const collection = collectDailyFactRebuildCandidate({
+              rebuildGroups,
+              targetByFactKey,
+              targetBySourceIdentity,
+              targetByReporterDate,
+              weakGroupsByReporterDate,
+              input,
+            });
+            if (collection?.conflict) {
+              for (const record of collection.conflict.records) {
+                if (record?.record_id) blockedTargetRecordIds.add(record.record_id);
+              }
+              conflicts += 1;
+              errors.push(buildStrongTargetConflictError(input));
+              continue;
+            }
+            sourceCounts.chatFacts += 1;
+          } catch (err) {
+            errors.push({
+              source: 'chat',
+              sourceRecordId: rawRecord.record_id,
+              messageId: rawEntry.messageId,
+              reportDate,
+              message: err?.message || String(err),
+            });
+          }
         }
       }
     }
@@ -1167,6 +1173,28 @@ function normalizeChatRawRecord(record, fields, group) {
   };
 }
 
+function expandChatRawReportEntries(raw, timezone = DEFAULT_TIMEZONE) {
+  const parsed = parseDailyReportText(raw.rawText, {
+    messageTime: raw.messageTime,
+    timezone,
+  });
+  if (!parsed?.highConfidence || !Array.isArray(parsed.reports) || parsed.reports.length < 2) {
+    return [raw];
+  }
+  return parsed.reports.map(report => ({
+    ...raw,
+    reporterName: report.reporterName || raw.reporterName,
+    reportDate: report.reportDate || '',
+    reportDates: report.reportDates?.length
+      ? report.reportDates
+      : [report.reportDate].filter(Boolean),
+    dateRange: report.dateRange || report.reportDate || '',
+    rawText: report.rawText || raw.rawText,
+    workSummaryText: report.workSummaryText || '',
+    reportType: report.reportType || '',
+  }));
+}
+
 function selectLatestFormRecordIds(records, fields, group, startDate, endDate) {
   const selected = new Map();
   for (const record of records) {
@@ -1198,24 +1226,28 @@ async function selectLatestChatEntries(
   for (const record of records) {
     const raw = normalizeChatRawRecord(record, fields, group);
     if (raw.rawRecordStatus === '历史版本' && !includeHistorical) continue;
-    const contact = await resolveContact(raw, record);
-    const dates = raw.reportDates.length ? raw.reportDates : [raw.reportDate].filter(Boolean);
-    for (const reportDate of dates) {
-      if (!reportDate || reportDate < startDate || reportDate > endDate) continue;
-      const identity = contact?.teamMemberId
-        ? buildFactKey({
-          openId: contact.teamMemberId,
-          name: contact.teamMember || raw.reporterName,
-          reportDate,
-        })
-        : `unmatched:${raw.senderOpenId || ''}:${buildReporterDateIdentity(
-          raw.reporterName,
-          reportDate,
-        )}`;
-      keepLatestSourceCandidate(selected, identity, {
-        id: buildChatEntryId(record.record_id, reportDate),
-        sourceTime: normalizeSourceTimestamp(raw.messageTime),
-      });
+    for (const rawEntry of expandChatRawReportEntries(raw)) {
+      const contact = await resolveContact(rawEntry, record);
+      const dates = rawEntry.reportDates.length
+        ? rawEntry.reportDates
+        : [rawEntry.reportDate].filter(Boolean);
+      for (const reportDate of dates) {
+        if (!reportDate || reportDate < startDate || reportDate > endDate) continue;
+        const identity = contact?.teamMemberId
+          ? buildFactKey({
+            openId: contact.teamMemberId,
+            name: contact.teamMember || rawEntry.reporterName,
+            reportDate,
+          })
+          : `unmatched:${rawEntry.senderOpenId || ''}:${buildReporterDateIdentity(
+            rawEntry.reporterName,
+            reportDate,
+          )}`;
+        keepLatestSourceCandidate(selected, identity, {
+          id: buildChatEntryId(record.record_id, reportDate),
+          sourceTime: normalizeSourceTimestamp(rawEntry.messageTime),
+        });
+      }
     }
   }
   return new Set([...selected.values()].map(candidate => candidate.id));
