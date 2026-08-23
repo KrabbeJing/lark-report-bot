@@ -59,12 +59,16 @@ export async function replayChatDailyReports({
   );
   const messageIdField = group.chatDailyRawTable.fields.messageId;
   const contentFingerprintField = group.chatDailyRawTable.fields.contentFingerprint;
+  const reportDatesField = group.chatDailyRawTable.fields.reportDates;
+  const reportDateRangeField = group.chatDailyRawTable.fields.reportDateRange;
   const existingMessages = new Map(existingRawRecords
     .map(record => [
       String(record.fields?.[messageIdField] || '').trim(),
       {
         fingerprint: String(record.fields?.[contentFingerprintField] || '').trim(),
         hasFingerprint: Boolean(contentFingerprintField && record.fields?.[contentFingerprintField]),
+        reportDates: normalizeReportDates(record.fields?.[reportDatesField]),
+        reportDateRange: normalizeReplayText(record.fields?.[reportDateRangeField]),
       },
     ])
     .filter(([messageId]) => messageId));
@@ -99,7 +103,15 @@ export async function replayChatDailyReports({
       riskItems: parsed.riskItems || '',
     });
     const existing = existingMessages.get(messageId);
-    if (existing && (!existing.hasFingerprint || existing.fingerprint === fingerprint)) {
+    const reportDates = normalizeReportDates(parsed.reportDates?.length
+      ? parsed.reportDates
+      : [parsed.reportDate]);
+    const reportDateRange = normalizeReplayText(parsed.dateRange || parsed.reportDate);
+    const parseMetadataMatches = existing
+      && arraysEqual(existing.reportDates, reportDates)
+      && existing.reportDateRange === reportDateRange;
+    if (existing && (!existing.hasFingerprint
+      || (existing.fingerprint === fingerprint && parseMetadataMatches))) {
       skippedExisting += 1;
       continue;
     }
@@ -114,7 +126,12 @@ export async function replayChatDailyReports({
       sheetWriter: null,
       outDir: '',
     });
-    existingMessages.set(messageId, { fingerprint, hasFingerprint: true });
+    existingMessages.set(messageId, {
+      fingerprint,
+      hasFingerprint: true,
+      reportDates,
+      reportDateRange,
+    });
     replayed += 1;
   }
 
@@ -255,6 +272,27 @@ function toMessageEvent(item) {
 
 function toEpochSeconds(value) {
   return Math.floor(Date.parse(value) / 1000).toString();
+}
+
+function normalizeReportDates(value) {
+  const text = normalizeReplayText(value);
+  return [...new Set(text
+    .split(/[\n,，、]+/)
+    .map(item => item.trim())
+    .filter(Boolean))];
+}
+
+function normalizeReplayText(value) {
+  if (value == null) return '';
+  if (Array.isArray(value)) return value.map(normalizeReplayText).filter(Boolean).join('\n');
+  if (typeof value === 'object') {
+    return normalizeReplayText(value.text || value.name || value.value || '');
+  }
+  return String(value).trim();
+}
+
+function arraysEqual(left, right) {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function createSilentMessenger() {

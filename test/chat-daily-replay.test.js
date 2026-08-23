@@ -6,6 +6,7 @@ import {
   replayRecentChatDailyReports,
 } from '../src/chat-daily-replay.js';
 import { normalizeConfig } from '../src/config.js';
+import { buildContentFingerprint } from '../src/daily-record-utils.js';
 
 test('parses a bounded replay window and report range', () => {
   const options = parseChatDailyReplayArgs([
@@ -134,6 +135,64 @@ test('replays an edited message when its message id already exists with older co
   });
 
   assert.deepEqual(handled, ['om_edited']);
+  assert.equal(result.replayed, 1);
+  assert.equal(result.skippedExisting, 0);
+});
+
+test('replays unchanged content when stored report dates are stale', async () => {
+  const config = normalizeConfig({
+    groups: [{
+      chatId: 'oc_test',
+      dailyTable: { appToken: 'bas', tableId: 'tbl_form' },
+      chatDailyRawTable: { appToken: 'bas', tableId: 'tbl_raw' },
+      dailyFactTable: { appToken: 'bas', tableId: 'tbl_fact' },
+    }],
+  });
+  const text = `胡仁庆8.19，8.20工作日报
+1.整理商户支付合同，并且进行标号处理。
+2.参加与聊城分行的线上会议，沟通校园托管相关业。`;
+  const workSummaryText = `1.整理商户支付合同，并且进行标号处理。
+2.参加与聊城分行的线上会议，沟通校园托管相关业。`;
+  const handled = [];
+
+  const result = await replayChatDailyReports({
+    client: {
+      im: {
+        message: {
+          list: async () => ({
+            code: 0,
+            data: {
+              has_more: false,
+              items: [message('om_stale_dates', text)],
+            },
+          }),
+        },
+      },
+    },
+    bitable: {
+      listRecords: async () => [{
+        record_id: 'rec_raw',
+        fields: {
+          消息ID: 'om_stale_dates',
+          内容指纹: buildContentFingerprint({ workItems: workSummaryText }),
+          拆分日期列表: '2026-08-19',
+          日报日期范围: '2026-08-19',
+        },
+      }],
+      syncDailyFactRecordsForGroup: async () => ({ created: 0, updated: 0, errors: [] }),
+    },
+    config,
+    options: {
+      chatId: 'oc_test',
+      messageStart: '2026-08-19T00:00:00+08:00',
+      messageEnd: '2026-08-21T00:00:00+08:00',
+      reportStart: '2026-08-19',
+      reportEnd: '2026-08-20',
+    },
+    handleMessage: async input => handled.push(input.data.message.message_id),
+  });
+
+  assert.deepEqual(handled, ['om_stale_dates']);
   assert.equal(result.replayed, 1);
   assert.equal(result.skippedExisting, 0);
 });
