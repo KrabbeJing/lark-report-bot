@@ -76,6 +76,70 @@ test('batches deterministically and separates accepted and low-confidence result
   assert.equal(result.model, 'fake-model');
 });
 
+test('defaults to batches of at most five items to prevent cross-item anchoring', async () => {
+  const calls = [];
+  const candidates = Array.from({ length: 11 }, (_, index) => candidate(`case-${index + 1}`));
+  const result = await classifyWeeklyCandidates({
+    candidates,
+    aiProvider: {
+      classifyWeeklyEvidence: async ({ items }) => {
+        calls.push(items.map(item => item.evidenceId));
+        return {
+          classifications: items.map(item => classification(
+            item.evidenceId,
+            item.allowedTargets[0].targetId,
+          )),
+        };
+      },
+    },
+  });
+
+  assert.deepEqual(calls.map(items => items.length), [5, 5, 1]);
+  assert.equal(result.accepted.length, 11);
+  assert.deepEqual(result.diagnostics, []);
+});
+
+test('exposes matched target topics as hints without turning them into hard routing', async () => {
+  let modelItem;
+  const result = await classifyWeeklyCandidates({
+    candidates: [candidate('hinted', [], {
+      text: '完成新银联前置强化轮测试',
+      allowedTargets: [
+        target('receipt', {
+          target: '收单项目组',
+          includeTopics: ['收单'],
+          excludeTopics: ['银联前置'],
+        }),
+        target('corporate', {
+          module: 'module3',
+          target: '对公客群经营及场景建设',
+          includeTopics: ['银联前置', '云缴费'],
+          excludeTopics: ['收单'],
+        }),
+      ],
+    })],
+    aiProvider: {
+      classifyWeeklyEvidence: async ({ items }) => {
+        [modelItem] = items;
+        return {
+          classifications: [classification('hinted', 'receipt')],
+        };
+      },
+    },
+  });
+
+  assert.deepEqual(modelItem.allowedTargets.map(item => ({
+    targetId: item.targetId,
+    matchedIncludeTopics: item.matchedIncludeTopics,
+    matchedExcludeTopics: item.matchedExcludeTopics,
+  })), [
+    { targetId: 'receipt', matchedIncludeTopics: [], matchedExcludeTopics: ['银联前置'] },
+    { targetId: 'corporate', matchedIncludeTopics: ['银联前置'], matchedExcludeTopics: [] },
+  ]);
+  assert.deepEqual(result.accepted.map(item => item.selectedTarget.targetId), ['receipt']);
+  assert.deepEqual(result.diagnostics, []);
+});
+
 test('isolates missing duplicate unauthorized and malformed classifications per item', async () => {
   let calls = 0;
   let fallbackCalls = 0;
@@ -129,10 +193,16 @@ test('isolates missing duplicate unauthorized and malformed classifications per 
 
 test('retries provider errors once per batch and continues with later batches', async () => {
   let calls = 0;
+  const waits = [];
   const provider = {
     classifyWeeklyEvidence: async ({ items }) => {
       calls += 1;
-      if (items.some(item => item.evidenceId === 'a')) throw new Error('private provider failure');
+      if (items.some(item => item.evidenceId === 'a')) {
+        throw Object.assign(new Error('private provider failure'), {
+          retryable: true,
+          retryAfterMs: 250,
+        });
+      }
       return {
         classifications: items.map(item => classification(
           item.evidenceId,
@@ -150,9 +220,11 @@ test('retries provider errors once per batch and continues with later batches', 
     maxItems: 2,
     maxCharacters: 12000,
     maxAttempts: 2,
+    wait: async milliseconds => { waits.push(milliseconds); },
   });
 
   assert.equal(calls, 3);
+  assert.deepEqual(waits, [250]);
   assert.deepEqual(result.accepted.map(item => item.evidenceId), ['c']);
   assert.deepEqual(result.diagnostics.map(item => [item.evidenceId, item.code]), [
     ['a', 'classification_provider_error'],
@@ -161,6 +233,32 @@ test('retries provider errors once per batch and continues with later batches', 
   assert.equal(JSON.stringify(result).includes('private provider failure'), false);
   assert.equal(result.provider, 'recovered-provider');
   assert.equal(result.model, 'recovered-model');
+});
+
+test('uses a safe default backoff when a retryable provider error has no retry-after hint', async () => {
+  let calls = 0;
+  const waits = [];
+  const result = await classifyWeeklyCandidates({
+    candidates: [candidate('a')],
+    aiProvider: {
+      classifyWeeklyEvidence: async ({ items }) => {
+        calls += 1;
+        if (calls === 1) throw Object.assign(new Error('temporary failure'), { retryable: true });
+        return {
+          classifications: items.map(item => classification(
+            item.evidenceId,
+            item.allowedTargets[0].targetId,
+          )),
+        };
+      },
+    },
+    maxAttempts: 2,
+    wait: async milliseconds => { waits.push(milliseconds); },
+  });
+
+  assert.equal(calls, 2);
+  assert.deepEqual(waits, [500]);
+  assert.deepEqual(result.accepted.map(item => item.evidenceId), ['a']);
 });
 
 test('does not retry deterministic provider response errors', async () => {
@@ -216,7 +314,11 @@ test('uses the character budget to form stable batches without splitting an item
     evidenceId: candidates[0].evidenceId,
     date: candidates[0].date,
     text: candidates[0].text,
-    allowedTargets: candidates[0].allowedTargets.map(({ cells, ...item }) => item),
+    allowedTargets: candidates[0].allowedTargets.map(({ cells, ...item }) => ({
+      ...item,
+      matchedIncludeTopics: [],
+      matchedExcludeTopics: [],
+    })),
   }).length;
   const provider = {
     classifyWeeklyEvidence: async ({ items }) => {

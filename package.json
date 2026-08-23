@@ -11,12 +11,14 @@
     "daily-fact:backfill": "node scripts/backfill-daily-facts.js",
     "daily-chat:replay": "node scripts/replay-chat-daily-reports.js",
     "weekly:ai-preview": "node scripts/preview-weekly-ai.js",
+    "weekly:classification-labels": "node scripts/prepare-weekly-classification-labels.js",
     "weekly:classification-eval": "node scripts/evaluate-weekly-classification.js",
     "weekly:workflow": "node scripts/run-weekly-workflow.js",
     "test": "node --test"
   },
   "dependencies": {
     "@larksuiteoapi/node-sdk": "^1.40.0",
+    "csv-parse": "^7.0.2",
     "dotenv": "^16.4.5",
     "echarts": "^6.1.0",
     "puppeteer": "^25.1.0"

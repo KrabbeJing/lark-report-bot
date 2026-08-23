@@ -85,6 +85,8 @@ export function calculateWeeklyClassificationEvaluation({ items = [], classifica
   }
 
   const accuracy = classified ? correct / classified : 0;
+  const classificationComplete = classified === items.length;
+  const diagnosticsPassed = diagnostics.length === 0;
   const lowConfidenceVisible = visibleLowConfidence === lowConfidence;
   const unauthorized = unauthorizedIds.size;
   const duplicateOrMultiTarget = duplicateOrMultiTargetIds.size;
@@ -109,10 +111,14 @@ export function calculateWeeklyClassificationEvaluation({ items = [], classifica
     gate: {
       minimumAccuracy: 0.9,
       accuracyPassed: accuracy >= 0.9,
+      classificationComplete,
+      diagnosticsPassed,
       unauthorizedPassed: unauthorized === 0,
       duplicateOrMultiTargetPassed: duplicateOrMultiTarget === 0,
       lowConfidenceVisible,
       passed: accuracy >= 0.9
+        && classificationComplete
+        && diagnosticsPassed
         && unauthorized === 0
         && duplicateOrMultiTarget === 0
         && lowConfidenceVisible,

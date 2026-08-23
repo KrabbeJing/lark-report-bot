@@ -1,6 +1,7 @@
-const DEFAULT_MAX_ITEMS = 20;
+const DEFAULT_MAX_ITEMS = 5;
 const DEFAULT_MAX_CHARACTERS = 12000;
 const DEFAULT_MAX_ATTEMPTS = 2;
+const DEFAULT_RETRY_DELAY_MS = 500;
 const VALID_CONFIDENCES = new Set(['high', 'medium', 'low']);
 
 export async function classifyWeeklyCandidates({
@@ -9,6 +10,7 @@ export async function classifyWeeklyCandidates({
   maxItems = DEFAULT_MAX_ITEMS,
   maxCharacters = DEFAULT_MAX_CHARACTERS,
   maxAttempts = DEFAULT_MAX_ATTEMPTS,
+  wait = waitFor,
 } = {}) {
   const limits = {
     maxItems: positiveInteger(maxItems, DEFAULT_MAX_ITEMS),
@@ -30,6 +32,7 @@ export async function classifyWeeklyCandidates({
         aiProvider,
         items: batch.map(item => item.modelItem),
         maxAttempts: limits.maxAttempts,
+        wait,
       });
     } catch {
       diagnostics.push(...batch.map(({ candidate }) => diagnostic(
@@ -86,21 +89,28 @@ function prepareCandidates(candidates, maxCharacters) {
 }
 
 function toModelItem(candidate) {
+  const text = normalized(candidate?.text);
   return {
     evidenceId: normalized(candidate?.evidenceId),
     date: normalized(candidate?.date),
-    text: normalized(candidate?.text),
-    allowedTargets: (candidate?.allowedTargets || []).map(target => ({
-      targetId: normalized(target?.targetId),
-      module: normalized(target?.module),
-      target: normalized(target?.target),
-      contentType: normalized(target?.contentType),
-      businessScope: normalized(target?.businessScope),
-      includeTopics: stringArray(target?.includeTopics),
-      excludeTopics: stringArray(target?.excludeTopics),
-      positiveExamples: stringArray(target?.positiveExamples),
-      negativeExamples: stringArray(target?.negativeExamples),
-    })),
+    text,
+    allowedTargets: (candidate?.allowedTargets || []).map(target => {
+      const includeTopics = stringArray(target?.includeTopics);
+      const excludeTopics = stringArray(target?.excludeTopics);
+      return {
+        targetId: normalized(target?.targetId),
+        module: normalized(target?.module),
+        target: normalized(target?.target),
+        contentType: normalized(target?.contentType),
+        businessScope: normalized(target?.businessScope),
+        includeTopics,
+        excludeTopics,
+        matchedIncludeTopics: includeTopics.filter(topic => topicMatches(text, topic)),
+        matchedExcludeTopics: excludeTopics.filter(topic => topicMatches(text, topic)),
+        positiveExamples: stringArray(target?.positiveExamples),
+        negativeExamples: stringArray(target?.negativeExamples),
+      };
+    }),
   };
 }
 
@@ -122,7 +132,7 @@ function buildBatches(items, { maxItems, maxCharacters }) {
   return batches;
 }
 
-async function classifyBatch({ aiProvider, items, maxAttempts }) {
+async function classifyBatch({ aiProvider, items, maxAttempts, wait }) {
   let lastError;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
@@ -130,9 +140,22 @@ async function classifyBatch({ aiProvider, items, maxAttempts }) {
     } catch (error) {
       lastError = error;
       if (error?.retryable === false) break;
+      if (attempt < maxAttempts) {
+        await wait(retryDelayMs(error?.retryAfterMs));
+      }
     }
   }
   throw lastError || new Error('classification_provider_error');
+}
+
+function retryDelayMs(value) {
+  const milliseconds = Number(value);
+  if (!Number.isFinite(milliseconds) || milliseconds < 0) return DEFAULT_RETRY_DELAY_MS;
+  return Math.min(milliseconds, 30000);
+}
+
+function waitFor(milliseconds) {
+  return new Promise(resolve => setTimeout(resolve, milliseconds));
 }
 
 function validateBatchResults(batch, rawClassifications) {
@@ -220,6 +243,16 @@ function stringArray(value) {
   return (Array.isArray(value) ? value : value == null ? [] : [value])
     .map(normalized)
     .filter(Boolean);
+}
+
+function topicMatches(text, topic) {
+  const normalizedText = normalizeTopicText(text);
+  const normalizedTopic = normalizeTopicText(topic);
+  return Boolean(normalizedText && normalizedTopic && normalizedText.includes(normalizedTopic));
+}
+
+function normalizeTopicText(value) {
+  return normalized(value).toLowerCase().replace(/[\s，。；;、:：【】\[\]（）()]/g, '');
 }
 
 function normalized(value) {

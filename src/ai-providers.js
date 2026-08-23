@@ -27,6 +27,7 @@ export class OpenAICompatibleProvider {
     this.apiKey = env.AI_API_KEY;
     this.model = env.AI_MODEL || 'gpt-4o-mini';
     this.timeoutMs = parseTimeoutMs(env.AI_TIMEOUT_MS);
+    this.classificationThinking = parseThinkingType(env.AI_CLASSIFICATION_THINKING);
   }
 
   async summarizeWeeklyReports(input) {
@@ -133,12 +134,17 @@ export class OpenAICompatibleProvider {
       res = await this.requestChatCompletion({
         system: [
           '你是企业周报事项分类器。来源映射给出的 allowedTargets 是唯一边界。',
-          '你必须逐条判断，且每条只能选择一个 allowed target。主题词和正反例只是语义提示。',
+          '每条事项必须独立判断，不能沿用同批次其他事项的分类结论，且每条只能选择一个 allowed target。',
+          '事项原文是唯一事实依据。不得把候选板块说明中的词语当作事项原文事实，也不得在理由中虚构原文未出现的业务对象。',
+          '主题词和正反例只是语义提示，用于理解候选板块边界，不是关键词硬匹配规则。',
+          'matchedIncludeTopics 是程序预先计算的命中提示；matchedExcludeTopics 是程序预先计算的排除提示。它们用于辅助语义判断，不直接替代你的最终判断。',
+          '当事项原文只命中一个候选板块的明确主题时，应将其作为强语义证据并优先选择该板块，除非事项完整语义明确冲突。',
           '不得拆分、合并、改写事项，不得输出人员信息，只输出严格 JSON。',
         ].join('\n'),
         user: buildWeeklyClassificationPrompt(input),
         jsonMode: true,
         temperature: 0.1,
+        thinking: this.classificationThinking,
       });
     } catch (error) {
       if (isAbortError(error)) {
@@ -148,8 +154,14 @@ export class OpenAICompatibleProvider {
     }
 
     if (!res.ok) {
+      const retryAfterMs = parseRetryAfterMs(res.headers?.get?.('retry-after'))
+        ?? (res.status === 429 ? 30000 : undefined);
       try { await res.text(); } catch {}
-      throw classificationError(`AI classification request failed: status=${res.status}`, true);
+      throw classificationError(
+        `AI classification request failed: status=${res.status}`,
+        true,
+        { retryAfterMs },
+      );
     }
 
     let json;
@@ -219,7 +231,7 @@ export class OpenAICompatibleProvider {
     };
   }
 
-  async requestChatCompletion({ system, user, jsonMode = false, temperature = 0.2 }) {
+  async requestChatCompletion({ system, user, jsonMode = false, temperature = 0.2, thinking = '' }) {
     return fetch(`${this.baseUrl.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -231,6 +243,7 @@ export class OpenAICompatibleProvider {
         model: this.model,
         temperature,
         ...(jsonMode ? { response_format: { type: 'json_object' } } : {}),
+        ...(thinking ? { thinking: { type: thinking } } : {}),
         messages: [
           { role: 'system', content: system },
           { role: 'user', content: user },
@@ -245,12 +258,30 @@ function parseTimeoutMs(value) {
   return Number.isFinite(timeout) && timeout > 0 ? timeout : 30000;
 }
 
+function parseThinkingType(value) {
+  const type = String(value || '').trim().toLowerCase();
+  return ['enabled', 'disabled'].includes(type) ? type : '';
+}
+
+function parseRetryAfterMs(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return undefined;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(Math.round(seconds * 1000), 30000);
+  const timestamp = Date.parse(raw);
+  if (!Number.isFinite(timestamp)) return undefined;
+  return Math.min(Math.max(timestamp - Date.now(), 0), 30000);
+}
+
 function isAbortError(error) {
   return error?.name === 'TimeoutError' || error?.name === 'AbortError';
 }
 
-function classificationError(message, retryable) {
-  return Object.assign(new Error(message), { retryable });
+function classificationError(message, retryable, options = {}) {
+  return Object.assign(new Error(message), {
+    retryable,
+    ...(Number.isFinite(options.retryAfterMs) ? { retryAfterMs: options.retryAfterMs } : {}),
+  });
 }
 
 function buildPrompt(input, fallbackText) {
@@ -322,6 +353,8 @@ function buildWeeklyClassificationPrompt(input = {}) {
       businessScope: String(target?.businessScope || '').trim(),
       includeTopics: toStringArray(target?.includeTopics),
       excludeTopics: toStringArray(target?.excludeTopics),
+      matchedIncludeTopics: toStringArray(target?.matchedIncludeTopics),
+      matchedExcludeTopics: toStringArray(target?.matchedExcludeTopics),
       positiveExamples: toStringArray(target?.positiveExamples),
       negativeExamples: toStringArray(target?.negativeExamples),
     })),

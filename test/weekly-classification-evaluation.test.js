@@ -79,6 +79,46 @@ test('calculates a passing 90 percent gate with visible low-confidence items', (
   assert.equal(JSON.stringify(report).includes('Synthetic work item'), false);
 });
 
+test('fails the gate when any labeled item is missing even if classified accuracy is perfect', () => {
+  const items = Array.from({ length: 10 }, (_, index) => item(index));
+  const accepted = items.slice(0, 9).map(source => joined(
+    source,
+    source.expectedTargetId,
+    'high',
+  ));
+
+  const report = calculateWeeklyClassificationEvaluation({
+    items,
+    classificationResult: {
+      accepted,
+      pendingOwnerReview: [],
+      diagnostics: [{ evidenceId: items[9].evidenceId, code: 'classification_provider_error' }],
+    },
+  });
+
+  assert.equal(report.metrics.accuracy, 1);
+  assert.equal(report.metrics.failed, 1);
+  assert.equal(report.gate.classificationComplete, false);
+  assert.equal(report.gate.passed, false);
+});
+
+test('fails the gate when the model returns an unknown evidence id alongside complete results', () => {
+  const items = [item(1)];
+  const report = calculateWeeklyClassificationEvaluation({
+    items,
+    classificationResult: {
+      accepted: [joined(items[0], items[0].expectedTargetId, 'high')],
+      pendingOwnerReview: [],
+      diagnostics: [{ evidenceId: 'invented-case', code: 'classification_unknown_evidence' }],
+    },
+  });
+
+  assert.equal(report.metrics.classified, 1);
+  assert.equal(report.gate.classificationComplete, true);
+  assert.equal(report.gate.diagnosticsPassed, false);
+  assert.equal(report.gate.passed, false);
+});
+
 test('fails closed for missing unauthorized duplicate and hidden-low results without leaking errors', () => {
   const items = [item(1), item(2), item(3), item(4)];
   const hiddenLow = joined(items[1], items[1].expectedTargetId, 'low');
